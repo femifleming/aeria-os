@@ -1,4 +1,4 @@
-# AERIA OS (beta)
+# aeria os (beta)
 
 **AERIA by sadnoise** — an operating system of its own for the Elektron Octatrack MKII.
 It replaces the Octatrack's OS (Elektron's bootloader and Startup Menu stay untouched, so the stock OS can always be put back from the card).
