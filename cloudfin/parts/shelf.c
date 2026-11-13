@@ -49,7 +49,7 @@ static int place_effect(int s, int row, int commit)
     for (int i = 0; i < 7; i++) { core[i] = i == s ? -1 : slot_core[i]; if (core[i] >= 0) load[core[i]] += slot_cost[i]; }
     /* one big effect alone on core 0 may take a little more than the shared room (the FFT SMEAR, 1,137: so it can
      * stand beside VERB on core 1); nothing else joins it there */
-#define ROOM_OF(k) ((k) == 0 && load[0] == CORE0_BASE ? CORE0_BASE + 1150 : CORE_ROOM)
+#define ROOM_OF(k) ((k) == 0 && load[0] == CORE0_BASE ? CORE0_BASE + 1170 : CORE_ROOM)   /* 1170: SMEAR after its quality pass (1,165), measured on the unit 13 Nov 2026 */
     int c = want < 2 ? want : (load[1] <= load[0] ? 1 : 0);
     if (load[c] + cost > ROOM_OF(c) && want == 2 && load[c ^ 1] + cost <= ROOM_OF(c ^ 1)) c ^= 1;
     for (int i = 0; i < 7 && load[c] + cost > ROOM_OF(c); i++)              /* make room: movable effects go across */
@@ -72,7 +72,7 @@ static int fx_clash(int a, int b)
     return fx_pair(a, b, "WIND", "FOG") || fx_pair(a, b, "HAIL", "AURORA")
         || fx_pair(a, b, "TAPE", "ECHO")                                     /* core 1's Y:$8000-$bfff and X:$4000-$7fff */
         || fx_pair(a, b, "BBD", "HAIL") || fx_pair(a, b, "BBD", "AURORA")    /* core 1's X:$2000-$3fff */
-        || fx_pair(a, b, "PT2399", "TWISTER");                               /* core 1's X:$8000-$8fff */
+        || fx_pair(a, b, "PT2399", "BBD") || fx_pair(a, b, "PT2399", "HAIL") || fx_pair(a, b, "PT2399", "AURORA");   /* PT2399 moved to core 1's X:$2000 (13 Nov 2026) */
     /* BBD with PT2399 (780 + 970 on core 1) is kept apart by the room alone: CORE1_BASE + both > CORE_ROOM, SQ_ROOM1 */
 }
 static int pick_effect(int t, int fx2, int row)
@@ -260,7 +260,7 @@ static int name_has(const char *name, const char *part)
 }
 /* effects the owner does not want offered (12 Nov 2026: no clipping or distortion): kept in the firmware so saved
  * rows still mean the same, but never on a list, never lent, never set up */
-static int fx_banned(const char *name) { return name_has(name, "DIST") || name_has(name, "BBD") || name_has(name, "PT2399") || name_has(name, "TAPE"); }   /* BBD PT2399 TAPE: held back until a DSP crash seen with them on 13 Nov 2026 is found */
+static int fx_banned(const char *name) { return name_has(name, "DIST"); }   /* (BBD, PT2399 and TAPE were held back on 13 Nov 2026 until a crash was found: PT2399 now lives at X:$2000) */
 static int rule_of(const char *knob)
 {
     for (int r = 0; r < N_RULES; r++) {

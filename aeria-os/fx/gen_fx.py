@@ -19,15 +19,15 @@ DOCKER = '/Applications/Docker.app/Contents/Resources/bin/docker'
 # the effects, their P address and their Y buffer (aligned for the effect's modulo ring): see MEMORY below
 EFFECTS = [  # folder, org, ybase (None = no buffer), core (0, 1, or 2 = either: no buffer, or one both cores reach), cost
     # cost: instructions a sample at the dearest settings, as each effect's own gate measured it (dsp_host)
-    ('pitch',  0x34000, 0x38000, 2, 280),   # stereo micro-detune (WIDE): the right side has its own pair of heads (was 204)
+    ('pitch',  0x34000, 0x38000, 2, 298),   # stereo micro-detune (WIDE): the right side has its own pair of heads (was 204)
     ('disto',  0x34800, None, 2, 152),
-    ('grains', 0x35000, 0x00000, 0, 304),   # 35,280 words (800 ms), wrapped in code: core 0's Y:$0000-$89cf
-    ('ringph', 0x35800, None, 2, 225),
-    ('reso',   0x36000, 0x0A000, 0, 226),   # DTND stereo out (was 215)
-    ('spectral', 0x36800, 0x3C000, 2, 1137),  # the FFT SMEAR (12 Nov 2026; 1,024-point STFT, mean 1,065 / worst call 1,137): Y:$3C000-$3E3FF, $3E400-$3FFFF free
-    ('rose',   0x37000, None, 2, 199),
+    ('grains', 0x35000, 0x00000, 0, 305),   # 35,280 words (800 ms), wrapped in code: core 0's Y:$0000-$89cf
+    ('ringph', 0x35800, None, 2, 236),
+    ('reso',   0x36000, 0x0A000, 0, 243),   # DTND stereo out (was 215)
+    ('spectral', 0x36800, 0x3C000, 2, 1165),  # the FFT SMEAR (12 Nov 2026; 1,024-point STFT, mean 1,065 / worst call 1,137): Y:$3C000-$3E3FF, $3E400-$3FFFF free
+    ('rose',   0x37000, None, 2, 205),
     # code in the shared window below the engine
-    ('comp',   0x30000, None, 2, 208),
+    ('comp',   0x30000, None, 2, 223),
     ('verb',   0x30800, 0x00000, 1, 1145),
     # 12 Nov 2026: ECHO is now Chloaelis' dual delay (aeria-fx/echo2), in the old ECHO's row, slot and memory (saved rows keep
     # their meaning: the name stays AERIA ECHO). 1,378 words with the stub; worst block 310.2
@@ -37,10 +37,10 @@ EFFECTS = [  # folder, org, ybase (None = no buffer), core (0, 1, or 2 = either:
     # sat (P:$32000-$32fff: only used at start-up) and the last effect slot. Their buffers: core 0's Y:$8a00-$9fff
     # (WIND or FOG, never both), core 1's X:$2000-$3fff (HAIL or AURORA, never both) and X:$8000-$8fff (TWISTER)
     ('wind',    0x32000, 0x09000, 0, 119),
-    ('fog',     0x32400, 0x08a00, 0, 120),
-    ('twister', 0x32800, 0x08000, 1, 189),
+    ('fog',     0x32400, 0x08a00, 0, 126),
+    ('twister', 0x32800, 0x08000, 1, 190),
     ('hail',    0x32C00, 0x02000, 1, 134),
-    ('aurora',  0x37800, 0x02000, 1, 192),
+    ('aurora',  0x37800, 0x02000, 1, 194),
     # 12 Nov 2026: Chloaelis' multimode filter (TPT SVF, LP > BP > HP > NOTCH, a cutoff a side: SKEW and the ColdFire's
     # Lorenz words r6+6 / r6+7). No buffer: either core. Code in the last 1K of P:$37800's slot, after AURORA (776 words)
     ('filt',    0x37C00, None, 2, 129),     # aeria-fx/filt: mean 126.3, worst call 128.1 (the first call)
@@ -48,7 +48,7 @@ EFFECTS = [  # folder, org, ybase (None = no buffer), core (0, 1, or 2 = either:
     # (core 1 only, a full 2K each) in the shared window above the FFT SMEAR's memory (Y:$3c000-$3e3ff), P:$3e800-$3ffff
     ('warm',    0x34400, None, 2, 150),     # aeria-fx/warm: 811 words with the stub; worst block 149.8
     ('bbd',     0x3F000, 0x02000, 1, 780),  # core 1's X:$2000-$3fff (the base word used as an X address): never with HAIL or AURORA
-    ('pt2399',  0x3F800, 0x08000, 1, 970),  # core 1's X:$8000-$8fff (as an X address): never with TWISTER
+    ('pt2399',  0x3F800, 0x02000, 1, 970),  # core 1's X:$2000-$2fff (as an X address; moved from X:$8000 13 Nov 2026: that region is unproven on core 1): never with BBD, HAIL, AURORA
     ('tape',    0x3E800, 0x08000, 1, 388),  # ECHO's memory exactly (Y:$8000-$bf7f, X:$4000-$7eff): never with ECHO
 ]
 MEMORY = """core 0: P:$33000 engine, P:$34000-$37fff effects (2K words each), Y:$0000-$89cf GRAINS (800 ms), Y:$a000-$bfff RESO

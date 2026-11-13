@@ -22,7 +22,7 @@
 ; each ring's first word must sit on a multiple of its reserved size; 5632 words in all.
 ; In a ring a stage's L line and R line follow each other; the ring is one word longer than its
 ; lines, so each stage's pointer (r1..r6) lands one word lower every frame with no extra code.
-; r7: 00 ST 01 YB 02 AMH 03 AML 04 WM 05 DW 06 LPA 07 LPL 08 LPR 09 GG 0a P0 0b P1 0c P2 0d P3 0e P4 0f P5 10 DLAST 11 ALAST 12 BLK 13 R6S 14 WT
+; r7: 00 ST 01 YB 02 AMH 03 AML 04 WM 05 DW 06 LPA 07 LPL 08 LPR 09 GG 0a P0 0b P1 0c P2 0d P3 0e P4 0f P5 10 DLAST 11 ALAST 12 BLK 13 R6S 14 WT 15 SIL 16 GC 17 DG
 
 init:
         move    #>$ffffff,m4
@@ -54,6 +54,7 @@ fgwake:
         move    a,x:(r7+$04)
         move    a,x:(r7+$07)
         move    a,x:(r7+$08)
+        move    a,x:(r7+$15)
         move    #>$000003,a             ; the lowpass is looked at on the first running call
         move    a,x:(r7+$12)
         move    #>$76266b,a
@@ -62,6 +63,7 @@ fgwake:
         move    #>$624dd3,y0
         mpy     y0,x0,a
         move    a,x:(r7+$09)
+        move    a,x:(r7+$16)
         move    #>$ffffff,a
         move    a,x:(r7+$10)
         move    x:(r7+$01),a
@@ -163,7 +165,11 @@ fggo:
         move    x:(r6+$1),x0
         move    #>$624dd3,y0
         mpy     y0,x0,a
-        move    a,x:(r7+$09)
+        move    x:(r7+$09),b                  ; glided 1/8 a look (every 2nd call: tau 5.8 ms), no zipper
+        sub     b,a
+        asr     #$3,a,a
+        add     a,b
+        move    b,x:(r7+$09)
         bra     fgsame
 fgfin:
         move    x:(r7+$14),a
@@ -200,6 +206,47 @@ fgnew:
         move    b,x0                    ; hz / 18 kHz
         move    x0,x:(r7+$14)
 fgsame:
+; ---- digital silence: a call whose first frame is 0 on both sides counts; after 1.5 s of them each call
+; is looked at whole and, if every word is 0, skipped (out = in = 0): what the floored lines keep (DC of a few
+; LSB) never reaches the output, and the tail ends in exact silence. Sound resets the count.
+        move    #>$1,n0
+        move    x:(r0),a
+        move    x:(r0+n0),x0
+        or      x0,a
+        beq     fgzin
+        clr     a
+        move    a,x:(r7+$15)
+        bra     fgsnd
+fgzin:
+        move    x:(r7+$15),a
+        cmp     #>$001026,a
+        bge     fgfull
+        add     #>$1,a
+        move    a,x:(r7+$15)
+        bra     fgsnd
+fgfull:
+        move    r0,r1
+        clr     b
+        do      n7,>fgscan
+        move    x:(r1)+,x0
+        or      x0,b
+        move    x:(r1)+,x0
+        or      x0,b
+fgscan:
+        nop
+        tst     b
+        bne     fgwoke
+        rts                             ; all 0: skipped
+fgwoke:
+        clr     a
+        move    a,x:(r7+$15)
+fgsnd:
+; ---- the allpass gain ramps sample by sample to the glided BLUR over the call
+        move    x:(r7+$09),a
+        move    x:(r7+$16),x0
+        sub     x0,a
+        asr     #$4,a,a
+        move    a,x:(r7+$17)
 ; ======== the frames ========
         move    r6,x:(r7+$13)
         move    #>$0003c8,m1
@@ -220,9 +267,13 @@ fgsame:
         move    #>$000f9a,m6
         move    x:(r7+$0f),r6
         move    #>$00034a,n6
-        move    x:(r7+$09),y0
         move    #>$1,n0
         do      n7,>fgframes
+        move    x:(r7+$16),a
+        move    x:(r7+$17),x0
+        add     x0,a
+        move    a,x:(r7+$16)
+        move    a,y0
         move    x:(r7+$04),a
         move    x:(r7+$05),x0
         add     x0,a

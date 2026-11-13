@@ -20,7 +20,7 @@
 ; Read: 4-point Hermite, weights once a frame for both taps (half a window apart = whole frames).
 ;
 ; X ring: 4096 words, L even / R odd, base a multiple of 4096: the word X:$213 points to (an X address on this effect)
-; r7: 00 ST 01 XB 02 WP 03 RNG 04 ARM 05 UH 06 UL 07 DUH 08 DUL 09 PHH 0a PHL 0b NIH 0c NIL 0d SPH 0e AL 0f BL 10 AR 11 BR 12 DAL 13 DBL 14 DAR 15 DBR 16 W0 17 W1 18 W2 19 W3 1a WW1 1b WW2 1c AEN 1d OUTE 1e T1 1f T2 20 HSN
+; r7: 00 ST 01 XB 02 WP 03 RNG 04 ARM 05 UH 06 UL 07 DUH 08 DUL 09 PHH 0a PHL 0b NIH 0c NIL 0d SPH 0e AL 0f BL 10 AR 11 BR 12 DAL 13 DBL 14 DAR 15 DBR 16 W0 17 W1 18 W2 19 W3 1a WW1 1b WW2 1c AEN 1d OUTE 1e T1 1f T2 20 HSN 21 RSK
 
 init:
         move    #>$ffffff,m4
@@ -92,6 +92,8 @@ twlen:
         asr     #$c,a,a           ; progress a call, 48 bits
         move    a1,x:(r7+$07)
         move    a0,x:(r7+$08)
+        move    x:(r6+$1),a             ; RISE starts where the knob is (glided from here on)
+        move    a,x:(r7+$21)
         move    #>$000010,a
         move    a,x:(r7+$00)
         rts
@@ -183,7 +185,13 @@ twon:
         move    x:(r7+$1d),y0
         mpy     y0,x0,a
         move    a,x0
-        move    x:(r6+$1),y0
+        move    x:(r6+$1),a             ; RISE glided 1/16 a call (5.8 ms): a jumped knob slides, it does not step
+        move    x:(r7+$21),b
+        sub     b,a
+        asr     #$4,a,a
+        add     a,b
+        move    b,x:(r7+$21)
+        move    b,y0
         mpy     y0,x0,a                 ; x RISE/128
         move    a,x0
         move    #>$555555,y0

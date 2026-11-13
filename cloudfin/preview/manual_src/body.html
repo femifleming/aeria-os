@@ -8,7 +8,8 @@
 
 <div style="page: front">
 <div class="fh">About this edition</div>
-<p>This manual describes the build that names itself <b><i>AERIA OS Nov 13 2026 04:18:16</i></b>: the multi-effect, called <b>the sky</b> in this manual, and the <b>sequencer</b>. It replaces the edition made earlier on the same day.</p>
+<p>This manual describes the build that names itself <b><i>AERIA OS Nov 13 2026 05:53:11</i></b>: the multi-effect, called <b>the sky</b> in this manual, and the <b>sequencer</b>. It replaces the edition made earlier on the same day.</p>
+<div class="tip"><b>New in the build of 05:53 (13 Nov).</b> <b>A quality pass on fifteen effects:</b> PITCH, RING, RESO, ROSE and FOG now fade to true silence (some held a faint hum for ever); no more clicks when turning PITCH's FDBK, RING's CNTR, COMP's THR, MAKE and BELW, WIND's LEAN, FOG's BLUR, TWISTER's RISE or ROSE's SPRD; GRAINS is flat at unison and DENS 127 gives four full grains; SMEAR's sustain is far cleaner; VERB sums to mono properly; RESO's DTND no longer leans right; AURORA can no longer be driven into its limit. <b>BBD, PT2399 and TAPE</b> are in: a crash found while testing them is fixed. </div>
 <div class="tip"><b>New in the build of 22:05.</b> <b>No distortion:</b> the DIST effect is gone from the shelf, the sequencer's list and the chain of the first start, and the sequencer's DRIV and BITS are gone (a sequence or project that used them now plays clean). <b>The storm</b> now throws every free knob of every effect somewhere new every two to nine seconds, all of them at once at a strike, and its lightning lends effects again and again, each for 45 to 90 seconds, then takes them away ({{pg:storm}}). More knobs follow the weather ({{pg:wxknobs}}). <b>The phones</b> were left-right swapped; now the tip is left. <b>New lamps:</b> the level lamps above [REC1] and [REC2] show inputs A B C D, the card lamp shows the card, the lamp above [ARR] shows the main output's level in the sky, and in the sequencer the four lights above [PAGE] show the track's pages ({{pg:newlamps}}). <b>Balloon grains</b> are scattered across the stereo field by SPRY. <b>In the builds of 20:47 and 21:11.</b> <b>The sockets sound cleaner:</b> until now a few samples in every sixteen left the main, cue and phones outputs a moment late, a faint rasp that grew with the load; the outputs are now sample-exact (a recording over USB never had it). In the sequencer: <b>mute scenes</b> ({{pg:mutescenes}}); <b>resampling</b> the main output into a sample ({{pg:resample}}); OUT has a fourth place, <b>QUAD</b>, with a Y knob that puts a track anywhere between the front pair and the back ({{pg:trackquad}}); <b>MIDI notes coming in</b> play the tracks and can be recorded ({{pg:notesin}}). In the sky: WIND, HAIL and AURORA are <b>remembered</b> through a power-off and in projects, and AUTO weather can bring them. Over USB: the packets to the computer are paced evenly, which ends the clicks that a recording of the stems could have ({{pg:stems}}).</div>
 <div class="note"><b>New since that edition.</b> SMEAR is a new effect under the old name: a spectral one, with sustain, freeze, gate, width and tilt, and the snow and the heat play it ({{pg:fxsmear}}). Three new weathers, WIND, HAIL and AURORA, on trigs 9 to 11 of the SKY page, and a TWISTER on trig 12; FOG now blurs and darkens the sound. Each of them is an effect that the sky puts into an empty slot of the chain while the weather lasts ({{pg:moreweather}}), and five new effects on the shelf: WIND, FOG, TWISTER, HAIL, AURORA ({{pg:fxweather}}). In the sequencer: a held step always shows its own six knobs; coming back from MASTER no longer changes the knob set; MIDI Continue goes on from where the sequencer stopped; locks are offered on the SRC, AMP, FLT and MIDI pages only. The first DSP core's room is counted more strictly, so a full chain may be refused a little sooner ({{pg:dsproom}}). New measured figures are in {{ch:specs}}. <b>In the build of 16:31:</b> SMEAR and VERB can be used together ({{pg:dsproom}}); a weather whose effect finds no room says so once; a weather's effect keeps its own knobs, so the sky's twister lasts its 10 to 20 seconds; [TRIG 1] also switches WIND, HAIL and AURORA off; the shelf refuses WIND beside FOG, and HAIL beside AURORA ({{pg:wxfx}}).</div>
 <p><small>Every screen picture in this manual is drawn by AERIA's own screen code, run on a computer and enlarged. The screen is 128 by 64 pixels, white on black. The panel drawings are our own, measured from the instrument. AERIA OS is not an Elektron product, and Elektron does not support it.</small></p>
@@ -755,7 +756,7 @@ shelf3 | The end of the list: the weather's five effects. The screen has room fo
 [BANK] :: The shelf, to choose the effect
 ]]
 <p>In the sequencer the same effects sit on tracks: [FX2] opens the FX page, [YES] the list ({{ch:seqpages}}). Their knobs, ranges and readouts are the same there.</p>
-<p>There are twenty-one effects (BBD, PT2399 and TAPE held back in this build): sixteen to play, and five that belong to the weather (WIND, FOG, TWISTER, HAIL and AURORA, {{pg:fxweather}}). All are AERIA's own, after the Balloon Shop and Cloudfin family. Chapter 6 says which DSP core each runs on and how many fit at once. With MIX at 0% an effect passes the exact dry signal; the weather's five have AMT in its place, and pass the exact dry signal at AMT 0%.</p>
+<p>There are twenty-one effects: sixteen to play, and five that belong to the weather (WIND, FOG, TWISTER, HAIL and AURORA, {{pg:fxweather}}). All are AERIA's own, after the Balloon Shop and Cloudfin family. Chapter 6 says which DSP core each runs on and how many fit at once. With MIX at 0% an effect passes the exact dry signal; the weather's five have AMT in its place, and pass the exact dry signal at AMT 0%.</p>
 <p>The tables give each knob's range as the popup shows it. Units: ms and s are time, Hz and kHz are frequency, dB is level, C is cents (hundredths of a semitone), a plain signed number on a pitch knob is semitones, x is a multiplier.</p>
 <p>Each table lists the six knobs A to F in order, then the second set (hold <span class="key">FUNC</span>) where the effect has one. All of them are side by side in {{ch:fxref}}. Where a blank is listed, that knob position is empty and the knob does nothing.</p>
 <p>Default is where a knob sits when the effect comes from the shelf, before the weather moves it. At the first start the effects are held dry instead (chapter 6).</p>
@@ -967,7 +968,6 @@ chain_smear_snow | SNOW alone: the weather has taken SMR to 9.84 s and FRZ to 93
 <p>Either core, cost 150.</p></div>
 
 <div class="fxb"><h3 id="fxbbd">BBD</h3>
-<div class="warn"><b>Held back in this build.</b> This effect is finished and passes its tests, but the DSP stopped twice while it was being swapped in and out under heavy tests, so it is not offered on the shelf or in the sequencer until that is found. It comes in a later release.</div>
 <p>Chloaelis's bucket-brigade delay: 4,096 buckets on each side clocked by the time, so the sound gets darker and grainier as the time grows, with the compander's breathing, the leak and the clock's whisper. Hard panned left and right like ECHO. No clipping: its grit is the buckets' own.</p>
 <table>
 <tr><th class="k">Knob</th><th>What it does</th><th>Range</th><th>Default</th></tr>
@@ -983,10 +983,9 @@ chain_smear_snow | SNOW alone: the weather has taken SMR to 9.84 s and FRZ to 93
 <tr><td class="k">FUNC D: TMOD</td><td>SLEW (pitch bends) or FADE (a crossfade)</td><td class="n">SLEW, FADE</td><td class="n">SLEW</td></tr>
 <tr><td class="k">FUNC E: RATE</td><td>The LFO's speed (the right side runs 1.18 times faster)</td><td class="n">0.02 Hz to 20 Hz</td><td class="n">0.11 Hz</td></tr>
 </table>
-<p>The second core only, cost 780. It shares memory with AURORA and HAIL, and cannot sit on the second core with PT2399.</p></div>
+<p>The second core only, cost 780. It shares memory with AURORA, HAIL and PT2399, so it never sits beside them.</p></div>
 
 <div class="fxb"><h3 id="fxpt2399">PT2399</h3>
-<div class="warn"><b>Held back in this build.</b> This effect is finished and passes its tests, but the DSP stopped twice while it was being swapped in and out under heavy tests, so it is not offered on the shelf or in the sequencer until that is found. It comes in a later release.</div>
 <p>Chloaelis's PT2399: the echo chip in countless pedals, modelled bit by bit. It stores the sound as one bit per clock, so long times get gritty and short times stay clean, with the chip's slope overload and its clock whine. Hard panned left and right.</p>
 <table>
 <tr><th class="k">Knob</th><th>What it does</th><th>Range</th><th>Default</th></tr>
@@ -1003,10 +1002,9 @@ chain_smear_snow | SNOW alone: the weather has taken SMR to 9.84 s and FRZ to 93
 <tr><td class="k">FUNC E: MOD</td><td>An LFO on the time</td><td class="n">OFF to 100%</td><td class="n">OFF</td></tr>
 <tr><td class="k">FUNC F: RATE</td><td>The LFO's speed</td><td class="n">0.02 Hz to 20 Hz</td><td class="n">0.11 Hz</td></tr>
 </table>
-<p>The second core only, cost 970: it is the dearest effect, so little else fits beside it. Shares memory with the TWISTER.</p></div>
+<p>The second core only, cost 970: it is the dearest effect, so little else fits beside it. Shares memory with BBD, HAIL and AURORA, so it never sits beside them.</p></div>
 
 <div class="fxb"><h3 id="fxtape">TAPE</h3>
-<div class="warn"><b>Held back in this build.</b> This effect is finished and passes its tests, but the DSP stopped twice while it was being swapped in and out under heavy tests, so it is not offered on the shelf or in the sequencer until that is found. It comes in a later release.</div>
 <p>Chloaelis's tape echo: wow and flutter, the head bump, pre- and de-emphasis, hiss and crackle, and <b>tape life</b>: the tape wears as it plays, losing its top end and shedding oxide, and a frozen loop slowly falls apart. RFSH puts on new tape. Hard panned left and right.</p>
 <table>
 <tr><th class="k">Knob</th><th>What it does</th><th>Range</th><th>Default</th></tr>

@@ -303,11 +303,11 @@ grlo1:
         sub     x1,b
 grhi1:
         move    b,x:(r7+$1b)
-; DENS: t = 3 DENS / 4; g0 = 1, g2 = c(4t), g1 = c(4t - 1), g3 = c(4t - 2)
+; DENS: t = 3 DENS / 4 x 128/127 (127 = four full grains); g0 = 1, g2 = c(4t), g1 = c(4t - 1), g3 = c(4t - 2)
         move    #>$7fffff,a
         move    a,x:(r7+$10)
         move    x:(r6+$1),x0
-        move    #>$600000,y0
+        move    #>$60c183,y0
         mpy     y0,x0,a
         move    a,x:(r7+$15)
         move    x:(r7+$15),a
@@ -520,6 +520,9 @@ grg0new:
         move    x:(r7+$1e),x1
         cmp     x1,a
         tgt     x1,a
+        and     #>$ffff80,a  ; whole samples (quality pass): at an integer rate (unison) the grain reads
+        clr     b  ; the ring exactly, no interpolation lowpass (was -2.3 dB at 10-15 kHz)
+        move    b,x:(r7+$26)  ; age lo
         move    a,x:(r7+$22)
 ; pan s = reach rnd held to +-1/2; gL = g (1/2 + s), gR = g (1/2 - s)
         move    x:(r7+$14),y0
@@ -660,6 +663,9 @@ grg1new:
         move    x:(r7+$1e),x1
         cmp     x1,a
         tgt     x1,a
+        and     #>$ffff80,a  ; whole samples (quality pass): at an integer rate (unison) the grain reads
+        clr     b  ; the ring exactly, no interpolation lowpass (was -2.3 dB at 10-15 kHz)
+        move    b,x:(r7+$2e)  ; age lo
         move    a,x:(r7+$2a)
 ; pan s = reach rnd held to +-1/2; gL = g (1/2 + s), gR = g (1/2 - s)
         move    x:(r7+$14),y0
@@ -800,6 +806,9 @@ grg2new:
         move    x:(r7+$1e),x1
         cmp     x1,a
         tgt     x1,a
+        and     #>$ffff80,a  ; whole samples (quality pass): at an integer rate (unison) the grain reads
+        clr     b  ; the ring exactly, no interpolation lowpass (was -2.3 dB at 10-15 kHz)
+        move    b,x:(r7+$36)  ; age lo
         move    a,x:(r7+$32)
 ; pan s = reach rnd held to +-1/2; gL = g (1/2 + s), gR = g (1/2 - s)
         move    x:(r7+$14),y0
@@ -940,6 +949,9 @@ grg3new:
         move    x:(r7+$1e),x1
         cmp     x1,a
         tgt     x1,a
+        and     #>$ffff80,a  ; whole samples (quality pass): at an integer rate (unison) the grain reads
+        clr     b  ; the ring exactly, no interpolation lowpass (was -2.3 dB at 10-15 kHz)
+        move    b,x:(r7+$3e)  ; age lo
         move    a,x:(r7+$3a)
 ; pan s = reach rnd held to +-1/2; gL = g (1/2 + s), gR = g (1/2 - s)
         move    x:(r7+$14),y0

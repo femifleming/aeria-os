@@ -20,7 +20,7 @@
 ;
 ; Y ring: 4096 words at the base X:$213 points to; the base must be a multiple of 4096.
 ; L on even addresses, R on odd.
-; r7: 00 ST 01 YB 02 WP 03 AMH 04 AML 05 RNG 06 ROLL 07 ENV 08 LEANT 09 LEANN 0a HOLD 0b DTGT 0c DH 0d DL 0e VL 0f VX 10 G2 11 AL 12 BL 13 AR 14 BR 15 DAL 16 DBL 17 DAR 18 DBR 19 W0 1a W1 1b W2 1c W3 1d MAXV0 1e GTHR 1f GLAST 20 GG 21 WMIX 22 CHL 23 CHR
+; r7: 00 ST 01 YB 02 WP 03 AMH 04 AML 05 RNG 06 ROLL 07 ENV 08 LEANT 09 LEANN 0a HOLD 0b DTGT 0c DH 0d DL 0e VL 0f VX 10 G2 11 AL 12 BL 13 AR 14 BR 15 DAL 16 DBL 17 DAR 18 DBR 19 W0 1a W1 1b W2 1c W3 1d MAXV0 1e GTHR 1f GLAST 20 GG 21 WMIX 22 CHL 23 CHR 24 LNK
 
 init:
         move    #>$ffffff,m4
@@ -72,6 +72,8 @@ wnwake:
         move    a,x:(r7+$13)
         move    x:(r7+$01),a
         move    a,x:(r7+$02)
+        move    x:(r6+$3),a             ; LEAN starts where the knob is (glided from here on)
+        move    a,x:(r7+$24)
         move    #>$000010,a
         move    a,x:(r7+$00)
         rts
@@ -274,7 +276,13 @@ wnheld:
         move    x:(r7+$09),y1
         mpy     x0,y1,a
         move    a,x0
-        move    x:(r6+$3),y1
+        move    x:(r6+$3),a             ; LEAN glided 1/16 a call (5.8 ms): a jumped knob must not step the gains
+        move    x:(r7+$24),b
+        sub     b,a
+        asr     #$4,a,a
+        add     a,b
+        move    b,x:(r7+$24)
+        move    b,y1
         mpy     x0,y1,a
         move    a,x0                    ; signed
         abs     a

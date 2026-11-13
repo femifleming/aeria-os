@@ -23,6 +23,8 @@
 ;
 ; r7: 00/01 env hi/lo  02 atk  03 rel  04 Yt  05 s  06 kb  07 fa  08 fb
 ;     09 (9 - makeup)/32  0a/0b mix t/s  0c path (n - 9)
+;     0d-0f THR / RATI / MAKE glided (used by the loop)  10-12 their per-sample steps  13 first-call flag
+;     14 MIX step  15/16 BELW kb glided / step
 ;     20..37 T[0..23]
 
 init:
@@ -48,6 +50,8 @@ cpitba:
         asr     a
 cpitbb:
         nop     
+        move    #>$1,a
+        move    a,x:(r7+$13)  ; first call: no glide
         rts     
 proc:
         move    #>$ffffff,m4
@@ -60,15 +64,6 @@ proc:
         move    #>$7fffff,a
 cpmset:
         move    a,x:(r7+$0a)
-        move    x:(r7+$0a),a
-        move    x:(r7+$0b),b
-        sub     b,a
-        abs     a
-        cmp     #>$000100,a
-        bge     cpmsnap
-        move    x:(r7+$0a),a
-        move    a,x:(r7+$0b)
-cpmsnap:
 ; THR: Yt = 60 dB * v/127 in log2/32
         move    x:(r6),x0
         move    #>$282d51,y0
@@ -154,24 +149,123 @@ cpbset:
         bsr     cpexp
         bsr     cpser
         move    b,x:(r7+$03)
-        lua     (r7+$20),r4
-        do      n7,>cpend
+; THR / RATI / MAKE / MIX / BELW glide: a piecewise-linear one-pole, 1/128 of the distance a sample (tau 2.9 ms),
+; the step set once a call (no zipper, no click on a jump); the first call lands on the targets
+        move    x:(r7+$13),a
+        tst     a
+        beq     cpgfirst
+        move    x:(r7+$04),a
+        move    a,x:(r7+$0d)
+        move    x:(r7+$05),a
+        move    a,x:(r7+$0e)
+        move    x:(r7+$09),a
+        move    a,x:(r7+$0f)
+        move    x:(r7+$0a),a
+        move    a,x:(r7+$0b)
+        move    x:(r7+$06),a
+        move    a,x:(r7+$15)
+        clr     a
+        move    a,x:(r7+$13)
+cpgfirst:
+        move    x:(r7+$04),a
+        move    x:(r7+$0d),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     cpgsnap0
+        move    x:(r7+$04),a
+        move    a,x:(r7+$0d)
+cpgsnap0:
+        move    x:(r7+$04),a
+        move    x:(r7+$0d),b
+        sub     b,a
+        asr     #$7,a,a
+        move    a1,x:(r7+$10)
+        move    x:(r7+$05),a
+        move    x:(r7+$0e),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     cpgsnap1
+        move    x:(r7+$05),a
+        move    a,x:(r7+$0e)
+cpgsnap1:
+        move    x:(r7+$05),a
+        move    x:(r7+$0e),b
+        sub     b,a
+        asr     #$7,a,a
+        move    a1,x:(r7+$11)
+        move    x:(r7+$09),a
+        move    x:(r7+$0f),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     cpgsnap2
+        move    x:(r7+$09),a
+        move    a,x:(r7+$0f)
+cpgsnap2:
+        move    x:(r7+$09),a
+        move    x:(r7+$0f),b
+        sub     b,a
+        asr     #$7,a,a
+        move    a1,x:(r7+$12)
+        move    x:(r7+$0a),a
+        move    x:(r7+$0b),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     cpgsnap3
+        move    x:(r7+$0a),a
+        move    a,x:(r7+$0b)
+cpgsnap3:
         move    x:(r7+$0a),a
         move    x:(r7+$0b),b
         sub     b,a
         asr     #$7,a,a
-        add     a,b
-        move    b,x:(r7+$0b)
+        move    a1,x:(r7+$14)
+        move    x:(r7+$06),a
+        move    x:(r7+$15),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     cpgsnap4
+        move    x:(r7+$06),a
+        move    a,x:(r7+$15)
+cpgsnap4:
+        move    x:(r7+$06),a
+        move    x:(r7+$15),b
+        sub     b,a
+        asr     #$7,a,a
+        move    a1,x:(r7+$16)
+        lua     (r7+$20),r4
+        do      n7,>cpend
+        move    x:(r7+$0d),a
+        move    x:(r7+$10),x0
+        add     x0,a
+        move    a,x:(r7+$0d)
+        move    x:(r7+$0e),a
+        move    x:(r7+$11),x0
+        add     x0,a
+        move    a,x:(r7+$0e)
+        move    x:(r7+$0f),a
+        move    x:(r7+$12),x0
+        add     x0,a
+        move    a,x:(r7+$0f)
+        move    x:(r7+$0b),a
+        move    x:(r7+$14),x0
+        add     x0,a
+        move    a,x:(r7+$0b)
+        move    x:(r7+$15),a
+        move    x:(r7+$16),x0
+        add     x0,a
+        move    a,x:(r7+$15)
 ; ---- peak of the pair, envelope (48 bits) ----
         move    x:(r0),a
         abs     a
-        move    a,x1
         move    x:(r0+n0),b
         abs     b
-        move    b,x0
-        move    x1,a
-        cmp     x0,a
-        tlt     x0,a  ; pk
+        cmp     b,a
+        tlt     b,a  ; pk
         move    x:(r7+$00),b
         move    x:(r7+$01),b0
         sub     b,a
@@ -241,7 +335,7 @@ cpn01:
         tgt     x1,a  ; floor -120 dBFS
 ; ---- gain computer ----
         move    a,x1  ; Y
-        move    x:(r7+$04),x0
+        move    x:(r7+$0d),x0
         sub     x0,a
         move    a,x0  ; d
         move    x:(r7+$08),y0
@@ -254,7 +348,7 @@ cpn01:
         tst     b
         tmi     y0,b
         move    b,y1  ; fade
-        move    x:(r7+$06),y0
+        move    x:(r7+$15),y0
         mpy     y0,x0,b
         asl     #$3,b,b
         move    #>$35269e,x1
@@ -265,14 +359,14 @@ cpn01:
         tlt     x1,b
         move    b,x1
         mpy     y1,x1,b  ; below: g
-        move    x:(r7+$05),y1
+        move    x:(r7+$0e),y1
         mpy     x0,y1,a
         neg     a
         move    a,y0  ; above: g = -d s
         move    x0,a
         tst     a
         tlt     y0,b
-        move    x:(r7+$09),x0
+        move    x:(r7+$0f),x0
         add     x0,b  ; w
         move    #>$0,x0
         tst     b

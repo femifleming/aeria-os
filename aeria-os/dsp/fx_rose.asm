@@ -21,7 +21,7 @@
 ;
 ; r7: 00 cnt 01/02 mix t/s 03 u 04 wet R 05/06 gin t/s 07/08 s t/s 09 rota phase
 ;     0a rota depth 0b dc lp 0c Yr/32 0d Y0/32 0e beta 10 1-cos 11 sin 12 oct/32
-;     13 call flag 15 tmp
+;     13 call flag 14 SPRD step a sample 15 tmp
 ; r1 = r7+$40: mode k at +8k: 0 re 1 im 2 rc 3 rs 4 G 5 rc' 6 rs' 7 G'
 
 init:
@@ -265,12 +265,40 @@ rsglide:
         move    x:(r4+$7),a
         move    x:(r4+$4),b
         sub     b,a
-        asr     #$4,a,a
+        asr     #$5,a,a  ; pane gain: 1/32 (smaller steps a call)
         add     a,b
         move    b,x:(r4+$4)
         move    (r4)+n4
 rsgend:
         nop     
+; ---- mode k (r3, this call's round-robin mode): its state words below the threshold move
+;      1 LSB toward 0 (every 8th call): the rounded recursion's limit cycles end in exact silence
+        move    #>$000004,x0
+        move    #>$fffffc,x1
+        move    #>$000100,y0
+        move    #>$0,y1
+        move    x:(r3+$0),a
+        clr     b
+        tst     a
+        tgt     x0,b
+        tlt     x1,b
+        cmpm    y0,a
+        tge     y1,b  ; only below 256 LSB
+        cmpm    x0,a
+        tlt     a,b  ; below 4: to exactly 0 (no overshoot)
+        sub     b,a
+        move    a,x:(r3+$0)
+        move    x:(r3+$1),a
+        clr     b
+        tst     a
+        tgt     x0,b
+        tlt     x1,b
+        cmpm    y0,a
+        tge     y1,b  ; only below 256 LSB
+        cmpm    x0,a
+        tlt     a,b  ; below 4: to exactly 0 (no overshoot)
+        sub     b,a
+        move    a,x:(r3+$1)
         move    x:(r7+$05),a
         move    x:(r7+$06),b
         sub     b,a
@@ -280,9 +308,18 @@ rsgend:
         move    x:(r7+$07),a
         move    x:(r7+$08),b
         sub     b,a
-        asr     #$3,a,a
-        add     a,b
-        move    b,x:(r7+$08)
+        abs     a
+        cmp     #>$000100,a
+        bge     rsssnap
+        move    x:(r7+$07),a
+        move    a,x:(r7+$08)
+rsssnap:
+; SPRD: per-sample linear steps (1/128 of the distance a sample: no per-call jump in the L/R mix)
+        move    x:(r7+$07),a
+        move    x:(r7+$08),b
+        sub     b,a
+        asr     #$7,a,a
+        move    a1,x:(r7+$14)
 rsrun:
         do      n7,>rsend
         move    x:(r7+$01),a
@@ -291,6 +328,10 @@ rsrun:
         asr     #$7,a,a
         add     a,b
         move    b,x:(r7+$02)
+        move    x:(r7+$08),a
+        move    x:(r7+$14),x0
+        add     x0,a
+        move    a,x:(r7+$08)
         move    x:(r0),a
         move    x:(r0+n0),x0
         add     x0,a
@@ -310,9 +351,9 @@ rsrun:
         mac     y0,x0,a
         move    x:(r1+$01),x1
         move    x:(r1+$03),y1
-        mac     -y1,x1,a
+        macr    -y1,x1,a
         mpy     x0,y1,b
-        mac     x1,y0,b
+        macr    x1,y0,b
         move    a,x:(r1+$00)
         move    b,x:(r1+$01)
 ; mode 1
@@ -322,9 +363,9 @@ rsrun:
         mac     y0,x0,a
         move    x:(r1+$09),x1
         move    x:(r1+$0b),y1
-        mac     -y1,x1,a
+        macr    -y1,x1,a
         mpy     x0,y1,b
-        mac     x1,y0,b
+        macr    x1,y0,b
         move    a,x:(r1+$08)
         move    b,x:(r1+$09)
 ; mode 2
@@ -334,9 +375,9 @@ rsrun:
         mac     y0,x0,a
         move    x:(r1+$11),x1
         move    x:(r1+$13),y1
-        mac     -y1,x1,a
+        macr    -y1,x1,a
         mpy     x0,y1,b
-        mac     x1,y0,b
+        macr    x1,y0,b
         move    a,x:(r1+$10)
         move    b,x:(r1+$11)
 ; mode 3
@@ -346,9 +387,9 @@ rsrun:
         mac     y0,x0,a
         move    x:(r1+$19),x1
         move    x:(r1+$1b),y1
-        mac     -y1,x1,a
+        macr    -y1,x1,a
         mpy     x0,y1,b
-        mac     x1,y0,b
+        macr    x1,y0,b
         move    a,x:(r1+$18)
         move    b,x:(r1+$19)
 ; mode 4
@@ -358,9 +399,9 @@ rsrun:
         mac     y0,x0,a
         move    x:(r1+$21),x1
         move    x:(r1+$23),y1
-        mac     -y1,x1,a
+        macr    -y1,x1,a
         mpy     x0,y1,b
-        mac     x1,y0,b
+        macr    x1,y0,b
         move    a,x:(r1+$20)
         move    b,x:(r1+$21)
 ; mode 5
@@ -370,9 +411,9 @@ rsrun:
         mac     y0,x0,a
         move    x:(r1+$29),x1
         move    x:(r1+$2b),y1
-        mac     -y1,x1,a
+        macr    -y1,x1,a
         mpy     x0,y1,b
-        mac     x1,y0,b
+        macr    x1,y0,b
         move    a,x:(r1+$28)
         move    b,x:(r1+$29)
 ; mode 6
@@ -382,9 +423,9 @@ rsrun:
         mac     y0,x0,a
         move    x:(r1+$31),x1
         move    x:(r1+$33),y1
-        mac     -y1,x1,a
+        macr    -y1,x1,a
         mpy     x0,y1,b
-        mac     x1,y0,b
+        macr    x1,y0,b
         move    a,x:(r1+$30)
         move    b,x:(r1+$31)
 ; mode 7
@@ -394,9 +435,9 @@ rsrun:
         mac     y0,x0,a
         move    x:(r1+$39),x1
         move    x:(r1+$3b),y1
-        mac     -y1,x1,a
+        macr    -y1,x1,a
         mpy     x0,y1,b
-        mac     x1,y0,b
+        macr    x1,y0,b
         move    a,x:(r1+$38)
         move    b,x:(r1+$39)
         move    x:(r1+$01),x0

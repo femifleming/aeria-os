@@ -233,6 +233,7 @@ pthq008:
         bsr     >ptsamp
         move    n2,r1
         bsr     >ptsamp
+        nop     
 ptloop:
         nop     
         move    #>$ffffff,m4

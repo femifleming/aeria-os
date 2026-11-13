@@ -18,7 +18,7 @@
 ; slow beating of a detuned pair, never a cancellation. WIDE 0 walks phi back
 ; to 0 (the nearest way round, ~0.1 s time constant) and holds it there: then
 ; right = left bit for bit on equal inputs.
-; Feedback: wet -> TONE lowpass -> DC block (10 Hz) -> soft clip
+; Feedback: wet -> TONE lowpass -> DC block (10 Hz, 48-bit, rounded out) -> soft clip
 ; x - x^3/3 (bounded at 2/3, unity slope at 0) -> FDBK (max 0.95) -> line.
 ;
 ; Memory: the FX2 allocator buffer (base from x:>$213 at init) used as ONE
@@ -36,7 +36,10 @@
 ;  18/19 head 1 weights w0,w1  1a/1b head 2 weights  1c q4 = (1-ratio)/4
 ;  1d/1e phi hi/lo  1f/20 dphi hi/lo  21/22 right head 1 weights
 ;  23/24 right head 2 weights  25 ratio/8  26 right phase
-;  (inc, feedback and tone glide once per block; W and mix per sample)
+;  27/28 tone LP L/R low words  29/2a DC block L/R y low words  2b feedback ramp a sample
+;  (12 Nov quality pass: tone LP and DC block keep 48-bit states so tails reach exact 0;
+;   feedback ramps per sample instead of stepping per block)
+;  (inc and tone glide once per block; feedback ramps per sample; W and mix per sample)
 ;
 ; Knobs: 0 SHFT (49-way, -24..+24 st)  1 FINE (+-1 st, 64 = 0)
 ;        2 GRN (window 10..160 ms, squared taper)  3 FDBK (0..0.95)
@@ -240,12 +243,20 @@ ptready:
         add     a,b
         move    b1,x:(r7+$05)
         move    b0,x:(r7+$06)
+; feedback: a per-sample ramp (2b) that covers 1/16 of the way a block; lands exactly within 256 LSB
         move    x:(r7+$0a),a
         move    x:(r7+$0b),b
         sub     b,a
-        asr     #$4,a,a
-        add     b,a
-        move    a,x:(r7+$0b)
+        move    a,b
+        abs     b
+        cmp     #>$000100,b
+        bge     ptfbramp
+        clr     a
+        move    x:(r7+$0a),b
+        move    b,x:(r7+$0b)
+ptfbramp:
+        asr     #$8,a,a
+        move    a,x:(r7+$2b)
         move    x:(r7+$0c),a
         move    x:(r7+$0d),b
         sub     b,a
@@ -280,7 +291,11 @@ ptready:
         add     b,a
         move    a,x:(r7+$0f)
 ; ---- write input + feedback (both channels) --------------------------------
-        move    x:(r7+$0b),y1
+        move    x:(r7+$0b),a
+        move    x:(r7+$2b),x0
+        add     x0,a
+        move    a,x:(r7+$0b)
+        move    a,y1
         move    x:(r7+$16),x0
         move    x:(r0),a
         mac     x0,y1,a
@@ -465,23 +480,33 @@ ptready:
         sub     x0,a
         move    a,x1
         mpy     y1,x1,a
-        add     x0,a
-        move    a,x:(r7+$14)
+        move    x:(r7+$14),x1
+        move    x:(r7+$27),x0
+        add     x,a                     ; 48-bit state: decays to exact 0 (no dead band)
+        move    a1,x:(r7+$14)
+        move    a0,x:(r7+$27)
         move    x:(r7+$15),x0
         sub     x0,b
         move    b,x1
         mpy     y1,x1,b
-        add     x0,b
-        move    b,x:(r7+$15)
+        move    x:(r7+$15),x1
+        move    x:(r7+$28),x0
+        add     x,b
+        move    b1,x:(r7+$15)
+        move    b0,x:(r7+$28)
 ; ---- left: DC block, soft clip -> feedback state; mix ----------------------
-        move    #>$7fd150,y0
+        move    #>$002eb0,y0            ; 1 - R (R = $7fd150): y = x - x1 + y1 - (1-R) y1, y 48-bit
         move    x:(r7+$14),a
         move    x:(r7+$10),x0
         move    a,x:(r7+$10)
         sub     x0,a
-        move    x:(r7+$11),x0
-        mac     y0,x0,a
-        move    a,x:(r7+$11)
+        move    x:(r7+$11),x1
+        move    x:(r7+$29),x0
+        add     x,a
+        mac     -x1,y0,a
+        move    a,x:(r7+$11)                ; limited, as before (a1 alone could wrap)
+        move    a0,x:(r7+$29)
+        rnd     a                       ; rounded into the clip: kills the 1-LSB limit cycle of the loop
         move    a,x0
         mpy     x0,x0,a
         move    a,x1
@@ -502,14 +527,18 @@ ptready:
         add     b,a
         move    a,x:(r0)+
 ; ---- right ------------------------------------------------------------------
-        move    #>$7fd150,y0
+        move    #>$002eb0,y0            ; 1 - R (R = $7fd150): y = x - x1 + y1 - (1-R) y1, y 48-bit
         move    x:(r7+$15),a
         move    x:(r7+$12),x0
         move    a,x:(r7+$12)
         sub     x0,a
-        move    x:(r7+$13),x0
-        mac     y0,x0,a
+        move    x:(r7+$13),x1
+        move    x:(r7+$2a),x0
+        add     x,a
+        mac     -x1,y0,a
         move    a,x:(r7+$13)
+        move    a0,x:(r7+$2a)
+        rnd     a
         move    a,x0
         mpy     x0,x0,a
         move    a,x1

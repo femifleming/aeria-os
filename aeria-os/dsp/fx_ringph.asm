@@ -27,7 +27,11 @@
 ; r7: 03 mode+1  04/05 inc t/s (RING carrier, PHSR LFO)  06/07 follow|fb
 ;     08/09 bias|depth  0a/0b spread  0c/0d mix  0e env  0f phase
 ;     10/11 aL t/s  12/13 aR t/s  14..19 L stage states  1a..1f R states
-;     20 fbL  21 fbR  22 temp  23 cntr  24 snap flag  25/26 fb DC mean L/R
+;     20 fbL  21 fbR  22 temp  23 cntr  24 snap flag  25/26 fb DC mean L/R  27/28 their low words
+;     29 silent-block count (PHSR)  2a CNTR target (23 = CNTR glided per block)
+; Quality pass (12 Nov 2026): allpass stages round (macr), the feedback DC mean is 48-bit, PHSR clears
+; its states after 0.74 s of digital silence in (tails end in exact 0); FREQ/RATE/CNTR reach the top
+; of their ranges at 127 (v/127, the display law; they were v/128).
 
 init:
         move    #>$ffffff,m4
@@ -53,7 +57,7 @@ proc:
         move    a,x:(r7+$03)
         lua     (r7+$e),r4
         clr     a
-        do      #25,>rpmzero
+        do      #27,>rpmzero
         move    a,x:(r4)+
 rpmzero:
         nop     
@@ -92,8 +96,12 @@ rpbring:
         move    #>$7fffff,b
         sub     a,b
         move    b,x0
-        move    #>$1fdcf7,y0
+        move    #>$201d31,y0
         mpy     y0,x0,a
+        sub     #>$00403a,a
+        move    #>$0,x0
+        tst     a
+        tlt     x0,a
         bsr     rpexp
         move    b,x0
         move    #>$1d0663,y0
@@ -272,15 +280,22 @@ rpbphsr:
         move    #>$7fffff,b
         sub     a,b
         move    b,x0
-        move    #>$1e934f,y0
+        move    #>$1ed0f1,y0
         mpy     y0,x0,a
+        sub     #>$003da2,a
+        move    #>$0,x0
+        tst     a
+        tlt     x0,a
         bsr     rpexp
         move    b,x0
         move    #>$000edc,y0
         mpy     y0,x0,a
         move    a,x:(r7+$04)
         move    x:(r6+$4),a
-        move    a,x:(r7+$23)  ; CNTR
+        move    a,x0
+        move    #>$010204,y0
+        mac     y0,x0,a
+        move    a,x:(r7+$2a)  ; CNTR v/127 (127 = 5 kHz, the display law; limited to $7fffff)
         move    x:(r6+$1),x0
         move    #>$6ccccd,y0
         mpy     y0,x0,a
@@ -296,9 +311,18 @@ rpbphsr:
         move    b,x:(r7+$09)
         move    x:(r7+$0a),b
         move    b,x:(r7+$0b)
+        move    x:(r7+$2a),b
+        move    b,x:(r7+$2b)
         clr     a
         move    a,x:(r7+$24)
 rpprun:
+; CNTR glides per block (2^-3: ~3 ms), so a jump sweeps the notches instead of ringing them
+        move    x:(r7+$2a),a
+        move    x:(r7+$23),b
+        sub     b,a
+        asr     #$3,a,a
+        add     a,b
+        move    b,x:(r7+$23)
         move    x:(r7+$05),x0
         move    #>$100000,y0
         mpy     y0,x0,a
@@ -393,6 +417,38 @@ rpprun:
         bsr     rpexp
         neg     b
         move    b,x:(r7+$12)
+; silence flush (quality pass): after 2048 blocks (0.74 s) of digital silence in, the stage and feedback
+; states are cleared. Rounding leaves first-order allpasses near -1 a dead band of up to ~18 LSB, so
+; without this a few LSB of DC could sit in the output for ever.
+        move    r0,r4
+        clr     a
+        do      n7,>rpqscan
+        move    x:(r4)+,x0
+        or      x0,a
+        move    x:(r4)+,x0
+        or      x0,a
+rpqscan:
+        move    x:(r7+$29),b
+        add     #>$1,b
+        tst     a
+        beq     rpqquiet
+        clr     b
+rpqquiet:
+        move    #>$000800,x0
+        cmp     x0,b
+        tgt     x0,b
+        move    b,x:(r7+$29)
+        blt     rpqkeep
+        clr     a
+        lua     (r7+$14),r4
+        do      #14,>rpqz1
+        move    a,x:(r4)+
+rpqz1:
+        lua     (r7+$25),r4
+        do      #4,>rpqz2
+        move    a,x:(r4)+
+rpqz2:
+rpqkeep:
         move    x:(r7+$24),a
         tst     a
         beq     rpploop
@@ -458,45 +514,45 @@ rpploop:
         move    a,x0  ; v
         move    x:(r7+$11),y0
         move    x:(r7+$14),b
-        mac     y0,x0,b  ; stage 1: y = a v + z
+        macr    y0,x0,b  ; stage 1: y = a v + z
         move    b,x1
         move    x0,a
-        mac     -x1,y0,a
+        macr    -x1,y0,a
         move    a,x:(r7+$14)  ; z = v - a y
         move    x1,x0
         move    x:(r7+$15),b
-        mac     y0,x0,b  ; stage 2: y = a v + z
+        macr    y0,x0,b  ; stage 2: y = a v + z
         move    b,x1
         move    x0,a
-        mac     -x1,y0,a
+        macr    -x1,y0,a
         move    a,x:(r7+$15)  ; z = v - a y
         move    x1,x0
         move    x:(r7+$16),b
-        mac     y0,x0,b  ; stage 3: y = a v + z
+        macr    y0,x0,b  ; stage 3: y = a v + z
         move    b,x1
         move    x0,a
-        mac     -x1,y0,a
+        macr    -x1,y0,a
         move    a,x:(r7+$16)  ; z = v - a y
         move    x1,x0
         move    x:(r7+$17),b
-        mac     y0,x0,b  ; stage 4: y = a v + z
+        macr    y0,x0,b  ; stage 4: y = a v + z
         move    b,x1
         move    x0,a
-        mac     -x1,y0,a
+        macr    -x1,y0,a
         move    a,x:(r7+$17)  ; z = v - a y
         move    x1,x0
         move    x:(r7+$18),b
-        mac     y0,x0,b  ; stage 5: y = a v + z
+        macr    y0,x0,b  ; stage 5: y = a v + z
         move    b,x1
         move    x0,a
-        mac     -x1,y0,a
+        macr    -x1,y0,a
         move    a,x:(r7+$18)  ; z = v - a y
         move    x1,x0
         move    x:(r7+$19),b
-        mac     y0,x0,b  ; stage 6: y = a v + z
+        macr    y0,x0,b  ; stage 6: y = a v + z
         move    b,x1
         move    x0,a
-        mac     -x1,y0,a
+        macr    -x1,y0,a
         move    a,x:(r7+$19)  ; z = v - a y
         move    x1,x0
         move    x0,a
@@ -511,11 +567,13 @@ rpploop:
         mac     -y1,y0,a
 ; DC-free feedback: subtract a leaky mean (2^-10, ~7 Hz)
         move    x:(r7+$25),b
+        move    x:(r7+$27),b0
         sub     b,a
         move    a,x:(r7+$20)
         asr     #$a,a,a
         add     a,b
-        move    b,x:(r7+$25)
+        move    b1,x:(r7+$25)
+        move    b0,x:(r7+$27)
         move    x:(r7+$22),a
         move    x:(r0),x0
         add     x0,a
@@ -539,45 +597,45 @@ rpploop:
         move    a,x0  ; v
         move    x:(r7+$13),y0
         move    x:(r7+$1a),b
-        mac     y0,x0,b  ; stage 1: y = a v + z
+        macr    y0,x0,b  ; stage 1: y = a v + z
         move    b,x1
         move    x0,a
-        mac     -x1,y0,a
+        macr    -x1,y0,a
         move    a,x:(r7+$1a)  ; z = v - a y
         move    x1,x0
         move    x:(r7+$1b),b
-        mac     y0,x0,b  ; stage 2: y = a v + z
+        macr    y0,x0,b  ; stage 2: y = a v + z
         move    b,x1
         move    x0,a
-        mac     -x1,y0,a
+        macr    -x1,y0,a
         move    a,x:(r7+$1b)  ; z = v - a y
         move    x1,x0
         move    x:(r7+$1c),b
-        mac     y0,x0,b  ; stage 3: y = a v + z
+        macr    y0,x0,b  ; stage 3: y = a v + z
         move    b,x1
         move    x0,a
-        mac     -x1,y0,a
+        macr    -x1,y0,a
         move    a,x:(r7+$1c)  ; z = v - a y
         move    x1,x0
         move    x:(r7+$1d),b
-        mac     y0,x0,b  ; stage 4: y = a v + z
+        macr    y0,x0,b  ; stage 4: y = a v + z
         move    b,x1
         move    x0,a
-        mac     -x1,y0,a
+        macr    -x1,y0,a
         move    a,x:(r7+$1d)  ; z = v - a y
         move    x1,x0
         move    x:(r7+$1e),b
-        mac     y0,x0,b  ; stage 5: y = a v + z
+        macr    y0,x0,b  ; stage 5: y = a v + z
         move    b,x1
         move    x0,a
-        mac     -x1,y0,a
+        macr    -x1,y0,a
         move    a,x:(r7+$1e)  ; z = v - a y
         move    x1,x0
         move    x:(r7+$1f),b
-        mac     y0,x0,b  ; stage 6: y = a v + z
+        macr    y0,x0,b  ; stage 6: y = a v + z
         move    b,x1
         move    x0,a
-        mac     -x1,y0,a
+        macr    -x1,y0,a
         move    a,x:(r7+$1f)  ; z = v - a y
         move    x1,x0
         move    x0,a
@@ -592,11 +650,13 @@ rpploop:
         mac     -y1,y0,a
 ; DC-free feedback: subtract a leaky mean (2^-10, ~7 Hz)
         move    x:(r7+$26),b
+        move    x:(r7+$28),b0
         sub     b,a
         move    a,x:(r7+$21)
         asr     #$a,a,a
         add     a,b
-        move    b,x:(r7+$26)
+        move    b1,x:(r7+$26)
+        move    b0,x:(r7+$28)
         move    x:(r7+$22),a
         move    x:(r0),x0
         add     x0,a

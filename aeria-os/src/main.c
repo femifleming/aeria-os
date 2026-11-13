@@ -959,11 +959,7 @@ static void seq_fx(void)
     const SqHead *h = SQH;
     for (int s = 0; s < FX_SLOTS; s++) {
         int row = h->fx_row[s]; if (row > FX_COUNT) row = 0;
-#ifdef ALLOW_DELAYS
-        if (row && fx_named(row, "DIST")) row = 0;
-#else
-        if (row && (fx_named(row, "DIST") || fx_named(row, "BBD") || fx_named(row, "PT2399") || fx_named(row, "TAPE"))) row = 0;
-#endif   /* no distortion; the three new delays held back for now (13 Nov 2026) */
+        if (row && fx_named(row, "DIST")) row = 0;   /* no distortion */
         if (row != slot_row[s] || (row && (h->fx_core[s] == 1) != (slot_on_core[s] == 1))) { slot_row[s] = (uint8_t)row; fx_configure(s, row); }
         if (!row) continue;
         for (int k = 0; k < 6; k++) {

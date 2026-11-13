@@ -10,7 +10,7 @@ def par(pg,i,v=None):
     a=PB+(pg*12+i)*16+10
     if v is None: return struct.unpack('>hh',aos.rdc(d,a,4))
     aos.wrc(d,a,struct.pack('>hh',v,v))
-def xf(v): aos.wrc(d,Y['preview_xfade'],struct.pack('>I',v)); time.sleep(0.3)
+def xf(v): aos.wrc(d,Y['xfade'],struct.pack('>i',2*v)); aos.wrc(d,Y['preview_xfade'],struct.pack('>I',v)); time.sleep(0.3)   # the raw fader value (0..254) the firmware copies, so a real fader position does not overwrite the test's
 def rec(secs):
     old=[par(6,k) for k in (6,7)]
     for k in (6,7): par(6,k,0)

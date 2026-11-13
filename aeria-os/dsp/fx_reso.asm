@@ -36,13 +36,19 @@
 ; +$1800 = 8,192 words, far below the Sidechain window (+$3DFE).
 ; MODE change re-arms the 68-call clear (dry while clearing).
 ;
+; Quality pass (12 Nov 2026): every recursive state (WAVE and DTND line writes, CPLX re/im and its
+; input lowpass, DTND loop lowpass; not CPLX re/im: those are 48-bit) is stored truncated TOWARD ZERO
+; (a negative value gets +1 LSB before the floor), so a decaying loop only loses energy to rounding and
+; ends in exact 0; the DTND DC mean is 48-bit; CPLX's re/im are 48-bit and its output is rounded. Before, CPLX could sing on for ever at up to -62 dBFS (a truncation limit
+; cycle) and WAVE/DTND held up to -78 dBFS of DC.
+;
 ; r7: 00 base 01 main ptr 02 clear count 03 mode+1  10/11 mix t/s
 ;   1c tmp sin 1d P/1024 or r 1e x/32 1f aD = 2^-(9.966 DECY)
 ;   WAVE 04 DL t 05/06 DL s  07 DR t 08/09 DR s  0a/0b g  0c/0d in
 ;        0e/0f h  12/13 previous tap L/R
 ;   CPLX 04/05 crL 06/07 ciL 08/09 crR 0a/0b ciR 0c/0d norm/4 0e/0f tone
-;        14 reL 15 imL 16 reR 17 imR 18 lpL 19 lpR
-;   DTND 04 P t 05/06 P s 07/08 det 0a/0b g 0c/0d in 0e/0f tone 1a lp 19 v 18 dc mean
+;        14 reL 15 imL 16 reR 17 imR 18 lpL 19 lpR  12 13 1a 1b their low words (reL imL reR imR)
+;   DTND 04 P t 05/06 P s 07/08 det 0a/0b g 0c/0d in 0e/0f tone 1a lp 19 v 18 dc mean (14 its low word)
 ;        12 u1, then the side signal 0.6 x 0.5 (u1 - u2)  13 u2, then the right output before its clip
 ;        (g and tone glide once per call in this mode; P, det, in and mix per sample)
 
@@ -276,6 +282,10 @@ rzwrun:
         move    x:(r7+$0d),x0
         move    x:(r0),y1
         mac     x0,y1,a
+        tst     a
+        bge     rzqw0
+        add     #>$1,a
+rzqw0:
         move    a,y:(r5)+  ; line <- in x + g y
         move    b,x0
         mpy     x0,x0,a
@@ -325,6 +335,10 @@ rzwrun:
         move    x:(r7+$0d),x0
         move    x:(r0),y1
         mac     x0,y1,a
+        tst     a
+        bge     rzqw1
+        add     #>$1,a
+rzqw1:
         move    a,y:(r5)+  ; line <- in x + g y
         move    b,x0
         mpy     x0,x0,a
@@ -484,21 +498,43 @@ rzcrun:
         move    x:(r7+$0f),y1
         mpy     y1,x1,a
         add     x0,a
+        tst     a
+        bge     rzqc0l
+        add     #>$1,a
+rzqc0l:
         move    a,x:(r7+$18)
-        move    a,x0
-        move    x:(r7+$0d),y1
-        mpy     x0,y1,a  ; u = norm/4 * lp(x)
-        move    x:(r7+$14),x0
+; 48-bit re/im (quality pass): the low words (raw a0/b0, used >> 1 as positive Q23) carry what
+; the products below the LSB leave, so a ring this close to r = 1 cannot sit in a truncation limit cycle
+        move    x:(r7+$12),b
+        lsr     #$1,b
+        move    b1,x0  ; re lo / 2
+        move    x:(r7+$13),b
+        lsr     #$1,b
+        move    b1,x1  ; im lo / 2
         move    x:(r7+$05),y0
+        move    x:(r7+$07),y1
+        mpy     y0,x0,a
+        mac     -y1,x1,a
+        asr     #$17,a,a  ; (cr re lo - ci im lo) 2^-23
+        mpy     x0,y1,b
+        mac     x1,y0,b
+        asr     #$17,b,b  ; (ci re lo + cr im lo) 2^-23
+        move    x:(r7+$18),x0
+        move    x:(r7+$0d),y1
+        mac     x0,y1,a  ; + u = norm/4 * lp(x)
+        move    x:(r7+$14),x0
         mac     y0,x0,a  ; + cr re
         move    x:(r7+$15),x1
         move    x:(r7+$07),y1
         mac     -y1,x1,a  ; - ci im
-        mpy     x0,y1,b  ; ci re
+        mac     x0,y1,b  ; + ci re
         mac     x1,y0,b  ; + cr im
-        move    a,x:(r7+$14)
+        move    a,x:(r7+$14)  ; limited, as before (a loud tone at the note fills it)
+        move    a0,x:(r7+$12)
         move    b,x:(r7+$15)
+        move    b0,x:(r7+$13)
         asl     #$2,b,b
+        rnd     b  ; rounded out: a tail below 1/4 LSB reads 0
         move    b,x0
         mpy     x0,x0,a
         move    a,x1
@@ -524,21 +560,43 @@ rzcrun:
         move    x:(r7+$0f),y1
         mpy     y1,x1,a
         add     x0,a
+        tst     a
+        bge     rzqc1l
+        add     #>$1,a
+rzqc1l:
         move    a,x:(r7+$19)
-        move    a,x0
-        move    x:(r7+$0d),y1
-        mpy     x0,y1,a  ; u = norm/4 * lp(x)
-        move    x:(r7+$16),x0
+; 48-bit re/im (quality pass): the low words (raw a0/b0, used >> 1 as positive Q23) carry what
+; the products below the LSB leave, so a ring this close to r = 1 cannot sit in a truncation limit cycle
+        move    x:(r7+$1a),b
+        lsr     #$1,b
+        move    b1,x0  ; re lo / 2
+        move    x:(r7+$1b),b
+        lsr     #$1,b
+        move    b1,x1  ; im lo / 2
         move    x:(r7+$09),y0
+        move    x:(r7+$0b),y1
+        mpy     y0,x0,a
+        mac     -y1,x1,a
+        asr     #$17,a,a  ; (cr re lo - ci im lo) 2^-23
+        mpy     x0,y1,b
+        mac     x1,y0,b
+        asr     #$17,b,b  ; (ci re lo + cr im lo) 2^-23
+        move    x:(r7+$19),x0
+        move    x:(r7+$0d),y1
+        mac     x0,y1,a  ; + u = norm/4 * lp(x)
+        move    x:(r7+$16),x0
         mac     y0,x0,a  ; + cr re
         move    x:(r7+$17),x1
         move    x:(r7+$0b),y1
         mac     -y1,x1,a  ; - ci im
-        mpy     x0,y1,b  ; ci re
+        mac     x0,y1,b  ; + ci re
         mac     x1,y0,b  ; + cr im
-        move    a,x:(r7+$16)
+        move    a,x:(r7+$16)  ; limited, as before (a loud tone at the note fills it)
+        move    a0,x:(r7+$1a)
         move    b,x:(r7+$17)
+        move    b0,x:(r7+$1b)
         asl     #$2,b,b
+        rnd     b  ; rounded out: a tail below 1/4 LSB reads 0
         move    b,x0
         mpy     x0,x0,a
         move    a,x1
@@ -718,6 +776,10 @@ rzdrun:
         move    x:(r7+$0f),y1
         mpy     y1,x1,a
         add     x0,a
+        tst     a
+        bge     rzqdl
+        add     #>$1,a
+rzqdl:
         move    a,x:(r7+$1a)  ; loop lowpass state
         move    a,x:(r7+$19)  ; v
         move    x:(r7+$05),x0
@@ -813,22 +875,30 @@ rzdrun:
         move    x0,a
         mac     y1,x1,a  ; v = d + .3 in
         move    a,x:(r7+$19)
-; side = 0.6 * SIDE * (u1 - u2) (no DC in it: both taps carry the same)
-        move    x:(r7+$12),a
-        move    x:(r7+$13),x0
-        sub     x0,a
-        move    a,x0
+; side = 0.6 SIDE ((u1 - u2) + SK (v - u2)) (quality pass: the SK term). u1 - u2 alone correlates with v
+; (on average Re{H3 H2} - Re{H3} = g^2 - g < 0 over the partials: the right side was 1.5-2.5 dB louder on
+; noise); v - u2 correlates the other way (1 - g). SK = 0.5, measured. As three products: no DC in it
+; (the weights sum to 0), and L + R is still 2 v.
+        move    x:(r7+$12),x0
         move    #>$266666,y1
         mpy     x0,y1,a
+        move    x:(r7+$19),x0
+        move    #>$133333,y1
+        mac     x0,y1,a
+        move    x:(r7+$13),x0
+        move    #>$c66666,y1
+        mac     x0,y1,a
         move    a,x:(r7+$12)
 ; DC block on v (leaky mean, 2^-12, 1.7 Hz): the loop gain at DC is 1/(1 - g)
         move    x:(r7+$19),a
         move    x:(r7+$18),b
+        move    x:(r7+$14),b0  ; 48-bit mean
         sub     b,a
         move    a,x:(r7+$19)
         asr     #$c,a,a
         add     a,b
-        move    b,x:(r7+$18)
+        move    b1,x:(r7+$18)
+        move    b0,x:(r7+$14)
 ; main write: in * mono + v; out = soft clip(0.6 v +- side)
         move    x:(r0),a
         move    x:(r0+n0),x0
@@ -839,6 +909,10 @@ rzdrun:
         mpy     x0,y1,a
         move    x:(r7+$19),x0
         add     x0,a
+        tst     a
+        bge     rzqdw
+        add     #>$1,a
+rzqdw:
         move    a,y:(r5)+
         move    #>$4ccccd,y1
         mpy     x0,y1,a

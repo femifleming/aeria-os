@@ -17,7 +17,7 @@
 ; loaded once for its column of butterflies, the work buffer addressed modulo 2048), the others
 ; butterfly by butterfly (twiddle pointer modulo 1024).
 ;
-; Per side and bin: m = max + 0.375 min of |re|, |im|; gate: m < THR -> the bin is out (m = 0, live
+; Per side and bin: m = max(max + 5/32 min, 27/32 max + 71/128 min) of |re|, |im| (within 1.2 %); gate: m < THR -> the bin is out (m = 0, live
 ; gain 0); H = max(m, floor(H - e H + r)) (e = 1 - decay, from SMR; r in [0, 1) LSB is new every hop:
 ; the decay is exponential on average down to the last LSB, reaches 0, and holds exactly at e = 0); out = (gl x bin + 2 (H - gl m) x random unit phasor) / 8.
 ; gl = 1 - FRZ. The wash is twice the magnitude it replaces: frames with fresh random phases add in
@@ -30,7 +30,7 @@
 ; from Nyquist down to 100 Hz, gain held at 1 at 1000 Hz (a Newton step a call on 1/sqrt).
 ;
 ; WORK IS SPREAD: one hop's job is cut into units of about 1.3-1.7 k instructions; every call is
-; granted 1033 instructions a frame and runs units while its budget is not negative. Only the start of a
+; granted 1061 instructions a frame and runs units while its budget is not negative. Only the start of a
 ; job is fixed to one call (the first of the hop): the last quarter of the previous frame into the
 ; overlap ring (its slots were being played until now), and the windowed copy-in (the input ring is
 ; exactly 1,024 frames, so it is read before this call's input goes in). Then: 8 forward passes
@@ -105,7 +105,7 @@ proc:
         bsr     >sqjob
 sqpnj:
         move    n7,x0
-        move    #>1033,y0
+        move    #>1061,y0
         mpy     y0,x0,a
         asr     a
         move    a0,x0
@@ -420,7 +420,7 @@ sqhpb:
         mpy     y0,x0,a
         bsr     >sqexp
         move    b,x0
-        move    #>$034bc7,y0
+        move    #>$03368f,y0
         mpy     y0,x0,b
 sqhpc:
         move    x:(r7+$2a),a
@@ -807,8 +807,15 @@ sqbng:
         tlt     y0,b
         sub     b,a
         move    a,y0
-        move    #>$300000,y1
+        move    b,x1
+        move    #>$140000,y1
         mac     y1,y0,b
+        move    #>$6c0000,y1
+        mpy     y1,x1,a
+        move    #>$470000,y1
+        mac     y1,y0,a
+        cmp     a,b
+        tlt     a,b
         move    x:(r7+$26),x0
         cmp     x0,b
         move    #0,x1
@@ -849,8 +856,15 @@ sqbng:
         tlt     y0,b
         sub     b,a
         move    a,y0
-        move    #>$300000,y1
+        move    b,x1
+        move    #>$140000,y1
         mac     y1,y0,b
+        move    #>$6c0000,y1
+        mpy     y1,x1,a
+        move    #>$470000,y1
+        mac     y1,y0,a
+        cmp     a,b
+        tlt     a,b
         move    x:(r7+$26),x0
         cmp     x0,b
         move    #0,x1
@@ -928,7 +942,7 @@ sqbnx:
         asr     #2,a,a
         move    a1,x:(r7+$1d)
 sqbnw:
-        move    #>104,y0
+        move    #>118,y0
         mpy     y0,x0,a
         asr     a
         move    a0,x0

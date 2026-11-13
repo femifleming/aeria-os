@@ -19,7 +19,7 @@
 ; output = input bit for bit). Coming up from rest the ring is cleared over 32 dry calls.
 ; Each call one of the four curtains is looked at in turn (brightness, pan levels, line gain).
 ; The taps move by whole frames, so nothing is interpolated: exact.
-; The lines run at 1/4 of the plugin's level and saturate if a long tail stacks past full scale.
+; The lines run at 1/4 of the plugin's level; a rider on what goes into them keeps a long tail of loud sound out of their limit.
 ;
 ; X ring: 8192 words, base a multiple of 8192: the word X:$213 points to (an X address on this effect)
 ; One pointer falls a word a frame; from it: +0 the window (2208 words), then the lines
@@ -28,7 +28,7 @@
 ;   line 2: written at +4608, read at +6259 (1651 frames, 37.4 ms)
 ;   line 3: written at +6259, read at +8190 (1931 frames, 43.8 ms)
 ; (the plugin's 2703 3523 4282 5014 frames x 0.3854; gains set for the same decay time)
-; r7: 00 ST 01 XB 02 RP 03 AMH 04 AML 05 RNG 06 C 07 STEP 08 WW 09 DW 0a SVL 0b SVB 0c INJ 0d WL 0e WR 0f LP0 10 LP1 11 LP2 12 LP3 13 G0 14 G1 15 G2 16 G3 17 CL0 18 CL1 19 CL2 1a CL3 1b CR0 1c CR1 1d CR2 1e CR3 1f CH0 20 CH1 21 CH2 22 CH3 23 CO0 24 CO1 25 CO2 26 CO3 27 CT0 28 CT1 29 CT2 2a CT3 2b CF0 2c CF1 2d CF2 2e CF3 2f QT 30 BLK 31 DAMP 32 RT 33 TLAST 34 OLAST
+; r7: 00 ST 01 XB 02 RP 03 AMH 04 AML 05 RNG 06 C 07 STEP 08 WW 09 DW 0a SVL 0b SVB 0c INJ 0d WL 0e WR 0f LP0 10 LP1 11 LP2 12 LP3 13 G0 14 G1 15 G2 16 G3 17 CL0 18 CL1 19 CL2 1a CL3 1b CR0 1c CR1 1d CR2 1e CR3 1f CH0 20 CH1 21 CH2 22 CH3 23 CO0 24 CO1 25 CO2 26 CO3 27 CT0 28 CT1 29 CT2 2a CT3 2b CF0 2c CF1 2d CF2 2e CF3 2f QT 30 BLK 31 DAMP 32 RT 33 TLAST 34 OLAST 35 RIDE 36 AR
 
 init:
         move    #>$ffffff,m4
@@ -82,6 +82,8 @@ auwz:
         move    #>$ffffff,a
         move    a,x:(r7+$33)
         move    a,x:(r7+$34)
+        move    #>$7fffff,a
+        move    a,x:(r7+$35)
         clr     a
         move    a,x:(r7+$03)
         move    a,x:(r7+$04)
@@ -148,6 +150,11 @@ aurun:
         move    a,x:(r7+$00)
         rts
 auon:
+; ---- what goes into the lines this call: the amount x the rider (1 unless the lines stack up near full scale)
+        move    x:(r7+$03),x0
+        move    x:(r7+$35),y0
+        mpy     y0,x0,a
+        move    a,x:(r7+$36)
 ; ---- SHFT: frames the taps move a frame; UNIS parks tap 1 at the window's top
         move    x:(r6+$3),a
         asr     #$10,a,a
@@ -484,7 +491,7 @@ autaph:
         macr    x1,y0,b
         move    b,x:(r7+$0b)
 ; into the lines: +-(up x amount)/2, at the lines' 1/4 scale
-        move    x:(r7+$03),y0
+        move    x:(r7+$36),y0
         mpy     x1,y0,a
         asr     #$2,a,a
         rnd     a
@@ -623,6 +630,41 @@ auframes:
         nop
         move    r1,x:(r7+$02)
         move    #>$ffffff,m1
+; the rider: the largest of the four lines' damped reads (the last frame) over 0.4 of the line scale rides the
+; injection down 1/4 a call; under it the rider comes back 2^-10 a call. A long TIME on loud sound
+; can no longer stack the lines into their limit (the plugin's float lines would only grow)
+        move    x:(r7+$0f),a
+        abs     a
+        move    x:(r7+$10),b
+        abs     b
+        move    b,x0
+        cmp     x0,a
+        tlt     x0,a
+        move    x:(r7+$11),b
+        abs     b
+        move    b,x0
+        cmp     x0,a
+        tlt     x0,a
+        move    x:(r7+$12),b
+        abs     b
+        move    b,x0
+        cmp     x0,a
+        tlt     x0,a
+        cmp     #>$333333,a
+        move    x:(r7+$35),b
+        ble     aurok
+        move    b,x0
+        move    #>$200000,y0
+        mpy     y0,x0,a
+        sub     a,b
+        bra     aurset
+aurok:
+        move    #>$7fffff,a
+        sub     b,a
+        asr     #$a,a,a
+        add     a,b
+aurset:
+        move    b,x:(r7+$35)
 ; quiet? (the last frame's curtains, both sides, against 512 LSB)
         move    x:(r7+$0d),a
         abs     a

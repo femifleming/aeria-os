@@ -577,7 +577,7 @@ vlnend:
         mac     -x0,y1,b
         move    x:(r7+$37),x0
         mac     x0,y1,a
-        mac     -x0,y1,b
+        mac     x0,y1,b
         asl     #$2,a,a
         move    a,x:(r7+$0d)
         asl     #$2,b,b
