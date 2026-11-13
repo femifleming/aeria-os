@@ -56,7 +56,7 @@ init:
         move    #>$ffffff,m4
         move    r7,r4
         clr     a
-        do      #64,>grizero
+        do      #80,>grizero
         move    a,x:(r4)+
 grizero:
         nop     
@@ -87,11 +87,16 @@ grizero:
 proc:
         move    #>$ffffff,m4
         move    #>$1,n0
+        move    #>$ffffff,m1
+        move    r7,b
+        add     #>$40,b
+        move    b,r1  ; r1 = r7 + $40: the anti-alias low-pass's words
 ; speed/8 = 2^(st/12)/8 by the PITCH chain (Taylor 2^(x/8), three squarings)
         move    x:(r6+$4),a
         asl     #$2,a,a
         move    #>$600000,x0
         sub     x0,a
+        bsr     >grfset  ; the anti-alias low-pass for PTCH (a = PTCH / 32 kept)
         move    a,x0
         move    #>$1d9304,y0
         mpy     y0,x0,a
@@ -422,6 +427,36 @@ grclrlp:
 grnoclr:
         rts     
 grready:
+; anti-alias low-pass: a rounding limit cycle (a few LSB) is cleared (looked for every 8th block)
+        move    x:(r7+$01),a
+        and     #>$000070,a
+        bne     grfkeep
+        move    x:(r1+$6),a
+        abs     a
+        move    x:(r1+$7),b
+        abs     b
+        add     b,a
+        move    x:(r1+$8),b
+        abs     b
+        add     b,a
+        cmp     #>$000030,a
+        bgt     grfkeep
+        clr     a
+        move    a,x:(r1+$6)
+        move    a,x:(r1+$7)
+        move    a,x:(r1+$8)
+grfkeep:
+; the mix and norm glides: per-sample ramps for this block (the old per-sample one-poles' rates)
+        move    x:(r7+$04),a
+        move    x:(r7+$05),b
+        sub     b,a
+        asr     #$7,a,a
+        move    a,x:(r1+$b)
+        move    x:(r7+$0e),a
+        move    x:(r7+$0f),b
+        sub     b,a
+        asr     #$8,a,a
+        move    a,x:(r1+$c)
         move    #>$ffffff,m5
         move    #>$c0,a
         move    r7,x0
@@ -431,24 +466,42 @@ grready:
         add     #>$1,a
         move    a,r5  ; r5 = base + 1 = ring sample 0
         do      n7,>grend
-        move    x:(r7+$04),a
-        move    x:(r7+$05),b
-        sub     b,a
-        asr     #$7,a,a
-        add     a,b
-        move    b,x:(r7+$05)
-        move    x:(r7+$0e),a
-        move    x:(r7+$0f),b
-        sub     b,a
-        asr     #$8,a,a
-        add     a,b
-        move    b,x:(r7+$0f)
+        move    x:(r7+$05),a
+        move    x:(r1+$b),x0
+        add     x0,a
+        move    a,x:(r7+$05)  ; mix += its ramp
+        move    x:(r7+$0f),a
+        move    x:(r1+$c),x0
+        add     x0,a
+        move    a,x:(r7+$0f)  ; norm += its ramp
 ; record at the head (age 0); frozen, the head does not advance, so this
 ; slot (also the oldest, which no grain reads) is all that is written
-        move    x:(r0),a
+; record through the anti-alias low-pass (aa_design.py): w = B (L + R) + 2 A1H w1 + A2 w2;
+; u = w + 2 CH w1 + K w2; v = u + P v1; y/2 = v + K v1 (at or under unison: (L + R)/4 exactly)
+        move    x:(r1+$0),y0
+        move    x:(r0),x0
+        mpy     y0,x0,a
         move    x:(r0+n0),x0
-        add     x0,a
-        asr     a
+        mac     y0,x0,a
+        move    x:(r1+$6),x1
+        move    x:(r1+$1),y0
+        mac     x1,y0,a
+        mac     x1,y0,a
+        move    x:(r1+$7),x0
+        move    x:(r1+$2),y0
+        macr    y0,x0,a  ; w
+        move    x1,x:(r1+$7)
+        move    a,x:(r1+$6)
+        move    x:(r1+$3),y0
+        mac     x1,y0,a
+        mac     x1,y0,a
+        move    x:(r1+$5),y1
+        mac     x0,y1,a  ; u
+        move    x:(r1+$8),x1
+        move    x:(r1+$4),y0
+        macr    x1,y0,a  ; v
+        move    a,x:(r1+$8)
+        macr    y1,x1,a  ; y/2
         move    x:(r7+$01),b
         move    b1,n5
         lua     (r5+n5),r4
@@ -1047,7 +1100,7 @@ grheadok:
         move    x:(r7+$16),x0
         move    x:(r7+$0f),y1
         mpy     x0,y1,a
-        asl     #$3,a,a
+        asl     #$4,a,a  ; x 16: the ring holds y/2
         move    x:(r7+$05),y1
         move    x:(r0),b
         sub     b,a
@@ -1060,7 +1113,7 @@ grheadok:
         move    x:(r7+$17),x0
         move    x:(r7+$0f),y1
         mpy     x0,y1,a
-        asl     #$3,a,a
+        asl     #$4,a,a  ; x 16: the ring holds y/2
         move    x:(r7+$05),y1
         move    x:(r0),b
         sub     b,a
@@ -1072,4 +1125,153 @@ grheadok:
         move    a,x:(r0)+
 grend:
         nop     
+        rts     
+; ---- the anti-alias low-pass coefficients for PTCH (only when it changed; aa_design.py) ----
+grfset:
+        move    a,x:(r1+$a)
+        tst     a
+        bgt     grfup
+        move    #>$800000,x0
+        move    x:(r1+$9),b
+        cmp     x0,b
+        beq     grfout
+        move    x0,x:(r1+$9)
+        move    #>$200000,x0
+        move    x0,x:(r1+$0)
+        clr     b
+        move    b,x:(r1+$1)
+        move    b,x:(r1+$2)
+        move    b,x:(r1+$3)
+        move    b,x:(r1+$4)
+        move    b,x:(r1+$5)
+grfout:
+        move    x:(r1+$a),a
+        rts     
+grfup:
+        move    #>$1cf237,x0
+        cmp     x0,a
+        tlt     x0,a
+        move    #>$660000,x0
+        cmp     x0,a
+        tgt     x0,a
+        move    x:(r1+$9),x0
+        cmp     x0,a
+        bne     grfnew
+        move    x:(r1+$a),a
+        rts     
+grfnew:
+        move    a,x:(r1+$9)
+        sub     #>$41791c,a
+        move    a,x0
+        move    #>$7022ef,y0
+        mpy     y0,x0,a
+        asl     #$2,a,a
+        move    a,y1  ; t
+        move    #>$fae82d,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$0c8a29,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$ecd4fd,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$1c0b20,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$2471bb,a
+        asl     a
+        move    a,x:(r1+$1)
+        move    #>$fc2d0c,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$03f8d2,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$0197e1,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$f73f74,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$d1622d,a
+        asl     a
+        move    a,x:(r1+$2)
+        move    #>$fc76eb,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$066fef,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$088207,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$cbfd8f,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$07448f,a
+        asl     a
+        move    a,x:(r1+$3)
+        move    #>$fa6455,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$0808af,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$f8ba34,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$0f7ea7,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$2759fc,a
+        asl     a
+        move    a,x:(r1+$4)
+        move    #>$7fffff,x0
+        move    x0,x:(r1+$5)
+        move    #>$040000,a
+        move    x:(r1+$1),x0
+        move    #>$080000,y0
+        mac     -y0,x0,a
+        move    x:(r1+$2),x0
+        move    #>$040000,y0
+        mac     -y0,x0,a
+        move    a,x1  ; (1 - 2 A1H - A2) / 32
+        move    #>$7fffff,a
+        move    x:(r1+$4),x0
+        sub     x0,a
+        move    a,y0  ; 1 - P
+        mpy     x1,y0,a
+        move    a1,a
+        move    x:(r1+$3),b
+        asr     b
+        add     #>$400000,b
+        move    b,x0  ; (1 + CH) / 2
+        andi    #$fe,ccr
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        div     x0,a
+        move    a0,x:(r1+$0)
+        move    x:(r1+$a),a
         rts     

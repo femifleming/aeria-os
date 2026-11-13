@@ -33,10 +33,22 @@ Per-mode names/defaults (ModeView): mode 0: names {4: '---'} defaults {0: 70, 1:
   order), computed per block for the block's end and glided per sample; FDBK 0..0.85 through
   x - x^3/3 and a 7 Hz DC blocker (StoreFX uses tanh and no DC block); out = 0.7 (x + v).
 
+## Aliasing (13 Nov 2026, "stop aliasing")
+
+- RING: the carrier step (FREQ x (1 + 6 FOLW env)) is held to 0.9 x Nyquist (19,845 Hz). Before, FREQ 127 FOLW 127
+  asked for ~35 kHz, which folded to a 9.3 kHz carrier. (+3 instructions a sample.)
+- RING: an input low-pass that tracks the carrier (2-pole Butterworth, zeros at Nyquist, corner fs/2 - fc, from the
+  carrier at the start of each block; off while fc < 3 kHz): a partial at f makes |f - fc| and f + fc, and the upper one
+  folded back down at the same level as the lower. Now a partial above the corner is low-passed (both its sidebands go
+  down together): at fc = 19.8 kHz a 5 / 8 / 12 kHz partial's folded sideband is 15 / 24 / 34 dB under a 1 kHz
+  partial's (before: 3 dB, as loud). RING mode costs ~190 instructions a sample now (was ~149); PHSR (232 / 235) is
+  still the dearest mode, so the effect's cost does not change. gen.py CLAMP=0 RLP=0 builds the code before.
+
 ## Cost
 
-- Static (tools/build/cycle_count.py, per-sample loop, worst mode): **208 cycles/sample**
-- dsp_host (meter minus a null effect, dearest settings, 0.5 FS noise): mean **222.8**, worst block 225.2 instructions/sample (instructions, no memory-contention stalls)
+- Static (tools/build/cycle_count.py, per-sample loop, worst mode): **212 cycles/sample**
+- dsp_host (meter minus a null effect, dearest settings (PHSR), 0.5 FS noise): mean **232.4**, worst block 235.3 instructions/sample
+  (unchanged by the 13 Nov 2026 RING aliasing work; RING mode itself ~190, was ~149). Code: 885 words (727 before).
 - Budget target: <= 300 per effect (8 effects share ~3,100 on one core)
 
 ## Test (`../tools/run.sh python3 /aeria/ringph/test.py`)

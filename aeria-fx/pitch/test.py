@@ -135,5 +135,49 @@ def d2(v): return max(abs(v[i + 1] - 2 * v[i] + v[i - 1]) for i in range(22050, 
 rep.check('FDBK jumping 0 <-> 127 every 93 ms on a 300 Hz sine (unison): largest second difference < 0.004 FS '
           '(the feedback gain ramps per sample; per-block steps gave 0.0165)', d2(L) < 0.004 and d2(R) < 0.004,
           f'L {d2(L):.5f} R {d2(R):.5f} FS; no knob moves {d2(L0):.5f} FS')
+# ---- aliasing (13 Nov 2026, "stop aliasing"): the anti-alias low-pass on each side's line input -----------------------
+sys.path.insert(0, '/aeria/pitch')
+import aa_design as AD
+# 1. the DSP's coefficient words (r7+$2c..$31, after the per-block update) are aa_design's for SHFT + FINE
+trk = A.BUILD / 'pitch_aa.track'
+worstw = 0
+for sh, fine in ((24, 64), (25, 64), (24, 127), (28, 0), (31, 64), (36, 64), (40, 90), (43, 64), (48, 64), (48, 127), (12, 64), (0, 0)):
+    p = list(d); p[0] = sh; p[1] = fine
+    A.render('pitch_aatrk', mems, init, proc, p, None, 4, extra=['-track', '2c,2d,2e,2f,30,31', '-trackout', str(trk)])
+    got = [int(v) for v in trk.read_text().split('\n')[-2].split()[1:]]
+    want = AD.dsp_words(sh - 24 + (fine / 128 - 0.5) * 2)       # FINE word/128: (v - 64)/64 semitones
+    worstw = max(worstw, max(abs(((g - w + (1 << 23)) % (1 << 24)) - (1 << 23)) for g, w in zip(got, [v & 0xffffff for v in want])))
+rep.check('anti-alias low-pass: the coefficient words the DSP computes per SHFT + FINE (degree-4 polynomials, B divided '
+          'out for unity DC gain) are aa_design.py\'s, within 64 LSB (at or under unison: B = 1, the rest 0)', worstw <= 64,
+          f'worst difference {worstw} LSB over 12 settings')
+# 2. sines above fs / (2 ratio): what folds back under 16 kHz, re the shifted 1 kHz-out level; the top kept
+rows, ok = [], True
+for st, fins in ((7, (19100, 20000)), (12, (14300, 15000, 18000, 21000)), (19, (9600, 11000, 14100, 18000)),
+                 (24, (7200, 8400, 10500, 18000))):
+    r = 2 ** (st / 12)
+    p = list(d); p[0] = 24 + st; p[3] = 0; p[4] = 127; p[5] = 127; p[WIDE] = 0
+    def lvl(f, fo):
+        # power within +-150 Hz of fo (the splices put sidebands round every line): Hann-windowed bins 5.4 Hz apart
+        L, R, _ = A.render(f'pitch_al_{st}_{f}', mems, init, proc, p, A.sine(f, 0.5, 2500 * 16), 2500)
+        nn = 8192
+        tot = 0.0
+        for k0 in range(-3, 1):
+            seg = L[len(L) + (k0 - 1) * nn:len(L) + k0 * nn] if k0 else L[-nn:]
+            seg = [v * (0.5 - 0.5 * math.cos(2 * math.pi * i / nn)) for i, v in enumerate(seg)]
+            for k in range(-28, 29):
+                tot += A.goertzel(seg, fo + k * 44100 / nn) ** 2
+        return math.sqrt(tot)
+    ref = lvl(round(1000 / r), 1000)
+    al = []
+    for f in fins:
+        fo = (f * r) % 44100
+        fo = 44100 - fo if fo > 22050 else fo
+        al.append((f, fo, A.db(lvl(f, fo) / ref)))
+    top = A.db(lvl(round(8000 / r), 8000) / ref)
+    ok &= all(v < -30 for _, _, v in al) and top > -6
+    rows.append(f'+{st}: ' + ', '.join(f'{f / 1000:g}k -> {fo / 1000:.1f}k {v:.1f} dB' for f, fo, v in al) + f'; 8 kHz out {top:+.1f} dB')
+rep.check('aliasing: a 0.5 FS sine above fs / (2 ratio) at +7 / +12 / +19 / +24 (MIX 127, WIDE 0): what lands under 16 kHz '
+          'is >= 30 dB under the shifted 1 kHz (before the low-pass, the same measure: -1.0 .. -8.7 dB, about as loud as the wanted sound); the '
+          'shifted 8 kHz within 6 dB of it', ok, '; '.join(rows))
 rep.note('cost', f'static {cost[0]} cycles/sample; dsp_host mean {cost[2]:.1f}, worst block {cost[1]:.1f} instr/sample')
 rep.save('/aeria/pitch/test_results.md')

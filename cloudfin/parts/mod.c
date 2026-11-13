@@ -269,13 +269,17 @@ static void mod_draw(void)
     /* the source's live value, as a bar, and its three settings */
     int src = m->r[mod_sel].src;
     if (src) { int v = ms_val[src]; int c = 64, w = v * 60 / 1000; for (int x = c; x != c + w; x += w > 0 ? 1 : -1) px(x, 46); px(c, 45); px(c, 47); }
-    for (int e = 0; e < 3; e++) {
-        int lo, hi; const char *lab; int id = mod_param_of(e, &lo, &hi, &lab);
-        if (id < 0) break;
-        int v = *mod_param_ptr(id);
-        text(70 + e * 20, 52, lab, 1);
-        if (id < 9 && id % 3 == 1) text(70 + e * 20, 58, lfo_shape[v], 1); else { num(n, v); text(70 + e * 20, 58, n, 1); }
+    if (!src) { text(1, 52, "A ROUT B SRC C DPTH", 1); text(1, 58, "YES LEARN  FUNC+YES CLR", 1); }   /* the help, until a source is chosen */
+    else {
+        /* the route's own knobs across the bottom: A ROUT, B SRC, C DPTH, then the source's D E F (fixed 13 Nov 2026:
+         * they were drawn over the help line) */
+        static const char *const lab3[3] = {"ROUT", "SRC", "DPTH"};
+        for (int e = 0; e < 6; e++) {
+            int x = 1 + e * 21; const char *lab = 0; char v[8] = "";
+            if (e < 3) { lab = lab3[e]; if (e == 0) num(v, mod_sel + 1); else if (e == 1) { int k = 0; const char *q = ms_name[src]; while (q[k] && k < 4 && q[k] != ' ') { v[k] = q[k]; k++; } if (src >= MS_LFO1 && src <= MS_LFO3) v[k++] = (char)('1' + src - MS_LFO1); v[k] = 0; } else signed_text(v, m->r[mod_sel].depth); }
+            else { int lo, hi; int id = mod_param_of(e - 3, &lo, &hi, &lab); if (id < 0) continue; int pvv = *mod_param_ptr(id); if (id < 9 && id % 3 == 1) { int k = 0; while (lfo_shape[pvv][k]) { v[k] = lfo_shape[pvv][k]; k++; } v[k] = 0; } else num(v, pvv); }
+            text(x, 52, lab, 1); text(x, 58, v, 1);
+        }
     }
-    text(1, 52, "A ROUT B SRC C DPTH", 1); text(1, 58, "YES LEARN  FUNC+YES CLR", 1);
 }
 #endif

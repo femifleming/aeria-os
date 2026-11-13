@@ -66,12 +66,24 @@ FRZ (slot 6) and REV (slot 8).
   within 2 LSB on the old engine.
 - DENS, PTCH, MIX, FRZ, REV, the LCG, pans and normalisation are as before.
 
+## Anti-alias low-pass (13 Nov 2026, "stop aliasing"; gen.py AA=1, the default)
+
+- Pitched-up grains read the ring 2^(PTCH/12) x as fast as it is written: everything above fs / (2 ratio) folded back
+  down (band noise there came out within 0.2-2.9 dB of the wanted sound). The recording is now y/2 = H (L + R)/4, H an
+  order-3 elliptic-type low-pass tracking PTCH (`aa_design.py`, the same family as PITCH): what lands under 16 kHz is
+  39-42 dB down, what lands at 16-22 kHz 20-29 dB down, the top (12-14 kHz out) unchanged. At or under unison: no
+  filter ((L + R)/4 exactly). The output gain is x 16 instead of x 8 (the ring holds y/2: no clipping on overshoot).
+- Its words live at r7 + $40..$4c through r1 (r7 displacements stop at 63); init zeroes 80 words. Coefficients only in
+  a block where PTCH changed. Limit-cycle flush every 8th block of a live head.
+- The mix and norm glides became per-sample ramps set once a block (the same rates; 3.4 instructions a sample cheaper)
+  so the dearest settings stay under the gate's 320.
+
 ## Cost (both builds, dearest settings, 0.5 FS noise)
 
-- dsp_host, meter minus a null effect: mean **297.4 / 297.7** instructions/sample (test / long),
-  worst block 303.6 / 303.8. Reference, same settings: pre-table build 234.9, hand-patched 290.9.
+- dsp_host, meter minus a null effect: mean **315.7 / 316.0** instructions/sample (test / long),
+  worst block 322.9 / 323.2 (13 Nov 2026, with the anti-alias low-pass; before: 297.6 / 298.0, 304.3 / 304.6). Reference, same settings: pre-table build 234.9, hand-patched 290.9.
 - Static (cycle_count.py, every grain restarting in the same sample, which cannot happen): 606.
-- Code: 1,037 words (long), 1,032 (test).
+- Code: 1,324 words (long), 1,319 (test) (before the low-pass 1,090 / 1,085).
 
 ## Test (`../tools/run.sh python3 /aeria/grains/test.py`)
 

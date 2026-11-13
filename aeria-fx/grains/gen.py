@@ -41,12 +41,96 @@ RING = os.environ.get('RING', 'long')
 AGE = int(os.environ.get('AGE', '48'))
 WINFIX = int(os.environ.get('WINFIX', '1'))
 SNAP = int(os.environ.get('SNAP', '1'))     # 1 (default): grain starts on whole samples (quality pass, 12 Nov 2026); 0: as before
+#   AA=1 (default)       the anti-alias low-pass on the recording (13 Nov 2026, "stop aliasing"; aa_design.py):
+#                        pitched-up grains read the ring 2^(PTCH/12) x as fast, so what sat above fs / (2 ratio)
+#                        folded back down. The ring now records y/2 = H (L + R)/4, H an order-3 elliptic-type
+#                        low-pass tracking PTCH (none at or under unison: (L + R)/4 exactly); the output gain is
+#                        x 16 instead of x 8. The mix and norm glides become per-sample ramps set once a block
+#                        (the same rates, 3.4 instructions a sample cheaper). AA=0: the build before. AGE=48 only.
+AA = int(os.environ.get('AA', '1'))
 assert RING in ('long', 'test') and AGE in (24, 48)
 N = {'long': 35280, 'test': 15870}[RING]   # ring words
 P48 = AGE == 48
 assert P48 or RING == 'test'
 assert WINFIX or not P48
-DFULL = int(os.environ.get('DFULL', '1')) and P48   # DENS 127 = four full grains (1 + 3 v/127, the display law); 0: 3 v/128 as before
+DFULL = int(os.environ.get('DFULL', '1')) and P48
+AA = AA and P48
+if AA:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import aa_design as AD  # noqa: E402
+# the low-pass's words at r1 = r7 + $40 (r7 displacements stop at 63; r7 + $40..$4c is zeroed by init)
+AW = dict(B=0, A1H=1, A2=2, CH=3, P=4, K=5, W1=6, W2=7, V1=8, SC=9, S32=10, MR=11, NR=12)
+
+
+def ax(name):
+    return f'x:(r1+${AW[name]:x})'
+
+
+def h24(v):
+    return f'#>${v & 0xffffff:06x}'
+
+
+def aa_update():
+    """subroutine grfset: a = s32 (PTCH semitones / 32) in and out. Only when it changed: at or under unison
+    B = 1/4, the rest 0; above, A1H A2 CH P = degree-4 polynomials in t (aa_design.POLY), K = 1,
+    B = (1 - 2 A1H - A2)(1 - P) / (16 (1 + CH)): y/2 at unity DC gain."""
+    out = ['; ---- the anti-alias low-pass coefficients for PTCH (only when it changed; aa_design.py) ----',
+           'grfset:', ins('move', 'a', ax('S32')), ins('tst', 'a'), ins('bgt', 'grfup'),
+           ins('move', '#>$800000', 'x0'), ins('move', ax('SC'), 'b'), ins('cmp', 'x0', 'b'), ins('beq', 'grfout'),
+           ins('move', 'x0', ax('SC')), ins('move', '#>$200000', 'x0'), ins('move', 'x0', ax('B')), ins('clr', 'b')]
+    out += [ins('move', 'b', ax(nm)) for nm in ('A1H', 'A2', 'CH', 'P', 'K')]
+    out += ['grfout:', ins('move', ax('S32'), 'a'), ins('rts'),
+            'grfup:', ins('move', h24(AD.q23(AD.SMIN / 32)), 'x0'), ins('cmp', 'x0', 'a'), ins('tlt', 'x0', 'a'),
+            ins('move', h24(AD.q23(AD.SMAX / 32)), 'x0'), ins('cmp', 'x0', 'a'), ins('tgt', 'x0', 'a'),
+            ins('move', ax('SC'), 'x0'), ins('cmp', 'x0', 'a'), ins('bne', 'grfnew'),
+            ins('move', ax('S32'), 'a'), ins('rts'),
+            'grfnew:', ins('move', 'a', ax('SC')), ins('sub', h24(AD.q23(AD.UC)), 'a'), ins('move', 'a', 'x0'),
+            ins('move', h24(AD.q23(1 / AD.UW / 4)), 'y0'), ins('mpy', 'y0', 'x0', 'a'), ins('asl', '#$2', 'a', 'a'),
+            ins('move', 'a', 'y1', c='t')]
+    for k, nm in enumerate(('A1H', 'A2', 'CH', 'P')):
+        row = AD.POLY[k]
+        out += [ins('move', h24(row[AD.DEG]), 'a')]
+        for i in range(AD.DEG - 1, -1, -1):
+            out += [ins('move', 'a', 'x0'), ins('mpy', 'x0', 'y1', 'a'), ins('add', h24(row[i]), 'a')]
+        out += [ins('asl', 'a'), ins('move', 'a', ax(nm))]
+    out += [ins('move', '#>$7fffff', 'x0'), ins('move', 'x0', ax('K')),
+            ins('move', q(1 / 32), 'a'), ins('move', ax('A1H'), 'x0'), ins('move', q(1 / 16), 'y0'), ins('mac', '-y0', 'x0', 'a'),
+            ins('move', ax('A2'), 'x0'), ins('move', q(1 / 32), 'y0'), ins('mac', '-y0', 'x0', 'a'),
+            ins('move', 'a', 'x1', c='(1 - 2 A1H - A2) / 32'), ins('move', '#>$7fffff', 'a'), ins('move', ax('P'), 'x0'),
+            ins('sub', 'x0', 'a'), ins('move', 'a', 'y0', c='1 - P'), ins('mpy', 'x1', 'y0', 'a'), ins('move', 'a1', 'a'),
+            ins('move', ax('CH'), 'b'), ins('asr', 'b'), ins('add', '#>$400000', 'b'), ins('move', 'b', 'x0', c='(1 + CH) / 2')]
+    out += div24() + [ins('move', 'a0', ax('B')), ins('move', ax('S32'), 'a'), ins('rts')]
+    return out
+
+
+def aa_record():
+    """(L + R) through the low-pass; a = y/2 (rounded), for the ring"""
+    return ['; record through the anti-alias low-pass (aa_design.py): w = B (L + R) + 2 A1H w1 + A2 w2;',
+            '; u = w + 2 CH w1 + K w2; v = u + P v1; y/2 = v + K v1 (at or under unison: (L + R)/4 exactly)',
+            ins('move', ax('B'), 'y0'), ins('move', 'x:(r0)', 'x0'), ins('mpy', 'y0', 'x0', 'a'),
+            ins('move', 'x:(r0+n0)', 'x0'), ins('mac', 'y0', 'x0', 'a'),
+            ins('move', ax('W1'), 'x1'), ins('move', ax('A1H'), 'y0'), ins('mac', 'x1', 'y0', 'a'), ins('mac', 'x1', 'y0', 'a'),
+            ins('move', ax('W2'), 'x0'), ins('move', ax('A2'), 'y0'), ins('macr', 'y0', 'x0', 'a', c='w'),
+            ins('move', 'x1', ax('W2')), ins('move', 'a', ax('W1')),
+            ins('move', ax('CH'), 'y0'), ins('mac', 'x1', 'y0', 'a'), ins('mac', 'x1', 'y0', 'a'),
+            ins('move', ax('K'), 'y1'), ins('mac', 'x0', 'y1', 'a', c='u'),
+            ins('move', ax('V1'), 'x1'), ins('move', ax('P'), 'y0'), ins('macr', 'x1', 'y0', 'a', c='v'),
+            ins('move', 'a', ax('V1')), ins('macr', 'y1', 'x1', 'a', c='y/2')]
+
+
+def aa_flush():
+    """a rounding limit cycle (a few LSB) cleared; looked at every 8th block of a live head (index bits 4-6)"""
+    return ['; anti-alias low-pass: a rounding limit cycle (a few LSB) is cleared (looked for every 8th block)',
+            ins('move', 'x:(r7+$01)', 'a'), ins('and', '#>$000070', 'a'), ins('bne', 'grfkeep'),
+            ins('move', ax('W1'), 'a'), ins('abs', 'a'), ins('move', ax('W2'), 'b'), ins('abs', 'b'), ins('add', 'b', 'a'),
+            ins('move', ax('V1'), 'b'), ins('abs', 'b'), ins('add', 'b', 'a'), ins('cmp', '#>$000030', 'a'),
+            ins('bgt', 'grfkeep'), ins('clr', 'a'), ins('move', 'a', ax('W1')), ins('move', 'a', ax('W2')),
+            ins('move', 'a', ax('V1')), 'grfkeep:',
+            '; the mix and norm glides: per-sample ramps for this block (the old per-sample one-poles\' rates)',
+            ins('move', 'x:(r7+$04)', 'a'), ins('move', 'x:(r7+$05)', 'b'), ins('sub', 'b', 'a'), ins('asr', '#$7', 'a', 'a'),
+            ins('move', 'a', ax('MR')),
+            ins('move', 'x:(r7+$0e)', 'a'), ins('move', 'x:(r7+$0f)', 'b'), ins('sub', 'b', 'a'), ins('asr', '#$8', 'a', 'a'),
+            ins('move', 'a', ax('NR'))]   # DENS 127 = four full grains (1 + 3 v/127, the display law); 0: 3 v/128 as before
 NL = N - 1 if P48 else N   # ring length in samples (AGE=48: one of the N words is the mirror)
 M = 48               # margin at either end of the ring, samples
 R = NL - 2 * M - 2   # usable age span
@@ -210,7 +294,7 @@ def window():
 
 
 L = [H, 'init:', ins('move', '#>$ffffff', 'm4'), ins('move', 'r7', 'r4'), ins('clr', 'a'),
-     ins('do', '#64', '>grizero'), ins('move', 'a', 'x:(r4)+'), 'grizero:', ins('nop'),
+     ins('do', '#80' if AA else '#64', '>grizero'), ins('move', 'a', 'x:(r4)+'), 'grizero:', ins('nop'),
      ins('move', 'x:>$213', 'r4'), ins('move', 'x:(r4)', 'a'), ins('move', 'a', 'x:(r7+$00)'),
      *([] if P48 else [ins('move', 'a', 'x:(r7+$01)')]), ins('move', f'#>${NCLR:02x}', 'a'), ins('move', 'a', 'x:(r7+$02)'),
      ins('move', '#>$2b5d1f', 'a'), ins('move', 'a', 'x:(r7+$03)', c='LCG seed')]
@@ -220,10 +304,13 @@ for k in range(GR):
 L += [ins('rts')]
 
 # ================================================================ per block
-L += ['proc:', ins('move', '#>$ffffff', 'm4'), ins('move', '#>$1', 'n0'),
+L += ['proc:', ins('move', '#>$ffffff', 'm4'), ins('move', '#>$1', 'n0')] + ([
+      ins('move', '#>$ffffff', 'm1'), ins('move', 'r7', 'b'), ins('add', '#>$40', 'b'),
+      ins('move', 'b', 'r1', c='r1 = r7 + $40: the anti-alias low-pass\'s words')] if AA else []) + [
       '; speed/8 = 2^(st/12)/8 by the PITCH chain (Taylor 2^(x/8), three squarings)',
       ins('move', 'x:(r6+$4)', 'a'), ins('asl', '#$2', 'a', 'a'), ins('move', q(0.75), 'x0'),
-      ins('sub', 'x0', 'a'), ins('move', 'a', 'x0'),
+      ins('sub', 'x0', 'a')] + ([ins('bsr', '>grfset', c='the anti-alias low-pass for PTCH (a = PTCH / 32 kept)')] if AA else []) + [
+      ins('move', 'a', 'x0'),
       ins('move', q(math.log(2) / 3), 'y0'), ins('mpy', 'y0', 'x0', 'a'), ins('move', 'a', 'y0'),
       ins('move', q(1 / 192), 'x0'), ins('mpy', 'y0', 'x0', 'a'), ins('add', q(1 / 48), 'a'),
       ins('move', 'a', 'x0'), ins('mpy', 'y0', 'x0', 'a'), ins('add', q(1 / 16), 'a'),
@@ -333,7 +420,7 @@ if P48:
           ins('clr', 'a'), ins('do', f'#{CH}', '>grclrlp'),
           ins('move', 'a', 'y:(r4)+'), 'grclrlp:', ins('nop'),
           'grnoclr:', ins('rts'),
-          'grready:', ins('move', '#>$ffffff', 'm5'),
+          'grready:'] + (aa_flush() if AA else []) + [ins('move', '#>$ffffff', 'm5'),
           ins('move', '#>$c0', 'a'), ins('move', 'r7', 'x0'), ins('add', 'x0', 'a'),
           ins('move', 'a', 'x:(r7+$15)', c='the window table\'s end, r7 + $c0, for the loop'),
           ins('move', 'x:(r7+$00)', 'a'), ins('add', '#>$1', 'a'), ins('move', 'a', 'r5', c='r5 = base + 1 = ring sample 0'),
@@ -347,10 +434,14 @@ else:
           ins('move', '#>$ffffff', 'n4'), ins('move', 'x:(r7+$01)', 'r5'), ins('do', 'n7', '>grend')]
 
 # ================================================================ per sample
-L += smooth(0x04, 0x05, 7) + smooth(0x0e, 0x0f, 8)
+if AA:
+    L += [ins('move', 'x:(r7+$05)', 'a'), ins('move', ax('MR'), 'x0'), ins('add', 'x0', 'a'), ins('move', 'a', 'x:(r7+$05)', c='mix += its ramp'),
+          ins('move', 'x:(r7+$0f)', 'a'), ins('move', ax('NR'), 'x0'), ins('add', 'x0', 'a'), ins('move', 'a', 'x:(r7+$0f)', c='norm += its ramp')]
+else:
+    L += smooth(0x04, 0x05, 7) + smooth(0x0e, 0x0f, 8)
 L += ['; record at the head (age 0); frozen, the head does not advance, so this',
       '; slot (also the oldest, which no grain reads) is all that is written',
-      ins('move', 'x:(r0)', 'a'), ins('move', 'x:(r0+n0)', 'x0'), ins('add', 'x0', 'a'), ins('asr', 'a')] + ([
+      ] + (aa_record() if AA else [ins('move', 'x:(r0)', 'a'), ins('move', 'x:(r0+n0)', 'x0'), ins('add', 'x0', 'a'), ins('asr', 'a')]) + ([
       ins('move', 'x:(r7+$01)', 'b'), ins('move', 'b1', 'n5'), ins('lua', '(r5+n5)', 'r4'),
       ins('move', 'a', 'y:(r4)')] if P48 else [ins('move', 'a', 'y:(r5)')]) + [ins('clr', 'a'), ins('move', 'a', 'x:(r7+$16)'), ins('move', 'a', 'x:(r7+$17)')]
 for k in range(GR):
@@ -430,9 +521,9 @@ if P48:
 L += ['; ---- out = sum * norm * 8 (norm word = 1/(2 max(2,sum)), pans carry 1/2) ----']
 for sl in (0x16, 0x17):
     L += [ins('move', f'x:(r7+${sl:02x})', 'x0'), ins('move', 'x:(r7+$0f)', 'y1'), ins('mpy', 'x0', 'y1', 'a'),
-          ins('asl', '#$3', 'a', 'a')] + mix(mixslot=0x05)
+          ins('asl', '#$4' if AA else '#$3', 'a', 'a', c='x 16: the ring holds y/2' if AA else '')] + mix(mixslot=0x05)
 if P48:
-    L += ['grend:', ins('nop'), ins('rts')]
+    L += ['grend:', ins('nop'), ins('rts')] + (aa_update() if AA else [])
 else:
     L += ['; advance the head by adv (0 when frozen)',
           ins('move', 'x:(r7+$0d)', 'a'), ins('asr', HSH, 'a', 'a'), ins('move', 'a1', 'n5'), ins('nop'),

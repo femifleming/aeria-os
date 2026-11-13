@@ -34,10 +34,27 @@ FX2 id 0x1b in `manifest.py` is PROVISIONAL: choose a free id at integration.
 - Smoothing per sample: head speed (48-bit, 23 ms), window (48-bit, ~1.5 s), feedback, tone,
   mix (asr 8, mix lands exactly on its target outside the loop). 128 dry calls clear the ring.
 
+## Anti-alias low-pass (13 Nov 2026, "stop aliasing")
+
+- An up-shift reads the line `ratio` x as fast as it is written, so what sat above fs / (2 ratio) folded back down
+  (a 0.5 FS sine above it came out only 1-9 dB under the wanted sound). Each side's line input (input + feedback)
+  now goes through an order-3 elliptic-type low-pass (biquad with a zero pair on the unit circle + a real pole with a
+  zero at Nyquist) that tracks SHFT + FINE: what would land under 16 kHz is >= 37 dB down (measured 39-65 dB), the
+  shifted top is kept to within ~1 dB up to 16 kHz out at +12 and 14 kHz out at +24. At or under unison the filter is
+  off (B = 1 - 2^-23, the rest 0). Design and fit: `aa_design.py`; `aa_patch.py` writes pitch.asm from
+  pitch.asm.preaa (the hand-written source before it).
+- Coefficients: degree-4 polynomials in the semitones, evaluated only in a block where SHFT + FINE changed, B divided
+  out for unity DC gain (that block: ~7 instructions a sample more). Rounding limit cycles (a few LSB) in the filter
+  states are cleared, looked for every 8th block. r7 words $2c..$3a.
+- To stay under the gate's 320 budget the mix glide became a per-sample ramp set once a block (the same 1/256 a sample
+  rate as the old one-pole; 2 instructions a sample cheaper).
+
 ## Cost
 
-- Static (tools/build/cycle_count.py, per-sample loop, worst mode): **204 cycles/sample**
-- dsp_host (meter minus a null effect, dearest settings, 0.5 FS noise): mean **195.4**, worst block 195.4 instructions/sample (instructions, no memory-contention stalls)
+- Static (tools/build/cycle_count.py, per-sample loop, worst mode): **336 cycles/sample** (298 before the anti-alias low-pass)
+- dsp_host (meter minus a null effect, dearest settings, 0.5 FS noise): mean **317.8**, worst block 319.2 instructions/sample
+  (278.6 / 278.6 before); a block where SHFT + FINE changed (coefficient update): 326.7
+- Code: 802 words (567 before), P:$34000-$34321: under WARM at $34400
 - Budget target: <= 300 per effect (8 effects share ~3,100 on one core)
 
 ## Test (`../tools/run.sh python3 /aeria/pitch/test.py`)

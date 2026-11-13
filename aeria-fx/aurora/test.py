@@ -18,7 +18,7 @@ for b in G.BUILDS:
 rep = A.Report('AURORA')
 DEAR = {'AMT': 127, 'TIME': 127, 'TONE': 127, 'SHFT': 3}
 mod, names, d, mems, init, proc, cost = T.standard(
-    rep, '/aeria/aurora/aurora_test.asm', 'AERIA AURORA', '/aeria/aurora/manifest.py', DEAR, cost_limit=200,
+    rep, '/aeria/aurora/aurora_test.asm', 'AERIA AURORA', '/aeria/aurora/manifest.py', DEAR, cost_limit=225,
     build_note='test build, ring at X:$10000')
 NUL = A.null_cost()['max_per_frame']
 ON = T.P(names, d, AMT=127)
@@ -70,6 +70,8 @@ def model(x, nblocks, time=64, tone=64, step=1, target=1.0):
     def win(cc):
         return math.sin(math.pi * cc / Wn) ** 2
 
+    fb, fa1, fa2, fcc, fpp, fk = (v / (1 << 23) for v in G.aa_words(step + 1))
+    fw1 = fw2 = fv1 = 0.0
     for b in range(nblocks):
         amt += amc * (target - amt)
         if step == 0:
@@ -77,6 +79,12 @@ def model(x, nblocks, time=64, tone=64, step=1, target=1.0):
         dw = (win((c - 16 * step) % Wn) - ww) / 16
         for i in range(16):
             m = x[b * 16 + i]
+            fw = fb * 2 * m + 2 * fa1 * fw1 + fa2 * fw2          # the anti-alias low-pass (13 Nov 2026)
+            fu = fw + 2 * fcc * fw1 + fk * fw2
+            fw2, fw1 = fw1, fw
+            fv = fu + fpp * fv1
+            m = 2 * (fv + fk * fv1)
+            fv1 = fv
             ring[wp] = m
             c = (c - step) % Wn
             t1 = ring[(wp - (c + 2)) % len(ring)]
@@ -318,6 +326,47 @@ for tag, p, amp, secs in (('rq25', ON, 0.25, 10), ('rq90', ON, 0.9, 20),
 rep.check('the rider: the lines (their damped reads, sampled a call) never reach their limit, even at T60 35 s on full-scale '
           'noise (before the quality pass, 1.0 FS noise for 40 s at TIME 127 TONE 127: line peak 0.998 / 0.999 and 5 / 4 calls at the limit); at the plugin\'s '
           'settings on 0.25 FS noise it never moves', ok, '; '.join(rows))
+
+# ---- 8. aliasing (13 Nov 2026, "stop aliasing"): the anti-alias low-pass in front of the window ---------------------------
+def bandnoise(lo, hi, n, rms_=0.1, seed=7, k=48):
+    """k random-phase sines spread over [lo, hi] (pure python), scaled to rms_ FS"""
+    import random
+    rg = random.Random(seed)
+    acc = [0.0] * n
+    for j in range(k):
+        f = lo + (hi - lo) * (j + rg.random()) / k
+        w = 2 * math.pi * f / FSR
+        ph = rg.random() * 2 * math.pi
+        rot = complex(math.cos(w), math.sin(w))
+        z = complex(math.cos(ph), math.sin(ph))
+        for i in range(n):
+            acc[i] += z.imag
+            z *= rot
+    sc = rms_ * A.FS / math.sqrt(sum(v * v for v in acc) / n)
+    return [round(v * sc) for v in acc]
+
+
+rows, ok = [], True
+secs = 3
+blocks = secs * FSR // 16
+n = blocks * 16
+for sh, r in ((1, 2), (2, 3), (3, 4)):
+    p = T.P(names, d, AMT=127, TONE=127, SHFT=sh)
+
+    def wetdb(lo, hi, tag):
+        x = bandnoise(lo, hi, n)
+        L, R, _ = run(f'al{sh}_{tag}', p, x, blocks)
+        return A.db(A.rms([a + b - 2 * c for a, b, c in zip(L[FSR:], R[FSR:], x[FSR:])]) + 1e-12)
+    ref = wetdb(2000 / r, 4000 / r, 'ref')
+    low = wetdb((FSR - 16000) / r, 21000, 'low') - ref                  # aliases landing under 16 kHz (mostly)
+    high = wetdb(FSR / 2 / r + 100, (FSR - 16000) / r, 'high') - ref     # aliases landing 16 .. 22 kHz
+    top = wetdb(12000 / r, 14000 / r, 'top') - ref                       # the shimmer's own top (12-14 kHz out)
+    ok &= low < -30 and high < -20 and top > -10
+    rows.append(f'{G.STEPS[sh]}: landing < 16 kHz {low:.1f} dB, 16-22 kHz {high:.1f} dB, wanted 12-14 kHz out {top:+.1f} dB')
+rep.check('aliasing (quality pass 13 Nov 2026): band noise above fs/(2 ratio) in, wet power re the wet of the same power '
+          'in the band that lands at 2-4 kHz (TONE 127): what folds back under 16 kHz is >= 30 dB down, what lands at '
+          '16-22 kHz >= 20 dB down (before the anti-alias low-pass, the same measure: -2.2 .. -2.9 dB and -4.2 .. -6.0 dB, about as loud as '
+          'the shimmer), the wanted top (12-14 kHz out) within 10 dB of 2-4 kHz', ok, '; '.join(rows))
 rep.note('size', f'{len(fw)} words of P; r7 state {len(G.ST.at)} words; X ring {G.RING} words (base a multiple of {G.RING}): '
                  f'window {G.WINDOW} frames, lines {" ".join(str(v) for v in G.LEN)} frames (the plugin at 44.1 kHz: '
                  f'{" ".join(str(v) for v in G.PLUGIN_LEN)}, x {G.SCALE:.4f})')

@@ -3,13 +3,13 @@
 | PASS | manifest loads (schema: names<=4, defaults in count) | FREQ FOLW SPRD BIAS CNTR MIX MODE |
 | PASS | no label is a prefix of another, no duplicates |  |
 | PASS | no rep instruction |  |
-| PASS | assembles; disassembler round-trip + mpysu audit clean | 727 words |
-| PASS | static cycle count (cycle_count.py, worst mode loop) | 212 cycles/sample (worst of 3 mode loops (155/4/212)) |
+| PASS | assembles; disassembler round-trip + mpysu audit clean | 885 words |
+| PASS | static cycle count (cycle_count.py, worst mode loop) | 212 cycles/sample (worst of 3 mode loops (195/4/212)) |
 | PASS | measured cost at dearest settings, 0.5 FS noise (dsp_host meter minus a null effect: steady mean / worst block) | mean 232.4, peak block 235.3 instr/sample |
 | PASS | dearest settings on 0.5 FS noise: bounded, guard clean (no stray writes) | peak 0.600 FS, dc -0.00093, stray 0 |
 | PASS | MIX 0 is exact dry (full-range ramp, dearest other knobs) | max |err| 0 LSB |
 | PASS | dirty state (garbage r7 block + Y) on silence -> silent tail | worst tail 0 LSB |
-| PASS | random knob automation every 3 blocks, splits 0 and 7, guard: bounded | peak 0.700 FS |
+| PASS | random knob automation every 3 blocks, splits 0 and 7, guard: bounded | peak 0.874 FS |
 | PASS | RING FREQ 64 (carrier 323 Hz): 1 kHz in -> sidebands 677 and 1323 Hz each ~0.25, carrier-free input bin | 0.249 / 0.249, 1 kHz 0.0004 |
 | PASS | RING FREQ 100 (carrier 1546 Hz): 1 kHz in -> sidebands 546 and 2546 Hz each ~0.25, carrier-free input bin | 0.249 / 0.249, 1 kHz 0.0018 |
 | PASS | RING FOLW 127 with a 0.5 FS input raises the carrier (StoreFX: up to x7) | carrier 176 Hz -> 1253 Hz |
@@ -29,4 +29,5 @@
 | PASS | RING FREQ 127: carrier 5000 Hz (+-10), as the display law 20 x 250^(v/127) reads | carrier 5000 Hz |
 | PASS | PHSR: noise burst then silence, FDBK 0/64/127 x CNTR x DPTH: the last second is exactly 0 (before this pass the allpass truncation and the feedback mean held up to 555 LSB of DC for ever) | FDBK 0 CNTR 64 DPTH 127: silent from 1.24 s; FDBK 64 CNTR 0 DPTH 0: silent from 1.24 s; FDBK 127 CNTR 0 DPTH 0: silent from 1.24 s; FDBK 127 CNTR 64 DPTH 127: silent from 1.24 s; FDBK 127 CNTR 20 DPTH 60: silent from 1.24 s; FDBK 64 CNTR 127 DPTH 0: silent from 0.89 s |
 | PASS | PHSR CNTR jumping 0 <-> 127 every 93 ms (DPTH 0, 300 Hz sine): largest second difference < 0.03 FS (CNTR glides ~3 ms a block; before it stepped and the notches rang: 0.22 FS) | 0.0113 FS |
+| PASS | RING aliasing: FREQ 127 FOLW 127 (asks for a 34.8 kHz carrier, which folded to 9.3 kHz), 1 kHz + a high partial at 0.35 FS each: the carrier sits at 19,845 Hz (0.9 Nyquist), nothing at the old folded carrier's sidebands (< -40 dB); the input low-pass (corner fs/2 - fc = 2.2 kHz here) puts the high partial's folded upper sideband >= 12 / 20 / 30 dB under the 1 kHz partial's for a 5 / 8 / 12 kHz partial (before: -3 dB, as loud; the partial's own lower sideband goes down with it: the input is low-passed) | 5 kHz partial: folded upper sideband -15.0 dB, its lower sideband -15.0 dB (re the 1 kHz partial's 18845 Hz); at the old folded carrier -145.7 dB; 8 kHz partial: folded upper sideband -24.3 dB, its lower sideband -24.3 dB (re the 1 kHz partial's 18845 Hz); at the old folded carrier -146.0 dB; 12 kHz partial: folded upper sideband -34.4 dB, its lower sideband -34.4 dB (re the 1 kHz partial's 18845 Hz); at the old folded carrier -145.2 dB |
 | info | cost | static 212 cycles/sample (worst mode); dsp_host mean 232.4, worst block 235.3 |

@@ -34,6 +34,13 @@
 ;  1d/1e phi hi/lo  1f/20 dphi hi/lo  21/22 right head 1 weights
 ;  23/24 right head 2 weights  25 ratio/8  26 right phase
 ;  27/28 tone LP L/R low words  29/2a DC block L/R y low words  2b feedback ramp a sample
+;  2c..31 anti-alias low-pass B A1H A2 CH P K  32 its s32 (the last update)
+;  33/34/35 left w1 w2 v1  36/37/38 right w1 w2 v1  39 mix ramp a sample  3a s32 (top of proc)
+;  (13 Nov 2026, "stop aliasing": an up-shift folds what sits above fs / (2 ratio) back down. Each side's line
+;   input (input + feedback) goes through an order-3 elliptic-type low-pass that tracks SHFT + FINE: what would
+;   land under 16 kHz is >= 37 dB down, the top of the shifted sound is kept to within 1 dB up to 16 kHz out at
+;   +12, 14 kHz at +24 (aa_design.py; this file is written by aa_patch.py from pitch.asm.preaa). At or under
+;   unison the filter is off (B = 1 - 2^-23, the rest 0).)
 ;  (12 Nov quality pass: tone LP and DC block keep 48-bit states so tails reach exact 0;
 ;   feedback ramps per sample instead of stepping per block)
 ;  (inc and tone glide once per block; feedback ramps per sample; W and mix per sample)
@@ -69,6 +76,7 @@ proc:
         mac     y0,x0,a
         move    #>$640000,x0
         sub     x0,a
+        move    a,x:(r7+$3a)            ; s32 for the anti-alias low-pass update
         move    a,x0
 ; v = ln2 * oct / 8 = s32 * ln2/3 ; y/8 = 2^(oct/8)/8 by Horner (Taylor, 4th)
         move    #>$1d9304,y0
@@ -148,6 +156,12 @@ ptmset:
         move    x:(r7+$0e),a
         move    a,x:(r7+$0f)
 ptmglide:
+; the mix ramp for this block: 1/256 of the way a sample (the old per-sample glide's rate; 0 once landed)
+        move    x:(r7+$0e),a
+        move    x:(r7+$0f),b
+        sub     b,a
+        asr     #$8,a,a
+        move    a,x:(r7+$39)
 ; while clearing, the slow smoothers start AT their targets
         move    x:(r7+$02),a
         tst     a
@@ -203,6 +217,7 @@ ptwnear:
         move    a1,x:(r7+$1d)
         move    a0,x:(r7+$1e)
 ptwdon:
+        bsr     >ptlpset                ; anti-alias low-pass coefficients (when SHFT + FINE changed)
 ; ---- bounded clearing: 128 dry calls, 124 x 128 words (miniverb's scheme) -
         move    x:(r7+$02),a
         tst     a
@@ -260,6 +275,38 @@ ptfbramp:
         asr     #$4,a,a
         add     b,a
         move    a,x:(r7+$0d)
+; anti-alias low-pass: a rounding limit cycle (a few LSB) is cleared, looked for every 8th block (r5 moves
+; 32 words a block)
+        move    r5,a
+        and     #>$0000e0,a
+        bne     ptaakeep
+        move    x:(r7+$33),a
+        abs     a
+        move    x:(r7+$34),b
+        abs     b
+        add     b,a
+        move    x:(r7+$35),b
+        abs     b
+        add     b,a
+        move    x:(r7+$36),b
+        abs     b
+        add     b,a
+        move    x:(r7+$37),b
+        abs     b
+        add     b,a
+        move    x:(r7+$38),b
+        abs     b
+        add     b,a
+        cmp     #>$000060,a
+        bgt     ptaakeep
+        clr     a
+        move    a,x:(r7+$33)
+        move    a,x:(r7+$34)
+        move    a,x:(r7+$35)
+        move    a,x:(r7+$36)
+        move    a,x:(r7+$37)
+        move    a,x:(r7+$38)
+ptaakeep:
         move    #>$3dfd,m1
         move    #>$3dfd,m2
         move    #>$3dfd,m3
@@ -281,26 +328,66 @@ ptfbramp:
         add     a,b
         move    b1,x:(r7+$08)
         move    b0,x:(r7+$09)
-        move    x:(r7+$0e),a
-        move    x:(r7+$0f),b
-        sub     b,a
-        asr     #$8,a,a
-        add     b,a
-        move    a,x:(r7+$0f)
+        move    x:(r7+$0f),a
+        move    x:(r7+$39),x0
+        add     x0,a
+        move    a,x:(r7+$0f)            ; mix += its ramp (set per block)
 ; ---- write input + feedback (both channels) --------------------------------
         move    x:(r7+$0b),a
         move    x:(r7+$2b),x0
         add     x0,a
         move    a,x:(r7+$0b)
         move    a,y1
-        move    x:(r7+$16),x0
-        move    x:(r0),a
-        mac     x0,y1,a
+; ---- write input + feedback through the anti-alias low-pass (both channels; see aa_design.py) ----
+;   w = B (in + fb s) + 2 A1H w1 + A2 w2;  u = w + 2 CH w1 + K w2;  v = u + P v1;  y = v + K v1
+        move    x:(r7+$2c),x0
+        mpy     x0,y1,b
+        move    b,y1                    ; B fb
+        move    x:(r0),y0
+        mpy     y0,x0,a
+        move    x:(r7+$16),x1
+        mac     y1,x1,a                 ; B (left in + fb s)
+        move    x:(r0+n0),y0
+        mpy     y0,x0,b
+        move    x:(r7+$17),x1
+        mac     y1,x1,b                 ; B (right in + fb s)
+        move    x:(r7+$2d),y0
+        move    x:(r7+$33),x1
+        mac     x1,y0,a
+        mac     x1,y0,a
+        move    x:(r7+$36),x0
+        mac     y0,x0,b
+        mac     y0,x0,b
+        move    x:(r7+$34),y1
+        move    x:(r7+$2e),y0
+        macr    y1,y0,a                 ; w left
+        move    x1,x:(r7+$34)
+        move    a,x:(r7+$33)
+        move    x:(r7+$2f),y0
+        mac     x1,y0,a
+        mac     x1,y0,a
+        move    x:(r7+$31),x1
+        mac     y1,x1,a                 ; u left
+        move    x:(r7+$37),y1
+        move    x:(r7+$2e),y0
+        macr    y1,y0,b                 ; w right
+        move    x0,x:(r7+$37)
+        move    b,x:(r7+$36)
+        move    x:(r7+$2f),y0
+        mac     y0,x0,b
+        mac     y0,x0,b
+        mac     y1,x1,b                 ; u right
+        move    x:(r7+$30),y0
+        move    x:(r7+$35),y1
+        macr    y1,y0,a                 ; v left
+        move    a,x:(r7+$35)
+        macr    y1,x1,a                 ; y left
+        move    x:(r7+$38),y1
+        macr    y1,y0,b                 ; v right
+        move    b,x:(r7+$38)
+        macr    y1,x1,b                 ; y right
         move    a,y:(r5)+
-        move    x:(r7+$17),x0
-        move    x:(r0+n0),a
-        mac     x0,y1,a
-        move    a,y:(r5)+
+        move    b,y:(r5)+
 ; ---- phases: p += inc; phi += dphi (48 bit); left p - phi, right p + phi -----
         move    x:(r7+$05),x1
         move    x:(r7+$03),a
@@ -563,4 +650,133 @@ ptend:
         move    #>$ffffff,m3
         move    #>$ffffff,m4
         move    #>$ffffff,m5
+        rts
+; ---- anti-alias low-pass coefficients (13 Nov 2026): only when SHFT + FINE changed ----
+; s32 = semitones / 32 as at the top of proc; <= 0: no filter (B = 1, the rest 0); else clamped to
+; [7.24, 25.5] / 32, t = (s32 - 0.511508) / 0.285367, A1H A2 CH P degree-4 polynomials in t,
+; then B = (1 - 2 A1H - A2)(1 - P) / (4 (1 + CH)): the DC gain is exactly 1
+ptlpset:
+        move    x:(r7+$3a),a            ; s32, kept at the top of proc
+        tst     a
+        bgt     ptaaup
+        move    #>$800000,x0
+        move    x:(r7+$32),b
+        cmp     x0,b
+        beq     ptaaout
+        move    x0,x:(r7+$32)
+        move    #>$7fffff,x0
+        move    x0,x:(r7+$2c)
+        clr     b
+        move    b,x:(r7+$2d)
+        move    b,x:(r7+$2e)
+        move    b,x:(r7+$2f)
+        move    b,x:(r7+$30)
+        move    b,x:(r7+$31)
+ptaaout:
+        rts
+ptaaup:
+        move    #>$1cf237,x0
+        cmp     x0,a
+        tlt     x0,a
+        move    #>$660000,x0
+        cmp     x0,a
+        tgt     x0,a
+        move    x:(r7+$32),x0
+        cmp     x0,a
+        bne     ptaanew
+        rts
+ptaanew:
+        move    a,x:(r7+$32)
+        sub     #>$41791c,a
+        move    a,x0
+        move    #>$7022ef,y0
+        mpy     y0,x0,a
+        asl     #$2,a,a
+        move    a,y1                    ; t
+        move    #>$fae82d,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$0c8a29,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$ecd4fd,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$1c0b20,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$2471bb,a
+        asl     a
+        move    a,x:(r7+$2d)
+        move    #>$fc2d0c,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$03f8d2,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$0197e1,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$f73f74,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$d1622d,a
+        asl     a
+        move    a,x:(r7+$2e)
+        move    #>$fc76eb,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$066fef,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$088207,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$cbfd8f,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$07448f,a
+        asl     a
+        move    a,x:(r7+$2f)
+        move    #>$fa6455,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$0808af,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$f8ba34,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$0f7ea7,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$2759fc,a
+        asl     a
+        move    a,x:(r7+$30)
+        move    #>$7fffff,x0
+        move    x0,x:(r7+$31)
+        move    #>$100000,a
+        move    x:(r7+$2d),x0
+        move    #>$200000,y0
+        mac     -y0,x0,a
+        move    x:(r7+$2e),x0
+        move    #>$100000,y0
+        mac     -y0,x0,a
+        move    a,x1                    ; (1 - 2 A1H - A2) / 8
+        move    #>$7fffff,a
+        move    x:(r7+$30),x0
+        sub     x0,a
+        move    a,y0                    ; 1 - P
+        mpy     x1,y0,a
+        move    a1,a
+        move    x:(r7+$2f),b
+        asr     b
+        add     #>$400000,b
+        move    b,x0                    ; (1 + CH) / 2
+        andi    #$fe,ccr
+        do      #24,>ptaadiv
+        div     x0,a
+ptaadiv:
+        nop
+        move    a0,x:(r7+$2c)
         rts

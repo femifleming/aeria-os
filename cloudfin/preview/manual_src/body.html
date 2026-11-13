@@ -8,7 +8,8 @@
 
 <div style="page: front">
 <div class="fh">About this edition</div>
-<p>This manual describes the build that names itself <b><i>AERIA OS Nov 13 2026 05:53:11</i></b>: the multi-effect, called <b>the sky</b> in this manual, and the <b>sequencer</b>. It replaces the edition made earlier on the same day.</p>
+<p>This manual describes the build that names itself <b><i>AERIA OS Nov 13 2026 07:10:51</i></b>: the multi-effect, called <b>the sky</b> in this manual, and the <b>sequencer</b>. It replaces the edition made earlier on the same day.</p>
+<div class="tip"><b>New in the build of 07:10 (13 Nov).</b> <b>Less aliasing:</b> PITCH, GRAINS and AURORA filter the sound before they shift it up, so high notes no longer fold back as harsh tones below them (37 to 65 dB quieter); RING's carrier stays below half the sample rate, and its input is filtered when the carrier is high. The cost: PITCH 336, GRAINS 330, AURORA 216 ({{pg:dsproom}}). The MOD page shows ROUT, SRC, DPTH and the source's settings in columns.</div>
 <div class="tip"><b>New in the build of 05:53 (13 Nov).</b> <b>A quality pass on fifteen effects:</b> PITCH, RING, RESO, ROSE and FOG now fade to true silence (some held a faint hum for ever); no more clicks when turning PITCH's FDBK, RING's CNTR, COMP's THR, MAKE and BELW, WIND's LEAN, FOG's BLUR, TWISTER's RISE or ROSE's SPRD; GRAINS is flat at unison and DENS 127 gives four full grains; SMEAR's sustain is far cleaner; VERB sums to mono properly; RESO's DTND no longer leans right; AURORA can no longer be driven into its limit. <b>BBD, PT2399 and TAPE</b> are in: a crash found while testing them is fixed. </div>
 <div class="tip"><b>New in the build of 22:05.</b> <b>No distortion:</b> the DIST effect is gone from the shelf, the sequencer's list and the chain of the first start, and the sequencer's DRIV and BITS are gone (a sequence or project that used them now plays clean). <b>The storm</b> now throws every free knob of every effect somewhere new every two to nine seconds, all of them at once at a strike, and its lightning lends effects again and again, each for 45 to 90 seconds, then takes them away ({{pg:storm}}). More knobs follow the weather ({{pg:wxknobs}}). <b>The phones</b> were left-right swapped; now the tip is left. <b>New lamps:</b> the level lamps above [REC1] and [REC2] show inputs A B C D, the card lamp shows the card, the lamp above [ARR] shows the main output's level in the sky, and in the sequencer the four lights above [PAGE] show the track's pages ({{pg:newlamps}}). <b>Balloon grains</b> are scattered across the stereo field by SPRY. <b>In the builds of 20:47 and 21:11.</b> <b>The sockets sound cleaner:</b> until now a few samples in every sixteen left the main, cue and phones outputs a moment late, a faint rasp that grew with the load; the outputs are now sample-exact (a recording over USB never had it). In the sequencer: <b>mute scenes</b> ({{pg:mutescenes}}); <b>resampling</b> the main output into a sample ({{pg:resample}}); OUT has a fourth place, <b>QUAD</b>, with a Y knob that puts a track anywhere between the front pair and the back ({{pg:trackquad}}); <b>MIDI notes coming in</b> play the tracks and can be recorded ({{pg:notesin}}). In the sky: WIND, HAIL and AURORA are <b>remembered</b> through a power-off and in projects, and AUTO weather can bring them. Over USB: the packets to the computer are paced evenly, which ends the clicks that a recording of the stems could have ({{pg:stems}}).</div>
 <div class="note"><b>New since that edition.</b> SMEAR is a new effect under the old name: a spectral one, with sustain, freeze, gate, width and tilt, and the snow and the heat play it ({{pg:fxsmear}}). Three new weathers, WIND, HAIL and AURORA, on trigs 9 to 11 of the SKY page, and a TWISTER on trig 12; FOG now blurs and darkens the sound. Each of them is an effect that the sky puts into an empty slot of the chain while the weather lasts ({{pg:moreweather}}), and five new effects on the shelf: WIND, FOG, TWISTER, HAIL, AURORA ({{pg:fxweather}}). In the sequencer: a held step always shows its own six knobs; coming back from MASTER no longer changes the knob set; MIDI Continue goes on from where the sequencer stopped; locks are offered on the SRC, AMP, FLT and MIDI pages only. The first DSP core's room is counted more strictly, so a full chain may be refused a little sooner ({{pg:dsproom}}). New measured figures are in {{ch:specs}}. <b>In the build of 16:31:</b> SMEAR and VERB can be used together ({{pg:dsproom}}); a weather whose effect finds no room says so once; a weather's effect keeps its own knobs, so the sky's twister lasts its 10 to 20 seconds; [TRIG 1] also switches WIND, HAIL and AURORA off; the shelf refuses WIND beside FOG, and HAIL beside AURORA ({{pg:wxfx}}).</div>
@@ -731,21 +732,21 @@ shelf3 | The end of the list: the weather's five effects. The screen has room fo
 </ul>
 <table class="small">
 <tr><th>Effect</th><th>Core</th><th>Cost</th><th>Effect</th><th>Core</th><th>Cost</th></tr>
-<tr><td class="k">PITCH</td><td>either</td><td class="n">280</td><td class="k">ROSE</td><td>either</td><td class="n">199</td></tr>
-<tr><td class="k">DIST</td><td>either</td><td class="n">152</td><td class="k">COMP</td><td>either</td><td class="n">208</td></tr>
-<tr><td class="k">GRAINS</td><td>first</td><td class="n">304</td><td class="k">VERB</td><td>second</td><td class="n">1,145</td></tr>
-<tr><td class="k">RING</td><td>either</td><td class="n">225</td><td class="k">ECHO</td><td>second</td><td class="n">259</td></tr>
-<tr><td class="k">RESO</td><td>first</td><td class="n">226</td><td class="k">VOWL</td><td>either</td><td class="n">657</td></tr>
-<tr><td class="k">SMEAR</td><td>either</td><td class="n">1,137</td><td class="k">WIND</td><td>first</td><td class="n">119</td></tr>
-<tr><td class="k">FOG</td><td>first</td><td class="n">120</td><td class="k">TWISTER</td><td>second</td><td class="n">189</td></tr>
-<tr><td class="k">HAIL</td><td>second</td><td class="n">134</td><td class="k">AURORA</td><td>second</td><td class="n">192</td></tr>
+<tr><td class="k">PITCH</td><td>either</td><td class="n">336</td><td class="k">ROSE</td><td>either</td><td class="n">205</td></tr>
+<tr><td class="k">DIST</td><td>either</td><td class="n">152</td><td class="k">COMP</td><td>either</td><td class="n">223</td></tr>
+<tr><td class="k">GRAINS</td><td>first</td><td class="n">330</td><td class="k">VERB</td><td>second</td><td class="n">1,145</td></tr>
+<tr><td class="k">RING</td><td>either</td><td class="n">236</td><td class="k">ECHO</td><td>second</td><td class="n">311</td></tr>
+<tr><td class="k">RESO</td><td>first</td><td class="n">243</td><td class="k">VOWL</td><td>either</td><td class="n">657</td></tr>
+<tr><td class="k">SMEAR</td><td>either</td><td class="n">1,165</td><td class="k">WIND</td><td>first</td><td class="n">119</td></tr>
+<tr><td class="k">FOG</td><td>first</td><td class="n">126</td><td class="k">TWISTER</td><td>second</td><td class="n">190</td></tr>
+<tr><td class="k">HAIL</td><td>second</td><td class="n">134</td><td class="k">AURORA</td><td>second</td><td class="n">216</td></tr>
 </table>
-<p>Cost is in DSP instructions for each sample. The first core has room for 990 of effects, because it also runs the mixer and plays the samples. The second has room for 1,450. One effect alone on the first core may be as large as 1,150: that is how SMEAR fits there. Add up the costs to see what fits. <b>The first core's room is counted more strictly in this build</b> (it was 1,090: the load meter now counts everything the core does), so with a full chain the unit may say ``NO ROOM`` ``DSP FULL`` a little sooner than before.</p>
+<p>Cost is in DSP instructions for each sample. The first core has room for 990 of effects, because it also runs the mixer and plays the samples. The second has room for 1,450. One effect alone on the first core may be as large as 1,170: that is how SMEAR fits there. Add up the costs to see what fits. <b>The first core's room is counted more strictly in this build</b> (it was 1,090: the load meter now counts everything the core does), so with a full chain the unit may say ``NO ROOM`` ``DSP FULL`` a little sooner than before.</p>
 <ul>
 <li><b>VERB and SMEAR are the two heavy ones, and they can be used together.</b> VERB runs on the second core, and SMEAR then takes the first core alone (measured: 86% in that core's worst frame, no overruns). Nothing else fits on the first core beside it. Every further effect must go to the second core, where VERB leaves 305, or is refused with ``NO ROOM`` ``DSP FULL``. GRAINS, RESO, WIND and FOG run on the first core only, so they cannot be used while SMEAR and VERB are both in the chain.</li>
 <li><b>VERB and ECHO together fill the second core</b>: with both in the chain, every other effect must fit on the first, and the weather has no room for HAIL, AURORA or the TWISTER.</li>
 <li><b>SMEAR without VERB runs on the second core and leaves 313 there</b>: enough for ECHO, or for one or two of the lighter effects.</li>
-<li><b>The chain of the first start</b> (PITCH, GRAINS, RING, SMEAR; until 12 Nov also DIST) nearly fills both cores. SMEAR takes 1,137 of the second core's 1,450. The other four cost 961 together, and AERIA shares them out between the two cores. About 340 is left in all: one of the weather's effects fits, and sometimes two. Measured with this chain: WIND and the TWISTER fitted, HAIL and AURORA were refused.</li>
+<li><b>The chain of the first start</b> (PITCH, GRAINS, RING, SMEAR; until 12 Nov also DIST) nearly fills both cores. SMEAR takes 1,165 of the second core's 1,450. The other three cost 902 together, and AERIA shares them out between the two cores. About 340 is left in all: one of the weather's effects fits, and sometimes two. Measured with this chain: WIND and the TWISTER fitted, HAIL and AURORA were refused.</li>
 </ul>
 <p>These limits were measured on the unit on 12 November 2026, with a computer recording over USB at the same time ({{pg:limits}}).</p>
 
@@ -785,7 +786,7 @@ shelf3 | The end of the list: the weather's five effects. The screen has room fo
 <div class="note"><b>Effects with modes.</b> RING and RESO each hold two or three different effects, chosen with MODE on the FUNC layer. Some of their knobs do a different job in each mode. The popup readouts of those knobs are written for the first mode (RING, WAVE): in another mode the knob still works, but read the number as a position, not as the unit shown.</div>
 
 <div class="fxb"><h3>PITCH</h3>
-<p>A pitch shifter with two read heads a side on a short delay line. The shifted sound can be fed back into the line, so repeats climb or fall. WIDE detunes the two sides against each other; with SHFT at 0 it is a detune chorus.</p>
+<p>A pitch shifter with two read heads a side on a short delay line. The shifted sound can be fed back into the line, so repeats climb or fall. WIDE detunes the two sides against each other; with SHFT at 0 it is a detune chorus. When it shifts up, a filter first takes away what would land above half the sample rate and fold back as false tones; it follows SHFT and FINE, and is off at unison and below.</p>
 <table>
 <tr><th class="k">Knob</th><th>What it does</th><th>Range</th><th>Default</th></tr>
 <tr><td class="k">SHFT</td><td>Transpose, in semitones. In a scale it lands exactly on a degree of the scale</td><td class="n">-24 to +24</td><td class="n">+12</td></tr>
@@ -798,7 +799,7 @@ shelf3 | The end of the list: the weather's five effects. The screen has room fo
 </table></div>
 
 <div class="fxb"><h3>GRAINS</h3>
-<p>Live granular: it remembers the last 800 ms of sound and plays up to four overlapping grains (short slices) from it. Each grain fades in and out with the shape drawn in the grain cloud (chapter 9).</p>
+<p>Live granular: it remembers the last 800 ms of sound and plays up to four overlapping grains (short slices) from it. Each grain fades in and out with the shape drawn in the grain cloud (chapter 9). With PTCH above 0 the grains are filtered first, so the top end does not fold back as false tones.</p>
 <table>
 <tr><th class="k">Knob</th><th>What it does</th><th>Range</th><th>Default</th></tr>
 <tr><td class="k">SIZE</td><td>Grain length</td><td class="n">10 ms to 750 ms</td><td class="n">139 ms</td></tr>
@@ -813,7 +814,7 @@ shelf3 | The end of the list: the weather's five effects. The screen has room fo
 </table></div>
 
 <div class="fxb"><h3>RING</h3>
-<p>Two effects in one. RING is a ring modulator: it multiplies the sound by a sine wave, the carrier, which gives bell-like and metallic tones; the carrier's pitch can rise with the input's level. PHSR is a six-stage phaser: notches that sweep up and down the spectrum.</p>
+<p>Two effects in one. RING is a ring modulator: it multiplies the sound by a sine wave, the carrier, which gives bell-like and metallic tones; the carrier's pitch can rise with the input's level. PHSR is a six-stage phaser: notches that sweep up and down the spectrum. In RING the carrier never goes above 19.8 kHz (loud input with FOLW could once push it past half the sample rate, where it folded back down), and when the carrier is high the input is filtered so its upper partials do not fold back.</p>
 <table>
 <tr><th class="k">Knob</th><th>What it does</th><th>Range</th><th>Default</th></tr>
 <tr><td class="k">FREQ</td><td>RING: the carrier's frequency. PHSR: the sweep's rate, 0.05 Hz to 10 Hz</td><td class="n">20 Hz to 5 kHz</td><td class="n">419 Hz</td></tr>
@@ -860,7 +861,7 @@ chain_smear_snow | SNOW alone: the weather has taken SMR to 9.84 s and FRZ to 93
 <li><b>The wet sound is 1,280 samples late</b>, 29 thousandths of a second. The dry sound is not delayed. With MIX part of the way, a drum is therefore heard twice, 29 ms apart; fully wet, or on sustained sound, nothing of it is heard.</li>
 <li><b>It goes on working with MIX at 0%</b>, and while it is held dry at the first start. What it holds is not lost: turn MIX up and the wash is there. Bypassing the slot does lose it.</li>
 <li><b>The weather plays it.</b> SMR and FRZ follow the weather until you turn them. SNOW freezes (FRZ to 93%, SMR to 9.84 s), HEAT smears (SMR to 7.99 s), FOG less (4.26 s); under a CLEAR sky SMR is OFF. GATE, WIDE and TILT are yours alone.</li>
-<li><b>It is heavy.</b> SMEAR costs 1,137, about as much as VERB. It usually runs on the second core. SMEAR and VERB can be used together: VERB is on the second core, and SMEAR then takes the first core alone, so every further effect must find room on the second core or is answered with ``NO ROOM`` ``DSP FULL`` ({{pg:dsproom}}).</li>
+<li><b>It is heavy.</b> SMEAR costs 1,165, about as much as VERB. It usually runs on the second core. SMEAR and VERB can be used together: VERB is on the second core, and SMEAR then takes the first core alone, so every further effect must find room on the second core or is answered with ``NO ROOM`` ``DSP FULL`` ({{pg:dsproom}}).</li>
 </ul>
 <div class="warn"><b>A frozen or heavily smeared loud sound can reach full scale.</b> The held wash is added to the live sound, and on steady, noisy material the wet sound is a few dB louder than what went in (up to 4.5 dB at SMR 20 s). Turn the input or MIX down. On the main output the master limiter catches it.</div>
 <div class="tip"><b>Freeze a chord.</b> Play it, turn FRZ to HOLD, and take your hands away: the chord stands. Play over it through the slots that follow, or bring FRZ down and let it fade in SMR's time. <b>Clean up a noisy input:</b> SMR at OFF, FRZ at 0%, GATE up until the hiss between the notes goes. <b>On a sequencer track</b>, SMEAR is the spectral freeze for pads: put it on the pad's track and turn FRZ to HOLD ({{pg:pfx}}).</div>
@@ -1085,7 +1086,7 @@ chain_twister | TWISTER in slot 6 while a twister crosses: AMT is back at ARM, t
 </table></div>
 
 <div class="fxb"><h3 id="fxaurora">AURORA</h3>
-<p>The sound, both sides mixed, goes an octave up and through a high-pass at 500 Hz into four delay lines that feed one another. Each line is a curtain with its own place between the speakers and a brightness that wanders. The curtains take nine seconds to die away. They are added to the dry sound, which passes untouched.</p>
+<p>The sound, both sides mixed, goes an octave up and through a high-pass at 500 Hz into four delay lines that feed one another. Each line is a curtain with its own place between the speakers and a brightness that wanders. The curtains take nine seconds to die away. They are added to the dry sound, which passes untouched. Before the octave shift a filter takes away what would fold back above half the sample rate (not at UNIS).</p>
 <table>
 <tr><th class="k">Knob</th><th>What it does</th><th>Range</th><th>Default</th></tr>
 <tr><td class="k">AMT</td><td>How much goes into the curtains. It glides over 1.2 seconds. At 0%, when the tail has gone, the effect rests</td><td class="n">0% to 100%</td><td class="n">0%</td></tr>
@@ -2834,14 +2835,14 @@ ss_clock | CLOCK at 645:833, half past three in the afternoon. Made on a compute
 <p>The sixteen effects side by side: the six knobs ((A)) to ((F)), then the second set ([FUNC] held; in the sequencer also [FX2] pressed again). Ranges are as the popup shows them. Each effect is explained in {{ch:fx}}.</p>
 <table class="long">
 <thead><tr><th>Effect</th><th>Knob</th><th>Name</th><th>Range</th><th>Default</th><th>Core, cost</th></tr></thead>
-<tr><td class="n" rowspan="7"><b>PITCH</b><br>pitch shifter</td><td class="n">A</td><td class="k">SHFT</td><td class="n">-24 to +24 semitones</td><td class="n">+12</td><td class="n" rowspan="7">either<br>280</td></tr>
+<tr><td class="n" rowspan="7"><b>PITCH</b><br>pitch shifter</td><td class="n">A</td><td class="k">SHFT</td><td class="n">-24 to +24 semitones</td><td class="n">+12</td><td class="n" rowspan="7">either<br>336</td></tr>
 <tr><td class="n">B</td><td class="k">FINE</td><td class="n">-100 C to +98 C</td><td class="n">0 C</td></tr>
 <tr><td class="n">C</td><td class="k">GRN</td><td class="n">10 ms to 160 ms</td><td class="n">65.1 ms</td></tr>
 <tr><td class="n">D</td><td class="k">FDBK</td><td class="n">0% to 95%</td><td class="n">0%</td></tr>
 <tr><td class="n">E</td><td class="k">TONE</td><td class="n">214 Hz to OPEN</td><td class="n">7.01 kHz</td></tr>
 <tr><td class="n">F</td><td class="k">MIX</td><td class="n">0% to 100%</td><td class="n">50%</td></tr>
 <tr><td class="n">2nd A</td><td class="k">WIDE</td><td class="n">0 C to 50 C</td><td class="n">15.9 C</td></tr>
-<tr><td class="n" rowspan="9"><b>GRAINS</b><br>live granular</td><td class="n">A</td><td class="k">SIZE</td><td class="n">10 ms to 750 ms</td><td class="n">139 ms</td><td class="n" rowspan="9">first<br>304</td></tr>
+<tr><td class="n" rowspan="9"><b>GRAINS</b><br>live granular</td><td class="n">A</td><td class="k">SIZE</td><td class="n">10 ms to 750 ms</td><td class="n">139 ms</td><td class="n" rowspan="9">first<br>330</td></tr>
 <tr><td class="n">B</td><td class="k">DENS</td><td class="n">x1 to x4</td><td class="n">x2.89</td></tr>
 <tr><td class="n">C</td><td class="k">POS</td><td class="n">1.09 ms to 793 ms</td><td class="n">126 ms</td></tr>
 <tr><td class="n">D</td><td class="k">SPRY</td><td class="n">0% to 100%</td><td class="n">24%</td></tr>
@@ -2850,27 +2851,27 @@ ss_clock | CLOCK at 645:833, half past three in the afternoon. Made on a compute
 <tr><td class="n">2nd A</td><td class="k">FRZ</td><td class="n">THAW, HOLD</td><td class="n">THAW</td></tr>
 <tr><td class="n">2nd C</td><td class="k">REV</td><td class="n">0% to 100%</td><td class="n">0%</td></tr>
 <tr><td class="n">2nd E</td><td class="k">SPRD</td><td class="n">0% to 100%</td><td class="n">79%</td></tr>
-<tr><td class="n" rowspan="7"><b>RING</b><br>ring modulator, phaser</td><td class="n">A</td><td class="k">FREQ</td><td class="n">20 Hz to 5 kHz (PHSR: 0.05 to 10 Hz)</td><td class="n">419 Hz</td><td class="n" rowspan="7">either<br>225</td></tr>
+<tr><td class="n" rowspan="7"><b>RING</b><br>ring modulator, phaser</td><td class="n">A</td><td class="k">FREQ</td><td class="n">20 Hz to 5 kHz (PHSR: 0.05 to 10 Hz)</td><td class="n">419 Hz</td><td class="n" rowspan="7">either<br>236</td></tr>
 <tr><td class="n">B</td><td class="k">FOLW</td><td class="n">x1 to x7</td><td class="n">x2.8</td></tr>
 <tr><td class="n">C</td><td class="k">SPRD</td><td class="n">0 deg to 90 deg</td><td class="n">90 deg</td></tr>
 <tr><td class="n">D</td><td class="k">BIAS</td><td class="n">0% to 100%</td><td class="n">0%</td></tr>
 <tr><td class="n">E</td><td class="k">CNTR</td><td class="n">200 Hz to 5 kHz (PHSR)</td><td class="n">1.01 kHz</td></tr>
 <tr><td class="n">F</td><td class="k">MIX</td><td class="n">0% to 100%</td><td class="n">100%</td></tr>
 <tr><td class="n">2nd A</td><td class="k">MODE</td><td class="n">RING, PHSR</td><td class="n">RING</td></tr>
-<tr><td class="n" rowspan="7"><b>RESO</b><br>tuned resonator</td><td class="n">A</td><td class="k">PTCH</td><td class="n">F#1 to F#7</td><td class="n">F#3</td><td class="n" rowspan="7">first<br>226</td></tr>
+<tr><td class="n" rowspan="7"><b>RESO</b><br>tuned resonator</td><td class="n">A</td><td class="k">PTCH</td><td class="n">F#1 to F#7</td><td class="n">F#3</td><td class="n" rowspan="7">first<br>243</td></tr>
 <tr><td class="n">B</td><td class="k">FINE</td><td class="n">-50 C to +49 C</td><td class="n">0 C</td></tr>
 <tr><td class="n">C</td><td class="k">DECY</td><td class="n">20 ms to 20 s</td><td class="n">1.55 s</td></tr>
 <tr><td class="n">D</td><td class="k">TONE</td><td class="n">0% to 100%</td><td class="n">71%</td></tr>
 <tr><td class="n">E</td><td class="k">DTUN</td><td class="n">+0 C to +25 C</td><td class="n">+7.87 C</td></tr>
 <tr><td class="n">F</td><td class="k">MIX</td><td class="n">0% to 100%</td><td class="n">50%</td></tr>
 <tr><td class="n">2nd A</td><td class="k">MODE</td><td class="n">WAVE, CPLX, DTND</td><td class="n">WAVE</td></tr>
-<tr><td class="n" rowspan="6"><b>SMEAR</b><br>spectral</td><td class="n">A</td><td class="k">SMR</td><td class="n">OFF, 82.9 ms to 20 s</td><td class="n">2.8 s</td><td class="n" rowspan="6">either<br>1,137</td></tr>
+<tr><td class="n" rowspan="6"><b>SMEAR</b><br>spectral</td><td class="n">A</td><td class="k">SMR</td><td class="n">OFF, 82.9 ms to 20 s</td><td class="n">2.8 s</td><td class="n" rowspan="6">either<br>1,165</td></tr>
 <tr><td class="n">B</td><td class="k">FRZ</td><td class="n">0% to 99%, HOLD</td><td class="n">0%</td></tr>
 <tr><td class="n">C</td><td class="k">GATE</td><td class="n">OFF, -80 dB to -20 dB</td><td class="n">OFF</td></tr>
 <tr><td class="n">D</td><td class="k">WIDE</td><td class="n">0% to 100%</td><td class="n">79%</td></tr>
 <tr><td class="n">E</td><td class="k">TILT</td><td class="n">-5.9 dB … FLAT … +5.9 dB</td><td class="n">FLAT</td></tr>
 <tr><td class="n">F</td><td class="k">MIX</td><td class="n">0% to 100%</td><td class="n">100%</td></tr>
-<tr><td class="n" rowspan="9"><b>ROSE</b><br>rose-window resonator</td><td class="n">A</td><td class="k">ROOT</td><td class="n">C1 to C6</td><td class="n">C3</td><td class="n" rowspan="9">either<br>199</td></tr>
+<tr><td class="n" rowspan="9"><b>ROSE</b><br>rose-window resonator</td><td class="n">A</td><td class="k">ROOT</td><td class="n">C1 to C6</td><td class="n">C3</td><td class="n" rowspan="9">either<br>205</td></tr>
 <tr><td class="n">B</td><td class="k">SHAP</td><td class="n">HARM, PRIM, CIRC, SQRE, ROSE, GOTH</td><td class="n">ROSE</td></tr>
 <tr><td class="n">C</td><td class="k">FOLD</td><td class="n">3-FOLD to 12-FOLD</td><td class="n">8-FOLD</td></tr>
 <tr><td class="n">D</td><td class="k">DECY</td><td class="n">50 ms to 12 s</td><td class="n">1.58 s</td></tr>
@@ -2879,7 +2880,7 @@ ss_clock | CLOCK at 645:833, half past three in the afternoon. Made on a compute
 <tr><td class="n">2nd A</td><td class="k">SPRD</td><td class="n">0% to 100%</td><td class="n">71%</td></tr>
 <tr><td class="n">2nd C</td><td class="k">ROTA</td><td class="n">OFF, 1 to 127</td><td class="n">OFF</td></tr>
 <tr><td class="n">2nd E</td><td class="k">TUNE</td><td class="n">OPEN, CLSE</td><td class="n">OPEN</td></tr>
-<tr><td class="n" rowspan="7"><b>COMP</b><br>compander</td><td class="n">A</td><td class="k">THR</td><td class="n">0 dB to -60 dB</td><td class="n">-18 dB</td><td class="n" rowspan="7">either<br>208</td></tr>
+<tr><td class="n" rowspan="7"><b>COMP</b><br>compander</td><td class="n">A</td><td class="k">THR</td><td class="n">0 dB to -60 dB</td><td class="n">-18 dB</td><td class="n" rowspan="7">either<br>223</td></tr>
 <tr><td class="n">B</td><td class="k">RATI</td><td class="n">1:1 to 20:1</td><td class="n">1.98:1</td></tr>
 <tr><td class="n">C</td><td class="k">BELW</td><td class="n">UP 10:1 … OFF … EXP 1:8</td><td class="n">OFF</td></tr>
 <tr><td class="n">D</td><td class="k">ATK</td><td class="n">0.05 ms to 200 ms</td><td class="n">9.92 ms</td></tr>
@@ -2890,7 +2891,7 @@ ss_clock | CLOCK at 645:833, half past three in the afternoon. Made on a compute
 <tr><td class="n">B</td><td class="k">TONE</td><td class="n">LP 303 Hz … HP 500 Hz … HP 5 kHz</td><td class="n">HP 500 Hz</td></tr>
 <tr><td class="n">C</td><td class="k">MOD</td><td class="n">0 ms to 0.56 ms</td><td class="n">0.28 ms</td></tr>
 <tr><td class="n">F</td><td class="k">MIX</td><td class="n">0% to 100%</td><td class="n">50%</td></tr>
-<tr><td class="n" rowspan="6"><b>ECHO</b><br>multi-tap delay</td><td class="n">A</td><td class="k">TIME</td><td class="n">10 ms to 220 ms</td><td class="n">70.1 ms</td><td class="n" rowspan="6">second<br>259</td></tr>
+<tr><td class="n" rowspan="6"><b>ECHO</b><br>multi-tap delay</td><td class="n">A</td><td class="k">TIME</td><td class="n">10 ms to 220 ms</td><td class="n">70.1 ms</td><td class="n" rowspan="6">second<br>311</td></tr>
 <tr><td class="n">B</td><td class="k">FDBK</td><td class="n">0% to 95%</td><td class="n">45%</td></tr>
 <tr><td class="n">C</td><td class="k">TONE</td><td class="n">300 Hz to 18 kHz</td><td class="n">7.54 kHz</td></tr>
 <tr><td class="n">D</td><td class="k">RATO</td><td class="n">JUST, MINR, PYTH, SEPT, HARM, UNIS</td><td class="n">JUST</td></tr>
@@ -2906,10 +2907,10 @@ ss_clock | CLOCK at 645:833, half past three in the afternoon. Made on a compute
 <tr><td class="n">B</td><td class="k">DPTH</td><td class="n">0 C to 40.7 C</td><td class="n">20.7 C</td></tr>
 <tr><td class="n">C</td><td class="k">GUST</td><td class="n">56 s to 228 ms</td><td class="n">3.5 s</td></tr>
 <tr><td class="n">D</td><td class="k">LEAN</td><td class="n">0% to 198%</td><td class="n">100%</td></tr>
-<tr><td class="n" rowspan="3"><b>FOG</b><br>blur</td><td class="n">A</td><td class="k">AMT</td><td class="n">0% to 100%</td><td class="n">0%</td><td class="n" rowspan="3">first<br>120</td></tr>
+<tr><td class="n" rowspan="3"><b>FOG</b><br>blur</td><td class="n">A</td><td class="k">AMT</td><td class="n">0% to 100%</td><td class="n">0%</td><td class="n" rowspan="3">first<br>126</td></tr>
 <tr><td class="n">B</td><td class="k">BLUR</td><td class="n">G 0 to G 0.76</td><td class="n">G 0.6</td></tr>
 <tr><td class="n">C</td><td class="k">DARK</td><td class="n">OPEN, 17.6 kHz to 1.15 kHz</td><td class="n">4.5 kHz</td></tr>
-<tr><td class="n" rowspan="4"><b>TWISTER</b><br>whirlwind</td><td class="n">A</td><td class="k">AMT</td><td class="n">ARM, GO</td><td class="n">ARM</td><td class="n" rowspan="4">second<br>189</td></tr>
+<tr><td class="n" rowspan="4"><b>TWISTER</b><br>whirlwind</td><td class="n">A</td><td class="k">AMT</td><td class="n">ARM, GO</td><td class="n">ARM</td><td class="n" rowspan="4">second<br>190</td></tr>
 <tr><td class="n">B</td><td class="k">RISE</td><td class="n">0 to +12 semitones</td><td class="n">+7</td></tr>
 <tr><td class="n">C</td><td class="k">SPIN</td><td class="n">0.3 Hz to 10.2 Hz</td><td class="n">5.3 Hz</td></tr>
 <tr><td class="n">D</td><td class="k">TIME</td><td class="n">RND, 2.04 s to 31.3 s</td><td class="n">RND</td></tr>
@@ -2918,7 +2919,7 @@ ss_clock | CLOCK at 645:833, half past three in the afternoon. Made on a compute
 <tr><td class="n">C</td><td class="k">SIZE</td><td class="n">x0.5 to x1.98</td><td class="n">x1</td></tr>
 <tr><td class="n">D</td><td class="k">BNCE</td><td class="n">0.45 to 0.95</td><td class="n">0.7</td></tr>
 <tr><td class="n">E</td><td class="k">WDTH</td><td class="n">0% to 100%</td><td class="n">90%</td></tr>
-<tr><td class="n" rowspan="4"><b>AURORA</b><br>octave-up reverb</td><td class="n">A</td><td class="k">AMT</td><td class="n">0% to 100%</td><td class="n">0%</td><td class="n" rowspan="4">second<br>192</td></tr>
+<tr><td class="n" rowspan="4"><b>AURORA</b><br>octave-up reverb</td><td class="n">A</td><td class="k">AMT</td><td class="n">0% to 100%</td><td class="n">0%</td><td class="n" rowspan="4">second<br>216</td></tr>
 <tr><td class="n">B</td><td class="k">TIME</td><td class="n">2.25 s to 35.2 s</td><td class="n">9 s</td></tr>
 <tr><td class="n">C</td><td class="k">TONE</td><td class="n">945 Hz to 11.7 kHz</td><td class="n">6 kHz</td></tr>
 <tr><td class="n">D</td><td class="k">SHFT</td><td class="n">UNIS, +12, +19, +24</td><td class="n">+12</td></tr>

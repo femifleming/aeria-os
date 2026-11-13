@@ -392,6 +392,58 @@ def gate(rep, name, asm, key, N, base, guard):
     rep.check(f'{name}: no read returns uncleared memory: Y garbage under the whole ring, silence in, '
               f'fixed far settings and random automation, splits 0 and 7: EVERY output sample is 0 ({tb} blocks)',
               worst == 0, f'worst {worst} LSB')
+    # ---- aliasing (13 Nov 2026, "stop aliasing"): the anti-alias low-pass on the recording -------------------------
+    sys.path.insert(0, '/aeria/grains')
+    import aa_design as AD
+    trk = A.BUILD / f'gr_{name}_aa.track'
+    worstw = 0
+    for pt_ in (0, 12, 24, 25, 28, 31, 36, 40, 43, 48, 36):
+        pp = list(d); pp[4] = pt_
+        A.render(f'gr_{name}_aatrk', mems, init, proc, pp, None, 40, extra=['-track', '40,41,42,43,44,45', '-trackout', str(trk)])
+        got = [int(v) for v in trk.read_text().split('\n')[-2].split()[1:]]
+        want = list(AD.dsp_words(pt_ - 24))
+        if pt_ <= 24:
+            want[0] = 1 << 21                                  # (L + R)/4: the ring holds y/2
+        else:
+            want[0] = round(want[0] / 4)
+        worstw = max(worstw, max(abs(((g - (w & 0xffffff) + (1 << 23)) % (1 << 24)) - (1 << 23)) for g, w in zip(got, want)))
+    rep.check(f'{name}: anti-alias low-pass: the coefficient words the DSP computes per PTCH (degree-4 polynomials, B '
+              'divided out for y/2 at unity DC gain) are aa_design.py\'s, within 64 LSB (at or under unison: B = 1/4, the '
+              'rest 0)', worstw <= 64, f'worst difference {worstw} LSB over 11 settings')
+
+    def bandnoise(lo, hi, nn, rms_=0.1, seed=7, k=48):
+        import random
+        rg = random.Random(seed)
+        acc = [0.0] * nn
+        for j in range(k):
+            w = 2 * math.pi * (lo + (hi - lo) * (j + rg.random()) / k) / 44100
+            rot = complex(math.cos(w), math.sin(w))
+            ph = rg.random() * 2 * math.pi
+            z = complex(math.cos(ph), math.sin(ph))
+            for i in range(nn):
+                acc[i] += z.imag
+                z *= rot
+        sc = rms_ * A.FS / math.sqrt(sum(v * v for v in acc) / nn)
+        return [round(v * sc) for v in acc]
+    rows, ok = [], True
+    bl_ = int(2.5 * 44100 / 16)
+    for st in (12, 19, 24):
+        r = 2 ** (st / 12)
+        pp = list(d); pp[0] = 70; pp[1] = 127; pp[2] = 20; pp[3] = 0; pp[4] = 24 + st; pp[5] = 127
+
+        def wetdb(lo, hi, tag):
+            L, Rr, _ = A.render(f'gr_{name}_al{st}{tag}', mems, init, proc, pp, bandnoise(lo, hi, bl_ * 16), bl_)
+            return A.db(A.rms([a + b for a, b in zip(L[44100:], Rr[44100:])]) + 1e-12)
+        ref = wetdb(2000 / r, 4000 / r, 'r')
+        low = wetdb((44100 - 16000) / r, 21000, 'l') - ref
+        high = wetdb(22050 / r + 100, (44100 - 16000) / r, 'h') - ref
+        top = wetdb(12000 / r, 14000 / r, 't') - ref
+        ok &= low < -30 and high < -15 and top > -10
+        rows.append(f'+{st}: landing < 16 kHz {low:.1f} dB, 16-22 kHz {high:.1f} dB, wanted 12-14 kHz out {top:+.1f} dB')
+    rep.check(f'{name}: aliasing: band noise above fs / (2 ratio) in (DENS 127, SPRY 0, MIX 127), output power re the '
+              'output of the same power in the band that lands at 2-4 kHz: what folds back under 16 kHz is >= 30 dB down, '
+              'what lands at 16-22 kHz >= 15 dB down (before the low-pass, the same measure: -0.2 .. -2.9 dB and -0.1 .. -0.8 dB: as loud as the wanted sound), the '
+              'wanted top (12-14 kHz out) within 10 dB of 2-4 kHz', ok, '; '.join(rows))
     rep.note(f'{name}: cost', f'static {cost[0]} cycles/sample (every grain restarting in the same sample); '
                               f'dsp_host mean {cost[2]:.1f}, worst block {cost[1]:.1f} instr/sample')
     return mems, init, proc, d
@@ -414,7 +466,7 @@ gate(rep, 'long', '/aeria/grains/grains.asm', 'AERIA GRAINS', 35280, 0, 0x89d0)
 # ---- against the build before the window table (test ring, triangle table) -----
 CUR.update(window='tri', base=None, guard=0x3dfe)
 # the quality pass (SNAP, DFULL) changes the output on purpose: these comparisons use the same source built as before it
-mt, _, it, pt = A.assemble(gen(A.BUILD / 'grains_test_before.asm', RING='test', SNAP=0, DFULL=0), 'AERIA GRAINSB')
+mt, _, it, pt = A.assemble(gen(A.BUILD / 'grains_test_before.asm', RING='test', SNAP=0, DFULL=0, AA=0), 'AERIA GRAINSB')
 shutil.copy(G / 'grains.asm.pretable', A.BUILD / 'grains_pretable.asm')
 shutil.copy(G / 'grains.asm.handpatched', A.BUILD / 'grains_handpatched.asm')
 refs = {}

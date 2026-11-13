@@ -54,7 +54,8 @@ AERIA Flasher (`aeria-os/flasher`) expects the same layout, the Modwerk venv and
 
 ## Beta notes
 
-- Latest: a quality pass on fifteen effects, and BBD, PT2399 and TAPE are in (a DSP crash found in testing is fixed).
+- Latest (v0.9.2): less aliasing — PITCH, GRAINS and AURORA filter before shifting up, RING's carrier stays below Nyquist; the MOD page shows its routing in columns.
+- Before that: a quality pass on fifteen effects, and BBD, PT2399 and TAPE are in (a DSP crash found in testing is fixed).
 - Never press TRIG 2 (EMPTY RESET) in the Startup Menu unless you mean to wipe the unit.
 - AERIA OS and the Elektron OS keep their saved data in the same battery-backed memory: back up before switching between them.
 

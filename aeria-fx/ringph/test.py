@@ -127,5 +127,37 @@ L, R, _ = A.render('rp_q_cntr', mems, init, proc, pz, A.sine(300.0, 0.5, bz * 16
 d2 = max(abs(L[i + 1] - 2 * L[i] + L[i - 1]) for i in range(22050, len(L) - 1)) / A.FS
 rep.check('PHSR CNTR jumping 0 <-> 127 every 93 ms (DPTH 0, 300 Hz sine): largest second difference < 0.03 FS '
           '(CNTR glides ~3 ms a block; before it stepped and the notches rang: 0.22 FS)', d2 < 0.03, f'{d2:.4f} FS')
+# ---- aliasing (13 Nov 2026, "stop aliasing"): the carrier held under 0.9 Nyquist; the input low-pass that tracks it ------
+def bandlvl(seg, f0, half=60):
+    nn = len(seg)
+    w = [v * (0.5 - 0.5 * math.cos(2 * math.pi * i / nn)) for i, v in enumerate(seg)]
+    tot = 0.0
+    k = -half
+    while k <= half:
+        tot += A.goertzel(w, f0 + k) ** 2
+        k += 44100 / nn
+    return math.sqrt(tot)
+
+
+rows, ok = [], True
+bl2 = 2000
+p = list(d); p[6] = 0; p[0] = 127; p[1] = 127; p[2] = 0; p[3] = 0; p[5] = 127
+fcl = 0.9 * 22050
+for fhi, lim in ((5000, -12), (8000, -20), (12000, -30)):
+    xx = [a + b for a, b in zip(A.sine(1000.0, 0.35, bl2 * 16), A.sine(float(fhi), 0.35, bl2 * 16))]
+    L, R, _ = A.render(f'rp_alias_{fhi}', mems, init, proc, p, xx, bl2)
+    seg = L[-8192:]
+    ref = bandlvl(seg, fcl - 1000)                      # the 1 kHz partial's lower sideband
+    old = bandlvl(seg, 44100 - 34750 + 1000)            # where the folded 34.8 kHz carrier put it before (9.35 kHz +- 1 kHz)
+    al = bandlvl(seg, 44100 - fhi - fcl)                # the high partial's upper sideband, folded
+    lg = bandlvl(seg, fcl - fhi)                        # its lower sideband (wanted, but its input is low-passed too)
+    ok &= ref > 0.03 and A.db(old / ref) < -40 and A.db(al / ref) < lim
+    rows.append(f'{fhi / 1000:g} kHz partial: folded upper sideband {A.db(al / ref):.1f} dB, its lower sideband '
+                f'{A.db(lg / ref):.1f} dB (re the 1 kHz partial\'s {fcl - 1000:.0f} Hz); at the old folded carrier {A.db(old / ref):.1f} dB')
+rep.check('RING aliasing: FREQ 127 FOLW 127 (asks for a 34.8 kHz carrier, which folded to 9.3 kHz), 1 kHz + a high partial '
+          'at 0.35 FS each: the carrier sits at 19,845 Hz (0.9 Nyquist), nothing at the old folded carrier\'s sidebands '
+          '(< -40 dB); the input low-pass (corner fs/2 - fc = 2.2 kHz here) puts the high partial\'s folded upper sideband '
+          '>= 12 / 20 / 30 dB under the 1 kHz partial\'s for a 5 / 8 / 12 kHz partial (before: -3 dB, as loud; the '
+          'partial\'s own lower sideband goes down with it: the input is low-passed)', ok, '; '.join(rows))
 rep.note('cost', f'static {cost[0]} cycles/sample (worst mode); dsp_host mean {cost[2]:.1f}, worst block {cost[1]:.1f}')
 rep.save('/aeria/ringph/test_results.md')

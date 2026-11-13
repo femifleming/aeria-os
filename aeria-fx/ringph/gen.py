@@ -15,7 +15,8 @@ H = '''; CYCLES_FORWARD_BRANCHES
 ;  RING  carrier sin(pi p), p a wrapping 24-bit phase; frequency 20 Hz ..
 ;        5 kHz (FREQ, log); FOLW: the step is multiplied by
 ;        1 + 6 FOLW min(1, 3 env) (env: |mono in|, 3 ms attack, 120 ms
-;        release); BIAS mixes the carrier toward 1 (0 = ring, 127 = nearly
+;        release), held under 0.9 x Nyquist (19.8 kHz: past Nyquist it folded
+;        back down; 13 Nov 2026); BIAS mixes the carrier toward 1 (0 = ring, 127 = nearly
 ;        dry AM); SPRD offsets the right carrier 0..90 degrees: at 127 the
 ;        two carriers are in quadrature (sin / cos), so the sidebands sit
 ;        +-90 degrees apart between the sides -- wide, and the mono sum is
@@ -65,9 +66,97 @@ QR = int(os.environ.get('QR', '1'))     # allpass stages: rounded (macr) instead
 QM = int(os.environ.get('QM', '1'))     # feedback DC mean: 48 bits
 QF = int(os.environ.get('QF', '1'))
 CS = int(os.environ.get('CS', '3'))     # PHSR: CNTR glide per block, 2^-CS     # PHSR: clear the states after 0.74 s of digital silence in
+CLAMP = float(os.environ.get('CLAMP', '0.9'))   # RING: the carrier step held to this x Nyquist (0: no clamp, the build before)
+RLP = int(os.environ.get('RLP', '1'))   # RING: the input low-pass that tracks the carrier (13 Nov 2026); 0: none (the build before)
 OUTF = os.environ.get('OUT')
+# ---- RING input low-pass (13 Nov 2026, "stop aliasing"): x c puts each input partial f at |f - fc| and f + fc;
+# above Nyquist the upper one folds back down. A 2-pole Butterworth low-pass (zeros at Nyquist) on each side's input
+# with its corner where f + fc meets Nyquist, fs/2 - fc (from the carrier step at the start of each block); off
+# (flat) while that corner would sit above 19 kHz (carrier under 3 kHz). A1H(step), A2(step) are polynomials in
+# t = (step - SC) / SW (fitted to the bilinear Butterworth); B = (1 - 2 A1H - A2)/8 (y/2, unity at DC).
+#   w = B x + 2 A1H w1 + A2 w2 (rounded);  y/2 = w + 2 K w1 + K w2;  the ring product takes y/2 x 2.
+RLO, RHI = 0.136, CLAMP or 0.9
+RSC, RSW = (RLO + RHI) / 2, (RHI - RLO) / 2
+RW = dict(B=0x2b, A1H=0x2c, A2=0x2d, K=0x2e, W1L=0x2f, W2L=0x30, W1R=0x31, W2R=0x32, XL=0x33, XR=0x34)
+
+
+def _rlp_fit():
+    def co(st):
+        k = 1 / math.tan(math.pi * st / 2)
+        n = 1 + math.sqrt(2) * k + k * k
+        return -(2 * (k * k - 1) / n) / 2, -((1 - math.sqrt(2) * k + k * k) / n)
+    pts = [RLO + (RHI - RLO) * i / 299 for i in range(300)]
+    ts = [(v - RSC) / RSW for v in pts]
+    out = []
+    for kk, deg in ((0, 3), (1, 4)):
+        ys = [co(v)[kk] for v in pts]
+        M = [[sum(t ** (i + j) for t in ts) for j in range(deg + 1)] for i in range(deg + 1)]
+        vv = [sum(t ** i * y for t, y in zip(ts, ys)) for i in range(deg + 1)]
+        n = deg + 1
+        for i in range(n):
+            for r in range(n):
+                if r != i:
+                    f = M[r][i] / M[i][i]
+                    M[r] = [a - f * b for a, b in zip(M[r], M[i])]
+                    vv[r] -= f * vv[i]
+        out.append([vv[i] / M[i][i] for i in range(n)])
+    return out
+
+
+RPOLY = _rlp_fit() if RLP else None
+
+
+def rx(nm):
+    return f'x:(r7+${RW[nm]:02x})'
+
+
+def rlp_block():
+    """per block: the carrier step from the smoothed state (as the frame loop forms it), held to the clamp; the
+    low-pass words for it. Clobbers a b x0 x1 y0 y1."""
+    out = ['; RING input low-pass for this block: step = inc (1 + 6 FOLW min(1, 3 env)) from the state, as below',
+           ins('move', 'x:(r7+$0e)', 'x0'), ins('move', q(3 / 8), 'y0'), ins('mpy', 'y0', 'x0', 'a'),
+           ins('move', q(1 / 8), 'x0'), ins('cmp', 'x0', 'a'), ins('tgt', 'x0', 'a'), ins('move', 'a', 'x0'),
+           ins('move', 'x:(r7+$07)', 'y0'), ins('mpy', 'y0', 'x0', 'a'), ins('move', 'a', 'x0'), ins('move', q(6 / 8), 'y0'),
+           ins('mpy', 'y0', 'x0', 'a'), ins('asl', '#$3', 'a', 'a'), ins('add', q(1 / 8), 'a'), ins('move', 'a', 'x0'),
+           ins('move', 'x:(r7+$05)', 'y0'), ins('mpy', 'y0', 'x0', 'a'), ins('asl', '#$3', 'a', 'a'),
+           ins('move', q(RHI), 'x0'), ins('cmp', 'x0', 'a'), ins('tgt', 'x0', 'a'),
+           ins('move', q(RLO), 'x0'), ins('cmp', 'x0', 'a'), ins('bge', 'rplpon'),
+           '; carrier under 3 kHz: no filter (B = 1/2, the rest 0: y/2 = x/2)',
+           ins('move', '#>$400000', 'x0'), ins('move', 'x0', rx('B')), ins('clr', 'a'),
+           ins('move', 'a', rx('A1H')), ins('move', 'a', rx('A2')), ins('move', 'a', rx('K')), ins('bra', 'rplpdone'),
+           'rplpon:', ins('sub', q(RSC), 'a'), ins('move', 'a', 'x0'), ins('move', q(1 / RSW / 4), 'y0'),
+           ins('mpy', 'y0', 'x0', 'a'), ins('asl', '#$2', 'a', 'a'), ins('move', 'a', 'y1', c='t')]
+    for kk, nm in enumerate(('A1H', 'A2')):
+        row = [v / 2 for v in RPOLY[kk]]
+        out += [ins('move', q(row[-1]), 'a')]
+        for c in reversed(row[:-1]):
+            out += [ins('move', 'a', 'x0'), ins('mpy', 'x0', 'y1', 'a'), ins('add', q(c), 'a')]
+        out += [ins('asl', 'a'), ins('move', 'a', rx(nm))]
+    out += [ins('move', q(1 / 8), 'a'), ins('move', rx('A1H'), 'x0'), ins('move', q(1 / 4), 'y0'), ins('mac', '-y0', 'x0', 'a'),
+            ins('move', rx('A2'), 'x0'), ins('move', q(1 / 8), 'y0'), ins('mac', '-y0', 'x0', 'a'),
+            ins('move', 'a', rx('B'), c='(1 - 2 A1H - A2)/8'), ins('move', '#>$7fffff', 'x0'), ins('move', 'x0', rx('K')),
+            'rplpdone:',
+            '; a rounding limit cycle (a few LSB) left in the filter states is cleared',
+            ins('move', rx('W1L'), 'a'), ins('abs', 'a'), ins('move', rx('W2L'), 'b'), ins('abs', 'b'), ins('add', 'b', 'a'),
+            ins('move', rx('W1R'), 'b'), ins('abs', 'b'), ins('add', 'b', 'a'), ins('move', rx('W2R'), 'b'), ins('abs', 'b'),
+            ins('add', 'b', 'a'), ins('cmp', '#>$000040', 'a'), ins('bgt', 'rplpkeep'), ins('clr', 'a')]
+    out += [ins('move', 'a', rx(nm)) for nm in ('W1L', 'W2L', 'W1R', 'W2R')]
+    return out + ['rplpkeep:']
+
+
+def rlp_frame():
+    out = []
+    for side, src in (('L', 'x:(r0)'), ('R', 'x:(r0+n0)')):
+        out += [f'; RING input low-pass, {side}: y/2 -> {rx("X" + side)}',
+                ins('move', src, 'x0'), ins('move', rx('B'), 'y0'), ins('mpy', 'y0', 'x0', 'a'),
+                ins('move', rx('W1' + side), 'x1'), ins('move', rx('A1H'), 'y0'), ins('mac', 'x1', 'y0', 'a'), ins('mac', 'x1', 'y0', 'a'),
+                ins('move', rx('W2' + side), 'x0'), ins('move', rx('A2'), 'y0'), ins('macr', 'y0', 'x0', 'a'),
+                ins('move', 'x1', rx('W2' + side)), ins('move', 'a', rx('W1' + side)),
+                ins('move', rx('K'), 'y0'), ins('mac', 'x1', 'y0', 'a'), ins('mac', 'x1', 'y0', 'a'), ins('mac', 'y0', 'x0', 'a'),
+                ins('move', 'a', rx('X' + side))]
+    return out
 L = [H, 'init:', ins('move', '#>$ffffff', 'm4'), ins('move', 'r7', 'r4'), ins('clr', 'a'),
-     ins('do', '#48', '>rpizero'), ins('move', 'a', 'x:(r4)+'), 'rpizero:', ins('nop'), ins('rts')]
+     ins('do', '#64' if RLP else '#48', '>rpizero'), ins('move', 'a', 'x:(r4)+'), 'rpizero:', ins('nop'), ins('rts')]
 
 L += ['proc:', ins('move', '#>$ffffff', 'm4'), ins('move', '#>$1', 'n0'),
       ins('move', 'x:(r6+$c)', 'a'), ins('asr', '#$10', 'a', 'a'), ins('move', '#>$1', 'x0'),
@@ -98,10 +187,10 @@ def snap(pairs, run):
 # inc = 2 f / fs, f = 20 * 250^FREQ  -> 0.22676 * 2^-(7.966 (1 - FREQ))
 L += ['rpbring:'] + knob_exp(0, math.log2(250), 2 * 5000 / 44100, 'r') + [ins('move', 'a', 'x:(r7+$04)'),
       ins('move', 'x:(r7+$0a)', 'a'), ins('asr', 'a'), ins('move', 'a', 'x:(r7+$0a)', c='RING: SPRD 0..90 degrees')]
-L += snap((0x04, 0x06, 0x08, 0x0a), 'rprrun') + ['rprrun:', ins('do', 'n7', '>rprend')]
+L += snap((0x04, 0x06, 0x08, 0x0a), 'rprrun') + ['rprrun:'] + (rlp_block() if RLP else []) + [ins('do', 'n7', '>rprend')]
 L += smooth(0x04, 0x05, 7) + smooth(0x06, 0x07, 7) + smooth(0x08, 0x09, 7) + smooth(0x0a, 0x0b, 7) \
     + smooth(0x0c, 0x0d, 7)
-L += ['; envelope of |mono|: attack 3 ms, release 120 ms',
+L += (rlp_frame() if RLP else []) + ['; envelope of |mono|: attack 3 ms, release 120 ms',
       ins('move', 'x:(r0)', 'a'), ins('move', 'x:(r0+n0)', 'x0'), ins('add', 'x0', 'a'), ins('asr', 'a'),
       ins('abs', 'a'), ins('move', 'x:(r7+$0e)', 'x0'), ins('sub', 'x0', 'a'), ins('move', 'a', 'x1'),
       ins('move', q(1 - math.exp(-1 / (0.120 * 44100))), 'y1'),
@@ -115,7 +204,9 @@ L += [ins('move', 'y1', 'b'), ins('tst', 'a'), ins('tgt', 'y0', 'b'), ins('move'
               ins('move', 'a', 'x0', c='min(1, 3 env) / 8'), ins('move', 'x:(r7+$07)', 'y0'),
               ins('mpy', 'y0', 'x0', 'a'), ins('move', 'a', 'x0'), ins('move', q(6 / 8), 'y0'),
               ins('mpy', 'y0', 'x0', 'a'), ins('asl', '#$3', 'a', 'a', c='6 FOLW e / 8'), ins('add', q(1 / 8), 'a'), ins('move', 'a', 'x0'),
-              ins('move', 'x:(r7+$05)', 'y0'), ins('mpy', 'y0', 'x0', 'a'), ins('asl', '#$3', 'a', 'a'),
+              ins('move', 'x:(r7+$05)', 'y0'), ins('mpy', 'y0', 'x0', 'a'), ins('asl', '#$3', 'a', 'a')] + ([
+              ins('move', q(CLAMP), 'x0', c='carrier held under %.2f x Nyquist (%.0f Hz): FREQ x FOLW past it used to fold' % (CLAMP, CLAMP * 22050)),
+              ins('cmp', 'x0', 'a'), ins('tgt', 'x0', 'a', c='back down (aliased carrier, 13 Nov 2026)')] if CLAMP else []) + [
               ins('move', 'x:(r7+$0f)', 'x0'), ins('add', 'x0', 'a'),
               ins('move', 'a1', 'x:(r7+$0f)', c='phase wraps mod 2 in a1')]
 for ch in range(2):
@@ -125,7 +216,8 @@ for ch in range(2):
     L += sine() + ['; carrier toward 1 by BIAS: c = s + b (1 - s)',
                    ins('move', 'a', 'x0'), ins('move', '#>$7fffff', 'b'), ins('sub', 'a', 'b'),
                    ins('move', 'b', 'x1'), ins('move', 'x:(r7+$09)', 'y0'), ins('mac', 'x1', 'y0', 'a'),
-                   ins('move', 'a', 'x0'), ins('move', 'x:(r0)', 'y1'), ins('mpy', 'x0', 'y1', 'a')] \
+                   ins('move', 'a', 'x0')] + ([ins('move', rx('XR' if ch else 'XL'), 'y1'), ins('mpy', 'x0', 'y1', 'a'),
+                   ins('asl', 'a', c='the low-passed input is y/2')] if RLP else [ins('move', 'x:(r0)', 'y1'), ins('mpy', 'x0', 'y1', 'a')]) \
         + mix(mixslot=0x0d)
 L += ['rprend:', ins('nop'), ins('rts')]
 

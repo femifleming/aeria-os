@@ -59,6 +59,36 @@ RIDE_UP_SHIFT = 10          # back up 2^-10 a call (0.37 s) while under
 AM_ZERO = round(1e-4 * (1 << 23))
 STEPS = ('UNIS', '+12', '+19', '+24')    # SHFT: the read runs 1 x .. 4 x the write (whole frames: no interpolation)
 
+# ---- anti-alias low-pass (13 Nov 2026, "stop aliasing"): the window is read 2 / 3 / 4 x as fast as it is written,
+# so what sits above fs / (2 x ratio) folds back down. (L + R) goes through an order-3 elliptic-type low-pass first
+# (a biquad with a pair of zeros on the unit circle, then a real pole with a zero at Nyquist), designed per SHFT so
+# that everything which would land below 16 kHz is >= 37 dB down while the shimmer keeps its top to within 1 dB:
+# +12 up to 16 kHz out (8 kHz in), +19 to 15 kHz out, +24 to 14 kHz out. UNIS: no filter (bit for bit as before).
+# AA[ratio] = (pole radius logit, pole Hz, zero Hz, real-pole logit): from a minimax search (scratch design script)
+AA = {2: (1.52483816, 7814.82563, 14882.0525, 0.0412253595),
+      3: (1.92847516, 4847.52177, 10261.7512, 0.742778404),
+      4: (2.26082686, 3378.77955, 7821.42421, 1.19737751)}
+
+
+def aa_coefs(ratio):
+    """-> (B, A1H, A2, CH, P, K) as fractions: w = B (L + R) + 2 A1H w1 + A2 w2; u = w + 2 CH w1 + K w2;
+    v = u + P v1; y = v + K v1 = H (L + R)/4 (H: unity at DC), so the window holds y = filtered (L + R)/2, halved."""
+    if ratio == 1:
+        return (0.25, 0.0, 0.0, 0.0, 0.0, 0.0)
+    lr, fp, fz, lp = AA[ratio]
+    rr = 1 / (1 + math.exp(-lr))
+    a1 = -2 * rr * math.cos(2 * math.pi * fp / FS)
+    a2 = rr * rr
+    c = -2 * math.cos(2 * math.pi * fz / FS)
+    p = 1 / (1 + math.exp(-lp))
+    g = (1 + a1 + a2) / (2 + c) * (1 - p) / 2
+    return (g / 4, -a1 / 2, -a2, c / 2, p, 1.0)
+
+
+def aa_words(ratio):
+    """the same as the DSP holds them (Q23 words, K = 1 as $7fffff)"""
+    return tuple(min((1 << 23) - 1, max(-(1 << 23), round(v * (1 << 23)))) for v in aa_coefs(ratio))
+
 
 def t60(v):
     return T60 * 2 ** ((v - 64) / T60_OCT)
@@ -80,7 +110,8 @@ def pan_gains(p):
 
 ST = W.State('ST XB RP AMH AML RNG C STEP WW DW SVL SVB INJ WL WR LP0 LP1 LP2 LP3 G0 G1 G2 G3 '
              'CL0 CL1 CL2 CL3 CR0 CR1 CR2 CR3 CH0 CH1 CH2 CH3 CO0 CO1 CO2 CO3 CT0 CT1 CT2 CT3 '
-             'CF0 CF1 CF2 CF3 QT BLK DAMP RT TLAST OLAST RIDE AR')
+             'CF0 CF1 CF2 CF3 QT BLK DAMP RT TLAST OLAST RIDE AR FB FA1 FA2 FC FP FK FW1 FW2 FV1')
+AAW = ('FB', 'FA1', 'FA2', 'FC', 'FP', 'FK')
 
 
 def per_curtain(j):
@@ -181,6 +212,8 @@ TEMPLATE = r'''; CYCLES_FORWARD_BRANCHES
 ;  knob 2 TONE  damping in the loop, as the plugin's lowpass: 6 kHz x 2^((v - 64)/24) (64 = the plugin). The loop's
 ;               own lowpass sits 1.545 x higher (9.27 kHz at 64, held to 18 kHz): the lines are 0.3855 x as long
 ;  knob 3 SHFT  0 UNIS, 1 +12 (the plugin's octave), 2 +19, 3 +24: the read runs 1 x .. 4 x the write
+;               13 Nov 2026: (L + R) is low-passed first (order 3, elliptic-type, per SHFT; none at UNIS), so the
+;               faster read does not fold the top of the sound back down (aliases landing under 16 kHz >= 37 dB down)
 ;
 ; AMT 0, the glide at 0 and the curtains under 1e-5 for half a second: REST (returns at once,
 ; output = input bit for bit). Coming up from rest the ring is cleared over {=CLRB} dry calls.
@@ -324,6 +357,8 @@ auon:
         cmp     x0,a
         tgt     x0,a
         move    a,{STEP}
+        bsr     >auzaa                  ; the anti-alias low-pass for this SHFT
+        move    {STEP},a
         tst     a
         bne     aumove
         move    {=HALFN},a
@@ -411,11 +446,32 @@ aunot1:
         move    {RP},r1
         move    #>$1,n0
         do      n7,>auframes
-; (L + R)/2 into the window
-        move    x:(r0),a
+; anti-alias low-pass on L + R (per SHFT; UNIS: B = 1/4, the rest 0 = (L + R)/4 exactly): the window holds y/2
+; w = B (L + R) + 2 A1H w1 + A2 w2;  u = w + 2 CH w1 + K w2;  v = u + P v1;  y/2 = v + K v1
+        move    {FB},y0
+        move    x:(r0),x0
+        mpy     y0,x0,a
         move    x:(r0+n0),x0
-        add     x0,a
-        asr     a
+        mac     y0,x0,a
+        move    {FW1},x1
+        move    {FA1},y0
+        mac     x1,y0,a
+        mac     x1,y0,a
+        move    {FW2},x0
+        move    {FA2},y0
+        macr    y0,x0,a
+        move    x1,{FW2}
+        move    a,{FW1}
+        move    {FC},y0
+        mac     x1,y0,a
+        mac     x1,y0,a
+        move    {FK},y1
+        mac     x0,y1,a
+        move    {FV1},x1
+        move    {FP},y0
+        macr    x1,y0,a
+        move    a,{FV1}
+        macr    y1,x1,a
         move    a,x:(r1)
 ; the taps: c frames (+ 2) back and half a window further round; c falls STEP a frame
         move    {C},a
@@ -440,7 +496,7 @@ autaph:
         add     y0,b
         move    b,{WW}
         move    b,y0
-; x/2 = tap2/2 + w (tap1 - tap2)/2
+; y/4 = tap2/2 + w (tap1 - tap2)/2 (the window holds y/2)
         move    x0,a
         sub     x1,a
         asr     a
@@ -449,7 +505,7 @@ autaph:
         move    x1,b
         asr     b
         add     b,a
-; 500 Hz highpass (state variable, on x/2): lp += f bp; hp = x - lp - q bp; bp += f hp
+; 500 Hz highpass (state variable, on y/4): lp += f bp; hp = x - lp - q bp; bp += f hp
         move    {SVB},x0
         move    {=SVF},y0
         move    {SVL},b
@@ -463,10 +519,10 @@ autaph:
         move    {SVB},b
         macr    x1,y0,b
         move    b,{SVB}
-; into the lines: +-(up x amount)/2, at the lines' 1/4 scale
+; into the lines: +-(up x amount)/2, at the lines' 1/4 scale (hp is on y/4: one shift fewer than LSHIFT)
         move    {AR},y0
         mpy     x1,y0,a
-        asr     {=LSHIFT},a,a
+        asr     {=ISHIFT},a,a
         rnd     a
         move    a,{INJ}
 ; the curtains: each line's output to its place
@@ -564,7 +620,23 @@ auquiet:
 auqx:
         rts
 ; ---- subroutines (after their callers) ----
-{=RANDSUB}{=EXPSUB}{=SINSUB}'''
+{=AASUB}{=RANDSUB}{=EXPSUB}{=SINSUB}'''
+
+
+def aa_sub():
+    """the per-call coefficient set for SHFT (STEP 0..3): six words, subroutine auzaa (after its caller)"""
+    out = '; the anti-alias low-pass coefficients for this SHFT: B A1H A2 CH P K (see gen.py aa_coefs)\nauzaa:\n'
+    out += '        move    {STEP},a\n'
+    labels = ('auzb12', 'auzb19', 'auzb24')
+    for st in range(4):
+        if st:
+            out += f'{labels[st - 1]}:\n'
+        if st < 3:
+            out += f'        cmp     #>${st:06x},a\n        bne     {labels[st]}\n'
+        for name, w in zip(AAW, aa_words(st + 1)):
+            out += f'        move    #>${w & 0xffffff:06x},x0\n        move    x0,{{{name}}}\n'
+        out += '        rts\n'
+    return out
 
 
 def build(out='aurora.asm', quiet=True):
@@ -587,7 +659,7 @@ def build(out='aurora.asm', quiet=True):
         KWCAP=q(2 * math.pi * TONE_TOP / FS / math.log(2) / 32),
         CFSPAN=n(round(5.0 / CUR_TICK)), CFLO=n(round(2.0 / CUR_TICK)), CURC=q(W.pole(CUR_TAU, CUR_TICK)),
         K36=q(LEVEL * 0.8), K09=q(LEVEL * 0.2),
-        SVF=q(SV_F), SVQ2=q(1 / HP_Q / 2), LSHIFT=f'#${LSHIFT:x}',
+        SVF=q(SV_F), SVQ2=q(1 / HP_Q / 2), LSHIFT=f'#${LSHIFT:x}', ISHIFT=f'#${LSHIFT - 1:x}', AASUB=aa_sub(),
         CURTAINS=''.join(per_curtain(j) for j in range(4)),
         RCEIL=RIDE_CEIL, RDOWN=f'1/{round(1 / RIDE_DOWN)}', RUPS=RIDE_UP_SHIFT, RUPSH=f'{RIDE_UP_SHIFT:x}',
         RCEILN=q(RIDE_CEIL), RDOWNQ=q(RIDE_DOWN),

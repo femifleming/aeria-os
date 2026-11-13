@@ -19,9 +19,9 @@ DOCKER = '/Applications/Docker.app/Contents/Resources/bin/docker'
 # the effects, their P address and their Y buffer (aligned for the effect's modulo ring): see MEMORY below
 EFFECTS = [  # folder, org, ybase (None = no buffer), core (0, 1, or 2 = either: no buffer, or one both cores reach), cost
     # cost: instructions a sample at the dearest settings, as each effect's own gate measured it (dsp_host)
-    ('pitch',  0x34000, 0x38000, 2, 298),   # stereo micro-detune (WIDE): the right side has its own pair of heads (was 204)
+    ('pitch',  0x34000, 0x38000, 2, 336),   # stereo micro-detune (WIDE): the right side has its own pair of heads (was 204)
     ('disto',  0x34800, None, 2, 152),
-    ('grains', 0x35000, 0x00000, 0, 305),   # 35,280 words (800 ms), wrapped in code: core 0's Y:$0000-$89cf
+    ('grains', 0x35000, 0x00000, 0, 330),   # 35,280 words (800 ms), wrapped in code: core 0's Y:$0000-$89cf
     ('ringph', 0x35800, None, 2, 236),
     ('reso',   0x36000, 0x0A000, 0, 243),   # DTND stereo out (was 215)
     ('spectral', 0x36800, 0x3C000, 2, 1165),  # the FFT SMEAR (12 Nov 2026; 1,024-point STFT, mean 1,065 / worst call 1,137): Y:$3C000-$3E3FF, $3E400-$3FFFF free
@@ -40,9 +40,9 @@ EFFECTS = [  # folder, org, ybase (None = no buffer), core (0, 1, or 2 = either:
     ('fog',     0x32400, 0x08a00, 0, 126),
     ('twister', 0x32800, 0x08000, 1, 190),
     ('hail',    0x32C00, 0x02000, 1, 134),
-    ('aurora',  0x37800, 0x02000, 1, 194),
+    ('aurora',  0x37800, 0x02000, 1, 216),
     # 12 Nov 2026: Chloaelis' multimode filter (TPT SVF, LP > BP > HP > NOTCH, a cutoff a side: SKEW and the ColdFire's
-    # Lorenz words r6+6 / r6+7). No buffer: either core. Code in the last 1K of P:$37800's slot, after AURORA (776 words)
+    # Lorenz words r6+6 / r6+7). No buffer: either core. Code in the last 1K of P:$37800's slot, after AURORA (926 words)
     ('filt',    0x37C00, None, 2, 129),     # aeria-fx/filt: mean 126.3, worst call 128.1 (the first call)
     # 12 Nov 2026: WARM (a soft clipper, no buffer, either core) in the free half of PITCH's slot; Chloaelis' three delays
     # (core 1 only, a full 2K each) in the shared window above the FFT SMEAR's memory (Y:$3c000-$3e3ff), P:$3e800-$3ffff
@@ -55,8 +55,8 @@ MEMORY = """core 0: P:$33000 engine, P:$34000-$37fff effects (2K words each), Y:
 segments, shared window Y:$38000-$3bdfd PITCH ring, Y:$3c000-$3fdfd SMEAR ring; P:$33a00-$33fff core 1's slot tables
 core 1 (its own X and Y, each core: Y $0-$bfff, X $0-$8fff, measured 10 Nov 2026): P:$30000-$32fff effects (shared),
 Y:$0000-$7fff VERB ring, Y:$8000-$bfff ECHO left, X:$4000-$7fff ECHO right
-P:$37800 AURORA (776 words), P:$37c00-$37fff FILT (830 words with the stub; no buffer)
-P:$34400-$347ff WARM (811 words, after PITCH's 545); shared window P:$3e400-$3e7ff free, P:$3e800 TAPE (2,045), P:$3f000 BBD
+P:$37800 AURORA (926 words), P:$37c00-$37fff FILT (830 words with the stub; no buffer)
+P:$34400-$347ff WARM (811 words, after PITCH's 802); shared window P:$3e400-$3e7ff free, P:$3e800 TAPE (2,045), P:$3f000 BBD
 (1,785), P:$3f800 PT2399 (1,671): above the FFT SMEAR's Y:$3c000-$3e3ff, in the same 8K block as its last 1K
 core 1 X:$2000-$3fff HAIL or AURORA or BBD; X:$8000-$8fff TWISTER or PT2399; Y:$8000-$bfff + X:$4000-$7fff ECHO or TAPE"""
 
