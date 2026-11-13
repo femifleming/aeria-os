@@ -1,10 +1,10 @@
 """everything at once in the sequencer: eight tracks sounding on most steps, each sending MIDI chords, effects on
 four, filters and delay sends on all, the master delay at its longest with full feedback, the clock sent, and the
 18-channel stems recorded on the computer meanwhile. torture.py [seconds]"""
-import sys,time,struct,subprocess; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, sq, c1dbg, place
+import sys,time,struct,subprocess; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, sq, c1dbg, place
 import numpy as np, wave
 d=sq.d; B=0x100C0000; PB=place.SYM['params']; secs=sys.argv[1] if len(sys.argv)>1 else '30'
-C='/private/tmp/claude-501/-Users-femishonugafleming-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad/ca/fmt'; S='/private/tmp/claude-501/-Users-femishonugafleming-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad'
+C='/private/tmp/claude-501/-Users-you-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad/ca/fmt'; S='/private/tmp/claude-501/-Users-you-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad'
 MD,MO,MLN=[int(x,16) for x in sys.argv[2:5]] if len(sys.argv)>4 else (0,0,0)
 def op(a,b=0): d.ctrl_transfer(0x40,0x16,a,b,None,timeout=2000); time.sleep(0.03)
 def tp(t,i,v): aos.wr(d,(B+64+32*t+i) if i<32 else (B+64+256+32+16+96+16*t+(i-32)),bytes([v]))

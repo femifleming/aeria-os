@@ -1,6 +1,6 @@
 """how many sample voices the main processor can feed: fake looping voices are switched on and the stream's lead
 over the DSP (frames queued ahead, wanted: about 2048) and the main loop's speed are watched. voices.py"""
-import sys,struct,time; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, place as P
+import sys,struct,time; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, place as P
 d=P.d; V=P.SYM['voice']; FS=P.SYM['flex_smp']
 ptr,frames,step=struct.unpack('>III',aos.rdc(d,FS,12)); print('loop sample: %d frames'%frames)
 def setv(n):

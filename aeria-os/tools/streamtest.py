@@ -1,5 +1,5 @@
-import sys,struct,time,subprocess; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, place as P
-d=P.d; V=P.SYM['voice']; S='/private/tmp/claude-501/-Users-femishonugafleming-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad'
+import sys,struct,time,subprocess; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, place as P
+d=P.d; V=P.SYM['voice']; S='/private/tmp/claude-501/-Users-you-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad'
 def voices():
     b=aos.rdc(d,V,0x2e0); return [(i,b[46*i+44],struct.unpack('>I',b[46*i+4:46*i+8])[0],struct.unpack('>I',b[46*i:46*i+4])[0]) for i in range(16) if b[46*i+45]]
 t_end=time.time()+25; got=None

@@ -1,5 +1,5 @@
 """DIN MIDI self-test: queue note-ons on the OUT port and count what comes back on IN (cable OUT -> IN)."""
-import sys,struct,time; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos
+import sys,struct,time; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos
 MO_R,MO_W,RING,IN,MI=0x40041b5c,0x40041b5e,0x40041b60,0x40041b58,0x40041b4c
 d=aos.dev()
 g16=lambda a: struct.unpack('>H',aos.rd(d,a,2))[0]; g32=lambda a: struct.unpack('>I',aos.rd(d,a,4))[0]

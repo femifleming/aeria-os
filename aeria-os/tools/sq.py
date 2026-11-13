@@ -1,5 +1,5 @@
 """drive the sequencer's UI by hand: sq.py k CODE [0|1] | e ENC DELTA | s (screen) | w SECONDS ... (several in a row)"""
-import sys,time,struct; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos
+import sys,time,struct; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos
 d=aos.dev()
 def key(c,p=None):
     for q in ([p] if p is not None else [1,0]): d.ctrl_transfer(0x40,0x03,c,q,None,timeout=2000); time.sleep(0.06)
@@ -14,7 +14,7 @@ def seqmode(on):
     not from the sequence's head (tests rewrite that)"""
     import aos
     a=None
-    for l in open('/private/tmp/claude-501/-Users-femishonugafleming-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad/sym.txt'):
+    for l in open('/private/tmp/claude-501/-Users-you-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad/sym.txt'):
         f=l.split()
         if f[-1]=='seq_on': a=int(f[0],16)
     was=aos.rdc(d,a,1)[0]==1

@@ -1,6 +1,6 @@
 """the sequencer by hand: a SUB kick on track 1 (four to the floor) and a higher SUB on track 2 (off-beats), 120 BPM.
 seqtest.py [stop]"""
-import sys,struct,time; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, c1dbg
+import sys,struct,time; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, c1dbg
 d=aos.dev(); B=0x100C0000
 def op(a,b=0): d.ctrl_transfer(0x40,0x16,a,b,None,timeout=2000); time.sleep(0.05)
 def trk(t,i,v): aos.wr(d,B+64+32*t+i,bytes([v]))

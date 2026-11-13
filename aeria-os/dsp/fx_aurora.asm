@@ -14,6 +14,8 @@
 ;  knob 2 TONE  damping in the loop, as the plugin's lowpass: 6 kHz x 2^((v - 64)/24) (64 = the plugin). The loop's
 ;               own lowpass sits 1.545 x higher (9.27 kHz at 64, held to 18 kHz): the lines are 0.3855 x as long
 ;  knob 3 SHFT  0 UNIS, 1 +12 (the plugin's octave), 2 +19, 3 +24: the read runs 1 x .. 4 x the write
+;               13 Nov 2026: (L + R) is low-passed first (order 3, elliptic-type, per SHFT; none at UNIS), so the
+;               faster read does not fold the top of the sound back down (aliases landing under 16 kHz >= 37 dB down)
 ;
 ; AMT 0, the glide at 0 and the curtains under 1e-5 for half a second: REST (returns at once,
 ; output = input bit for bit). Coming up from rest the ring is cleared over 32 dry calls.
@@ -28,7 +30,7 @@
 ;   line 2: written at +4608, read at +6259 (1651 frames, 37.4 ms)
 ;   line 3: written at +6259, read at +8190 (1931 frames, 43.8 ms)
 ; (the plugin's 2703 3523 4282 5014 frames x 0.3854; gains set for the same decay time)
-; r7: 00 ST 01 XB 02 RP 03 AMH 04 AML 05 RNG 06 C 07 STEP 08 WW 09 DW 0a SVL 0b SVB 0c INJ 0d WL 0e WR 0f LP0 10 LP1 11 LP2 12 LP3 13 G0 14 G1 15 G2 16 G3 17 CL0 18 CL1 19 CL2 1a CL3 1b CR0 1c CR1 1d CR2 1e CR3 1f CH0 20 CH1 21 CH2 22 CH3 23 CO0 24 CO1 25 CO2 26 CO3 27 CT0 28 CT1 29 CT2 2a CT3 2b CF0 2c CF1 2d CF2 2e CF3 2f QT 30 BLK 31 DAMP 32 RT 33 TLAST 34 OLAST 35 RIDE 36 AR
+; r7: 00 ST 01 XB 02 RP 03 AMH 04 AML 05 RNG 06 C 07 STEP 08 WW 09 DW 0a SVL 0b SVB 0c INJ 0d WL 0e WR 0f LP0 10 LP1 11 LP2 12 LP3 13 G0 14 G1 15 G2 16 G3 17 CL0 18 CL1 19 CL2 1a CL3 1b CR0 1c CR1 1d CR2 1e CR3 1f CH0 20 CH1 21 CH2 22 CH3 23 CO0 24 CO1 25 CO2 26 CO3 27 CT0 28 CT1 29 CT2 2a CT3 2b CF0 2c CF1 2d CF2 2e CF3 2f QT 30 BLK 31 DAMP 32 RT 33 TLAST 34 OLAST 35 RIDE 36 AR 37 FB 38 FA1 39 FA2 3a FC 3b FP 3c FK 3d FW1 3e FW2 3f FV1
 
 init:
         move    #>$ffffff,m4
@@ -163,6 +165,8 @@ auon:
         cmp     x0,a
         tgt     x0,a
         move    a,x:(r7+$07)
+        bsr     >auzaa                  ; the anti-alias low-pass for this SHFT
+        move    x:(r7+$07),a
         tst     a
         bne     aumove
         move    #>$00044e,a
@@ -438,11 +442,32 @@ aucurd:
         move    x:(r7+$02),r1
         move    #>$1,n0
         do      n7,>auframes
-; (L + R)/2 into the window
-        move    x:(r0),a
+; anti-alias low-pass on L + R (per SHFT; UNIS: B = 1/4, the rest 0 = (L + R)/4 exactly): the window holds y/2
+; w = B (L + R) + 2 A1H w1 + A2 w2;  u = w + 2 CH w1 + K w2;  v = u + P v1;  y/2 = v + K v1
+        move    x:(r7+$37),y0
+        move    x:(r0),x0
+        mpy     y0,x0,a
         move    x:(r0+n0),x0
-        add     x0,a
-        asr     a
+        mac     y0,x0,a
+        move    x:(r7+$3d),x1
+        move    x:(r7+$38),y0
+        mac     x1,y0,a
+        mac     x1,y0,a
+        move    x:(r7+$3e),x0
+        move    x:(r7+$39),y0
+        macr    y0,x0,a
+        move    x1,x:(r7+$3e)
+        move    a,x:(r7+$3d)
+        move    x:(r7+$3a),y0
+        mac     x1,y0,a
+        mac     x1,y0,a
+        move    x:(r7+$3c),y1
+        mac     x0,y1,a
+        move    x:(r7+$3f),x1
+        move    x:(r7+$3b),y0
+        macr    x1,y0,a
+        move    a,x:(r7+$3f)
+        macr    y1,x1,a
         move    a,x:(r1)
 ; the taps: c frames (+ 2) back and half a window further round; c falls STEP a frame
         move    x:(r7+$06),a
@@ -467,7 +492,7 @@ autaph:
         add     y0,b
         move    b,x:(r7+$08)
         move    b,y0
-; x/2 = tap2/2 + w (tap1 - tap2)/2
+; y/4 = tap2/2 + w (tap1 - tap2)/2 (the window holds y/2)
         move    x0,a
         sub     x1,a
         asr     a
@@ -476,7 +501,7 @@ autaph:
         move    x1,b
         asr     b
         add     b,a
-; 500 Hz highpass (state variable, on x/2): lp += f bp; hp = x - lp - q bp; bp += f hp
+; 500 Hz highpass (state variable, on y/4): lp += f bp; hp = x - lp - q bp; bp += f hp
         move    x:(r7+$0b),x0
         move    #>$091dd5,y0
         move    x:(r7+$0a),b
@@ -490,10 +515,10 @@ autaph:
         move    x:(r7+$0b),b
         macr    x1,y0,b
         move    b,x:(r7+$0b)
-; into the lines: +-(up x amount)/2, at the lines' 1/4 scale
+; into the lines: +-(up x amount)/2, at the lines' 1/4 scale (hp is on y/4: one shift fewer than LSHIFT)
         move    x:(r7+$36),y0
         mpy     x1,y0,a
-        asr     #$2,a,a
+        asr     #$1,a,a
         rnd     a
         move    a,x:(r7+$0c)
 ; the curtains: each line's output to its place
@@ -686,6 +711,70 @@ auquiet:
 auqx:
         rts
 ; ---- subroutines (after their callers) ----
+; the anti-alias low-pass coefficients for this SHFT: B A1H A2 CH P K (see gen.py aa_coefs)
+auzaa:
+        move    x:(r7+$07),a
+        cmp     #>$000000,a
+        bne     auzb12
+        move    #>$200000,x0
+        move    x0,x:(r7+$37)
+        move    #>$000000,x0
+        move    x0,x:(r7+$38)
+        move    #>$000000,x0
+        move    x0,x:(r7+$39)
+        move    #>$000000,x0
+        move    x0,x:(r7+$3a)
+        move    #>$000000,x0
+        move    x0,x:(r7+$3b)
+        move    #>$000000,x0
+        move    x0,x:(r7+$3c)
+        rts
+auzb12:
+        cmp     #>$000001,a
+        bne     auzb19
+        move    #>$02714c,x0
+        move    x0,x:(r7+$37)
+        move    #>$2e6b8f,x0
+        move    x0,x:(r7+$38)
+        move    #>$a9ab95,x0
+        move    x0,x:(r7+$39)
+        move    #>$42da7a,x0
+        move    x0,x:(r7+$3a)
+        move    #>$4151ac,x0
+        move    x0,x:(r7+$3b)
+        move    #>$7fffff,x0
+        move    x0,x:(r7+$3c)
+        rts
+auzb19:
+        cmp     #>$000002,a
+        bne     auzb24
+        move    #>$013451,x0
+        move    x0,x:(r7+$37)
+        move    #>$5624ba,x0
+        move    x0,x:(r7+$38)
+        move    #>$9e6df3,x0
+        move    x0,x:(r7+$39)
+        move    #>$f21bae,x0
+        move    x0,x:(r7+$3a)
+        move    #>$56bbb3,x0
+        move    x0,x:(r7+$3b)
+        move    #>$7fffff,x0
+        move    x0,x:(r7+$3c)
+        rts
+auzb24:
+        move    #>$00b668,x0
+        move    x0,x:(r7+$37)
+        move    #>$66bd9b,x0
+        move    x0,x:(r7+$38)
+        move    #>$9707c2,x0
+        move    x0,x:(r7+$39)
+        move    #>$c7958f,x0
+        move    x0,x:(r7+$3a)
+        move    #>$624fb9,x0
+        move    x0,x:(r7+$3b)
+        move    #>$7fffff,x0
+        move    x0,x:(r7+$3c)
+        rts
 aurand:
         move    x:(r7+$05),x0
         move    #>$0343fd,y0

@@ -7,13 +7,13 @@ mkdir -p "$OUT"
 export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
 # the DSP program first (Octabam's vendored dsp_asm), checked by disassembling it back
 docker run --rm --network none --user "$(id -u):$(id -g)" -v "$(cd ../dsp && pwd)":/d -w /d modwerk-source-tools sh -c '
-  /opt/toolchain/vendor/dsp56300/build/source/dsp_host/dsp_asm -in engine.asm -org 33000 -out slots.bin -list > slots.lst 2>&1 &&
+  /opt/toolchain/vendor/dsp56300/build/source/dsp_host/dsp_asm -in engine.asm -org 200 -out slots.bin -list > slots.lst 2>&1 &&
   /opt/toolchain/vendor/dsp56300/build/source/dsp_host/dsp_asm -in core1.asm -org 33800 -out core1.bin -list > core1.lst 2>&1 &&
   /opt/toolchain/vendor/dsp56300/build/source/dsp_host/dsp_asm -in stage1.asm -org 31000 -out stage1.bin -list > stage1.lst 2>&1 &&
   /opt/toolchain/vendor/dsp56300/build/source/dsp_host/dsp_asm -in stage1b.asm -org 32000 -out stage1b.bin -list > stage1b.lst 2>&1 &&
   ! grep -v "^0" slots.lst core1.lst stage1.lst | grep -v ":assembled\|:wrote" '
-python3 ../dsp/pmove.py ../dsp/slots.bin
-python3 ../dsp/mkinc.py ../dsp/slots.bin dsp_slots.inc 33000 slots
+python3 ../dsp/pmove.py ../dsp/slots.bin && python3 ../dsp/pmove.py ../dsp/stage1.bin stage1
+python3 ../dsp/mkinc.py ../dsp/slots.bin dsp_slots.inc 200 slots
 python3 ../dsp/mkinc.py ../dsp/core1.bin dsp_core1.inc 33800 core1
 python3 ../dsp/mkinc.py ../dsp/stage1.bin dsp_stage1.inc 31000 stage1
 python3 ../dsp/mkinc.py ../dsp/stage1b.bin dsp_stage1b.inc 32000 stage1b

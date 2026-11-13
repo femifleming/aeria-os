@@ -1,6 +1,6 @@
 """place an effect row into a chain slot through the keys, then report meters and DSP health: place.py row [trig]"""
-import sys,struct,time; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, c1dbg
-SYM={l.split()[-1]:int(l.split()[0],16) for l in open('/private/tmp/claude-501/-Users-femishonugafleming-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad/sym.txt')}
+import sys,struct,time; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, c1dbg
+SYM={l.split()[-1]:int(l.split()[0],16) for l in open('/private/tmp/claude-501/-Users-you-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad/sym.txt')}
 d=aos.dev()
 i32=lambda a: struct.unpack('>i',aos.rdc(d,a,4))[0]
 def key(c):

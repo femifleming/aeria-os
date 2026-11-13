@@ -1,7 +1,7 @@
 """MIDI notes in -> tracks: bytes injected as if from MIDI IN, the result recorded. seqnin.py"""
-import sys,time,struct,subprocess,threading; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, sq, place
+import sys,time,struct,subprocess,threading; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, sq, place
 import numpy as np, wave
-d=sq.d; B=0x100C0000; S='/private/tmp/claude-501/-Users-femishonugafleming-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad'
+d=sq.d; B=0x100C0000; S='/private/tmp/claude-501/-Users-you-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad'
 def op(a,b=0): d.ctrl_transfer(0x40,0x16,a,b,None,timeout=2000); time.sleep(0.02)
 def tp(t,i,v): aos.wr(d,(B+64+32*t+i) if i<32 else (B+64+256+32+16+96+16*t+(i-32)),bytes([v]))
 def note(ch,n,v=100): op(7,0x90|ch); op(7,n); op(7,v)

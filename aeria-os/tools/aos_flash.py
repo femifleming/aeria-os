@@ -4,13 +4,13 @@ link (usb.c FLASH): decoded to the plain container here, checked to hold the fla
 bootloader copy, staged, verified, written back to front by the unit, then read back whole.
     <modwerk venv python> aos_flash.py AERIA_OS.bin FLASH_BUILD_MAIN.raw"""
 import sys, time, struct
-sys.path.insert(0, '/Users/femishonugafleming/octa/aeria-os/tools'); sys.path.append('/Users/femishonugafleming/octa/modwerk/sdk')
-import firmware_codec; firmware_codec.use_elekloader('/Users/femishonugafleming/.cache/modwerk-upstream/elekloader')
+sys.path.insert(0, '/Users/you/octa/aeria-os/tools'); sys.path.append('/Users/you/octa/modwerk/sdk')
+import firmware_codec; firmware_codec.use_elekloader('/Users/you/.cache/modwerk-upstream/elekloader')
 from elekloader import elek, formats
 import aos, usb.core
 raw = open(sys.argv[1], 'rb').read()
 plain = elek.decode_bin(raw)[1]
-stock, dev, rel = formats.load('/Users/femishonugafleming/octa/build/to-card/OCTATRACK_OS1.40C_OFFICIAL.bin')
+stock, dev, rel = formats.load('/Users/you/octa/build/to-card/OCTATRACK_OS1.40C_OFFICIAL.bin')
 main = formats.main_image(formats.parse(raw, dev), dev)
 img = open(sys.argv[2], 'rb').read()
 assert main[:0xDDDE0] == img[:0xDDDE0], 'the container does not hold this build'

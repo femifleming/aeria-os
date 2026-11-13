@@ -1,5 +1,5 @@
 """core 1 helpers: dspw(d, addr, val) writes DSP X memory through core 0's engine; reports(d) reads core 1's debug words."""
-import sys,struct,time; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos
+import sys,struct,time; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos
 def st(d,c): return bytes(d.ctrl_transfer(0xC0,0x10,c,0,16,timeout=2000))
 def dspw(d,addr,val,y=0):
     d.ctrl_transfer(0x40,0x10,0,4,struct.pack('>II',(0x80000000 if y else 0)|addr,val&0xffffff),timeout=2000)

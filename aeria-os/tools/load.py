@@ -1,6 +1,6 @@
 """core 0's spare time: turns of the engine's wait loop per frame (now, and the least since zeroed), read through
 core 1's reports. load.py [tag]"""
-import sys,struct,time; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, c1dbg, place as P
+import sys,struct,time; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, c1dbg, place as P
 d=P.d
 def load(tag=''):
     c1dbg.dspw(d,0x33a02,0); time.sleep(1.2); r=c1dbg.reports(d,0.5)

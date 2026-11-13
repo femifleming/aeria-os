@@ -43,6 +43,53 @@ static uint32_t rd16(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] 
 static uint8_t wav_head[1024] __attribute__((aligned(4)));
 static uint32_t div_u(uint32_t n, uint32_t d) { uint32_t q = 0, r = 0; for (int i = 31; i >= 0; i--) { r = r << 1 | ((n >> i) & 1); if (r >= d) { r -= d; q |= 1u << i; } } return q; }
 /* path -> s, into [dst, dst+room): 1 if loaded (cut to fit if it is longer) */
+/* raw frames -> the sampler's 24-bit stereo pairs */
+static void wav_widen(const uint8_t *src, int32_t *o, uint32_t frames, uint32_t fsz, uint32_t bps, uint32_t ch, uint32_t bits, uint32_t fmt)
+{
+    for (uint32_t i = 0; i < frames; i++) {
+        int32_t v[2];
+        for (uint32_t c = 0; c < ch; c++) {
+            const uint8_t *p = src + i * fsz + c * bps;
+            int32_t x;
+            if (bits == 8) x = ((int32_t)p[0] - 128) << 16;
+            else if (bits == 16) x = (int32_t)(int16_t)(uint16_t)(p[0] | p[1] << 8) << 8;
+            else if (bits == 24) x = (int32_t)((uint32_t)p[0] << 8 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 24) >> 8;
+            else if (fmt == 1) x = (int32_t)rd32(p) >> 8;
+            else {                                             /* float: sign, exponent, mantissa -> 24 bits */
+                uint32_t f = rd32(p), e = (f >> 23) & 0xFF, m = (f & 0x7FFFFF) | 0x800000;
+                int sh = 127 - (int)e;                         /* |x| = m * 2^(e-150); 24-bit full scale = 2^23 */
+                int32_t a = e == 0 ? 0 : sh <= 0 ? 0x7FFFFF : sh >= 24 ? 0 : (int32_t)(m >> sh);
+                if (a > 0x7FFFFF) a = 0x7FFFFF;
+                x = (f >> 31) ? -a : a;
+            }
+            v[c] = x;
+        }
+        if (ch == 1) v[1] = v[0];
+        o[2 * i] = v[0]; o[2 * i + 1] = v[1];
+    }
+}
+
+/* the card's preview (slot 128) plays as soon as its first half second is in; the rest comes in a piece each UI tick,
+ * well ahead of the voice (13 Nov 2026: the whole file first took a second or more before anything was heard) */
+uint32_t hear_dbg[4];   /* the preview: ticks (132 a microsecond) before it could play, its length in frames, pieces loaded */
+static struct { Smp *s; uint32_t cl, data_at, fsz, bps, ch, bits, fmt, done, total; } hear_job;
+static uint8_t hear_chunk[16384];
+static int hear_more(void)
+{
+    if (!hear_job.s) return 0;
+    uint32_t n = div_u(sizeof hear_chunk, hear_job.fsz);
+    if (n > hear_job.total - hear_job.done) n = hear_job.total - hear_job.done;
+    uint32_t raw = n * hear_job.fsz;
+    if (n && fat_read_at(hear_job.cl, hear_job.data_at + hear_job.done * hear_job.fsz, hear_chunk, raw) == raw) {
+        wav_widen(hear_chunk, hear_job.s->d + 2 * hear_job.done, n, hear_job.fsz, hear_job.bps, hear_job.ch, hear_job.bits, hear_job.fmt);
+        hear_job.done += n; hear_job.s->frames = hear_job.done;
+    } else hear_job.total = hear_job.done;                 /* a read went wrong: keep what is in */
+    if (hear_job.done >= hear_job.total) hear_job.s = 0;
+    hear_dbg[2]++;
+    return 1;
+}
+static uint32_t wav_first;   /* frames to load at once (0: all); the rest by hear_more */
+
 static int wav_load(const char *path, Smp *s, uint8_t *dst, uint32_t room)
 {
     *(volatile uint32_t *)0x100FBFF0u = 0x70;
@@ -65,32 +112,26 @@ static int wav_load(const char *path, Smp *s, uint8_t *dst, uint32_t room)
     if (data_at + data_len > size) data_len = size - data_at;
     uint32_t frames = div_u(data_len, fsz), max = room / 8;
     if (frames > max) frames = max;
+    hear_job.s = 0;
+    if (wav_first && frames > wav_first) {
+        uint32_t total = frames; frames = wav_first;
+        uint32_t raw = frames * fsz;
+        uint8_t *src = dst + (frames * 8 - raw);
+        if (fat_read_at(cl, data_at, src, raw) != raw) { s->status = 3; return 0; }
+        wav_widen(src, (int32_t *)dst, frames, fsz, bps, ch, bits, fmt);
+        s->d = (int32_t *)dst; s->frames = frames;
+        s->step = div_u(rate, 44100u) << 16 | (div_u((rate % 44100u) << 16, 44100u) & 0xFFFF);
+        hear_job.cl = cl; hear_job.data_at = data_at; hear_job.fsz = fsz; hear_job.bps = bps; hear_job.ch = ch; hear_job.bits = bits;
+        hear_job.fmt = fmt; hear_job.done = frames; hear_job.total = total; hear_job.s = s;
+        s->status = 0;
+        return 1;
+    }
     /* read the raw frames to the end of the space they will fill, then widen them forwards (never overtaking) */
     uint32_t raw = frames * fsz, out = frames * 8;
     uint8_t *src = dst + (out - raw);
     if (fat_read_at(cl, data_at, src, raw) != raw) { s->status = 3; return 0; }
     int32_t *o = (int32_t *)dst;
-    for (uint32_t i = 0; i < frames; i++) {
-        int32_t v[2];
-        for (uint32_t c = 0; c < ch; c++) {
-            const uint8_t *p = src + i * fsz + c * bps;
-            int32_t x;
-            if (bits == 8) x = ((int32_t)p[0] - 128) << 16;
-            else if (bits == 16) x = (int32_t)(int16_t)(uint16_t)(p[0] | p[1] << 8) << 8;
-            else if (bits == 24) x = (int32_t)((uint32_t)p[0] << 8 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 24) >> 8;
-            else if (fmt == 1) x = (int32_t)rd32(p) >> 8;
-            else {                                             /* float: sign, exponent, mantissa -> 24 bits */
-                uint32_t f = rd32(p), e = (f >> 23) & 0xFF, m = (f & 0x7FFFFF) | 0x800000;
-                int sh = 127 - (int)e;                         /* |x| = m * 2^(e-150); 24-bit full scale = 2^23 */
-                int32_t a = e == 0 ? 0 : sh <= 0 ? 0x7FFFFF : sh >= 24 ? 0 : (int32_t)(m >> sh);
-                if (a > 0x7FFFFF) a = 0x7FFFFF;
-                x = (f >> 31) ? -a : a;
-            }
-            v[c] = x;
-        }
-        if (ch == 1) v[1] = v[0];
-        o[2 * i] = v[0]; o[2 * i + 1] = v[1];
-    }
+    wav_widen(src, o, frames, fsz, bps, ch, bits, fmt);
     s->d = o; s->frames = frames;
     s->step = div_u(rate, 44100u) << 16 | (div_u((rate % 44100u) << 16, 44100u) & 0xFFFF);
     s->status = 0;
@@ -671,7 +712,7 @@ int aos_slot_load(int kind, int slot, const char *path)
         if (ok && strlen(path) < 124) { loaded_init(); vcopy(LOADED->loop, path, 124); }
         return ok;
     }
-    if (slot == 128) { voices_stop(&st_smp[128]); return wav_load(path, &st_smp[128], (uint8_t *)POOL_HEAR, SZ_HEAR); }
+    if (slot == 128) { uint32_t t0 = now(); voices_stop(&st_smp[128]); hear_job.s = 0; wav_first = 22050; int ok = wav_load(path, &st_smp[128], (uint8_t *)POOL_HEAR, SZ_HEAR); wav_first = 0; hear_dbg[0] = now() - t0; hear_dbg[1] = hear_job.total; return ok; }
     if (slot < 0 || slot >= 128) return 0;
     int b = slot / 16;
     if (slot % 16 == 0) bank_used[b] = 0;      /* a deal starts at the bank's first slot: the bank is new */
@@ -775,6 +816,7 @@ static void sampler_tick(void)
 {
     const uint8_t *h = preview_lane[4], *t1 = preview_lane[0];
     if (preview_step > 4) restore_tick();       /* after the intro has begun */
+    hear_more();
     bus_gain[BUS_LOOP] = (uint32_t)h[20] * 258u;    /* 127 -> 1.0 (Q15) */
     bus_gain[BUS_STAR] = (uint32_t)h[21] * 258u;
     bus_gain[BUS_BALLOON] = bal_level * 258u;

@@ -1,6 +1,6 @@
 """the sequencer's limits: every track pitched, every step on, filters and sends everywhere; then effects added.
 Saves the sequence first and puts it back. seqstress.py"""
-import sys,time,struct; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, sq, c1dbg
+import sys,time,struct; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, sq, c1dbg
 d=sq.d; B=0x100C0000
 keep=aos.rd(d,B,0x400+12*64*8)   # the head and pattern A
 def op(a,b=0): d.ctrl_transfer(0x40,0x16,a,b,None,timeout=2000); time.sleep(0.05)
@@ -26,7 +26,7 @@ try:
     measure('... + pitch envelopes, ducking')
     # effects: rows by cost, on core 0 until it overruns
     import re
-    src=open('/Users/femishonugafleming/octa/aeria-os/src/fx_table.inc').read()
+    src=open('/Users/you/octa/aeria-os/src/fx_table.inc').read()
     cost=[int(x) for x in re.search(r'fx_cost\[FX_COUNT\] = \{([^}]*)\}',src).group(1).split(',')]
     core=[int(x) for x in re.search(r'fx_core\[FX_COUNT\] = \{([^}]*)\}',src).group(1).split(',')]
     names=re.findall(r'\{"AERIA ([A-Z ]+)"',src) or re.findall(r'\{"([A-Za-z ]+)", 0x3',src)

@@ -611,7 +611,7 @@ I'll build those once you've confirmed the stars play correctly, since they all 
 
 **What was done / reported:**
 
-_(no written reply: work continued)_
+_(work continued; reported in the next entries)_
 
 ---
 
@@ -796,7 +796,7 @@ AERIA v8 is running, and every sound change now goes through the Octatrack's own
 
 **What was done / reported:**
 
-_(no written reply: work continued)_
+_(work continued; reported in the next entries)_
 
 ---
 
@@ -2673,7 +2673,7 @@ The 440 run went through but left the unit stuck again, as these hybrid runs usu
 
 **What was done / reported:**
 
-_(no written reply: work continued)_
+_(work continued; reported in the next entries)_
 
 ---
 
@@ -2685,7 +2685,7 @@ _(no written reply: work continued)_
 
 **What was done / reported:**
 
-_(no written reply: work continued)_
+_(work continued; reported in the next entries)_
 
 ---
 
@@ -3668,7 +3668,7 @@ Core 0 came back by itself this time; only core 1 is down. So I'm running the me
 
 **What was done / reported:**
 
-_(no written reply: work continued)_
+_(work continued; reported in the next entries)_
 
 ---
 
@@ -5647,6 +5647,173 @@ None of these needs doing unless you want it.
 
 **What was done / reported:**
 
-_(no written reply: work continued)_
+The log is on GitHub and the cleanup is done.
+
+**On GitHub** (README → "History"):
+- **`docs/LOG.md`**: all 235 of your requests from 9–13 November, quoted word for word in order, each followed by what I reported doing about it. Home-folder paths are shortened to `~`. I checked it for your email, real name and any passwords or keys, and found none.
+- **`docs/CHANGELOG.md`**: a day-by-day summary of how the project got here, then every release build with its notes and whether it was tested on the unit. The days in the summary part are approximate.
+- I also removed five stale test-result files from the repo. Two backup files the effect tests still need had never been uploaded, so I added them.
+
+**Cleanup:** about 3.1 GB moved to one folder, `~/.Trash/octa-cleanup-2026-11-13`, so nothing is gone until you empty the Trash:
+- 3.0 GB of old effect-test output. I put back the emulator and the files the tests need, and a WARM test still passes.
+- About 210 old `.bak`/`.pre` backup copies. Four that the scripts still read stay where they are.
+- The archived Chinese, Japanese and German manual sources.
+- The leftover video scripts and the two folders I'd used to stage earlier GitHub uploads.
+- 15 old test builds.
+- The 01:34 release, which was never tested on the unit and has been superseded.
+- Separately, I deleted about 6.5 GB of my own temporary working files.
+
+**Kept on purpose:**
+- Your saved-state backups. The ones from my test sessions are now in `~/octa/aeria-os/backups/session-2026-11-13/`.
+- All five tested releases, so the flasher can still go back to an older build.
+- The current builds.
+- The Modwerk and octabam folders, which the build tools come from.
+- `~/octa/build` (273 MB), which holds backups of your old Octatrack projects from the Modwerk days. Delete it yourself if you don't need them.
+
+---
+
+### 236. 07:28
+
+**Ask:**
+
+> the headphone out is still doing a weird thing where it will be stereo and then a few seconds later itll cut out completely and be right only, and then a few seconds later itll cutout and be left comlpletely, and it cuts in and out sometimes. also when i preview audio it
+
+**What was done / reported:**
+
+That explains the result: all four inputs measured silent (about −110 dB) while the unit was playing at −14 dB over USB, so nothing was plugged in. Please patch it like this:
+
+1. **Main Out L → Input A**
+2. **Main Out R → Input B**
+3. **Phones → Inputs C and D** through a stereo splitter (TRS to two mono jacks): the **tip (left) → C** and the **ring (right) → D**.
+4. **MIDI Out → MIDI In** (optional; it isn't needed for this test).
+
+Use ordinary mono cables for the mains. Leave the headphone volume knob at about three-quarters. The inputs are muted in the mix during my tests, so there won't be any feedback.
+
+Tell me once it's patched. I'll run the 60-second recording again to catch the headphone channels dropping or moving. If my theory is right, a fix in the DSP engine should cure it: the output DMA would run continuously like the other two, instead of stopping and being restarted every 256 words.
+
+And please finish the sentence that got cut off: "when i preview audio it…" what happens?
+
+---
+
+### 237. 07:34
+
+**Ask:**
+
+> when i preview audio in the file browser it takes a second, also what is preventing me from adding affects, why does the dsp full so fast, how can we change that
+
+**What was done / reported:**
+
+The test version with the faster preview is now running on your Octatrack from memory. Flash is unchanged.
+
+**Preview:** it loaded the whole file from the card before playing anything (up to about 12 seconds of audio). Now it starts after the first half second is in and loads the rest while it plays. Please try previewing a few files in the browser and tell me if it feels instant now. I'm also logging how long each one takes to start.
+
+**Why the DSP fills up so fast:**
+- Each effect is booked at its worst case, in DSP instructions per sample. The unit has two DSP cores:
+
+| | Total | Already used | Left for effects |
+|---|---|---|---|
+| Core 1 | 1,700 | 710 (mixer, samples, tracks, USB, inputs) | 990 |
+| Core 2 | 1,700 | 250 | 1,450 |
+
+- **VERB (1,145) and SMEAR (1,165) each take almost a whole core**, PT2399 takes 970 and BBD 780. One of those plus a couple of small effects and it says DSP FULL.
+- The booking is worst case and strict, so a core is never actually overloaded (no clicks or dropouts). But a core often sits around 50–70% busy while the unit is refusing new effects.
+
+**Ways to get more room, best first:**
+1. **Cheaper versions of the heavy effects:** a VERB and a SMEAR at roughly half the cost, and BBD/PT2399 running their delay lines at half rate (which suits those dark delays anyway). Biggest gain: room for 2–4 more effects when one of these is in the chain. The cost is a little sound quality, which you'd judge by ear.
+2. **Shrink the 710 used up before any effect on the first core:** sequencer work (16 track filters, 8 track voices) runs even in the sky, where it isn't needed. Probably 100–300 more room on that core.
+3. **Book effects by their measured load, with a safety margin, instead of the worst case.** More room in practice, but a sudden spike could cause a click, so I'd keep this last.
+4. **Check the DSP clock:** the budget works out lower than this chip should manage. If the chip turns out to be running below its rated speed, raising it would give more room on both cores. Worth a careful look, but there's a risk.
+
+My recommendation is 2 and 1 in that order, because neither risks clicks.
+
+**Headphones:** that still needs the loopback patched before I can test the fix: Main L → In A, Main R → In B, Phones → C/D through the splitter (tip → C, ring → D). Tell me when it's in and I'll measure, fix and flash. I'll start on option 2 meanwhile.
+
+---
+
+### 238. 07:40
+
+**Ask:**
+
+> do 2, make the delays run at half rate
+
+**What was done / reported:**
+
+Option 2 is done and flashed (build 08:03:09), and the delays are being converted to half rate by the helper now.
+
+The DSP filled so fast because all our code was running from memory the two DSP cores share. Code fetched from there takes about twice as long, and the two cores slow each other down. Each core also has its own private program memory with no such delay, and we weren't using it. I moved the engine (mixer, outputs, filters, sample streaming) into the first core's private memory. Its own load roughly halved:
+
+| | Before | Now |
+|---|---|---|
+| Sky, engine's worst case | ~700 | ~370 |
+| Sequencer stress test, worst load | 89% | 50% |
+| Effect room on the first core, sky | 990 | 1,280 |
+| Effect room on the first core, sequencer | 560 | 1,060 |
+| USB per-track frames dropped in that stress test | 4,452 | 1,840 |
+
+- **Filters:** the master EQ, the rain/helium filters and the 16 sequencer track filters now run about 3× cheaper, with output identical bit for bit. They use a DSP feature (doing a multiply and two memory loads in one instruction) that I'd wrongly noted as unavailable.
+- **Output loop:** the main mix was being computed twice; it's now computed once.
+- **Main feedback:** its code, unused since you removed the feature, is gone from the DSP program.
+- **Real result:** GRAINS, RESO, PITCH and WIND now run together on the first core at 70% worst, with EQ, weather and USB recording all on. That combination used to be refused.
+- **A fix along the way:** with the master EQ and weather filters on, the old booking could actually overload the first core. Now it can't.
+- **Checks:** the effect tests, 8/8 features and the stress test all pass, and your saved state was put back.
+
+**What I need from you:**
+1. **Power-cycle the Octatrack once.** I tested this build by loading it into memory, but a cold start loads the DSP slightly differently, and that path is new.
+2. **Try previewing a few files in the browser.** This build starts playback after the first half second instead of loading the whole file. Tell me if it feels instant.
+3. **Patch the loopback when you can** (Main L → In A, Main R → In B, Phones → C/D through the splitter) so I can measure and fix the headphones.
+
+**Next big lever, if you want it:** move the effects into private memory too. The first core has room for its four fixed effects (GRAINS, RESO, WIND, FOG), and the second core could take its fixed-core effects. Those effects could then cost about half their current share of the DSP, giving room for maybe 2–3 more effects per chain. It's a bigger change: the effects would load differently and every cost would need re-measuring on the unit.
+
+---
+
+### 239. 08:11
+
+**Ask:**
+
+> cycled, patched, test and fix headphone out problem.
+
+**What was done / reported:**
+
+I couldn't make the headphone fault happen. The output tested clean in every case, so I haven't changed anything for it yet. I did find and fix a separate bug along the way, and flashed build 08:21:44.
+
+**Headphone tests on your unit (loopback: tip → In C, ring → In D):**
+
+| Test | Length | Result |
+|---|---|---|
+| Sequencer playing | 60 s | Both sides steady, no drops |
+| Sky with your own chain and sources | 2 min | Left followed main left and right followed main right (correlation 1.00) every half second |
+| Effects swapped every 2 s | 60 s | 0 of 240 quarter-seconds with a drop, swap or silent side |
+
+I also ruled out the causes I could think of in the firmware:
+- The OS writes to the audio chip only once, at start-up.
+- Nothing in the DSP can hold up the output.
+- None of your slots are on the quad panner.
+
+The headphones always carried exactly what the main outputs carried.
+
+**What I fixed:** the start-up power cycle you did confirmed the new build loads properly. The bug was in effect placement: with the first core's booking lowered, picking effects in some orders could put SMEAR on a core that was already full (overload and clicks), or refuse it. Placement now tries both cores, and the simulation shows no order of your chain gets refused any more. Your state is back.
+
+**Since I can't reproduce it, these would help:**
+1. **Does it still happen on this build?** The engine changed a lot today, and the old build may have been involved.
+2. **Do the main outputs do it too, or only the headphones?** If only the headphones, try other headphones or a different adapter or plug. A plug not fully seated gives exactly "left only, right only, mono". Our splitter in the same jack was clean.
+3. **What was playing?** Some things move sound left and right on purpose:
+   - RING's SPRD at a low FREQ makes a tremolo that circles between the sides.
+   - GRAINS' SPRD above 50% throws grains hard left or right.
+   - The TWISTER weather spins the sound.
+   - The quad panner's ORBIT, PING and LRNZ modes move it too. Those settings are cleared on power-off, so they could have been on before.
+
+The half-rate BBD and PT2399 are still being worked on. I'll test and flash them when they're ready.
+
+---
+
+### 240. 08:46
+
+**Ask:**
+
+> hows it going
+
+**What was done / reported:**
+
+Manual rebuilt: BBD's page is gone, and the counts and costs are updated. Now removing the BBD source (to the Trash) and updating GitHub.
 
 ---

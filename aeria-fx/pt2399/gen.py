@@ -1,27 +1,42 @@
 #!/usr/bin/env python3
 """Generates pt2399.asm and pt2399_test.asm (AERIA PT2399: Chloaelis' PT2399 delay, DSP.h PT2399Line inside DelayCell,
-in 24-bit fixed point).
+in 24-bit fixed point), the chip and everything around it at HALF RATE (22.05 kHz).
 
     python3 pt2399/gen.py     (host, no dependencies; test.py imports this and rebuilds)
 
-pt2399.asm       the hardware build: the RAM starts at the word X:$213 points to, used as an X address (core 1 X:$8000)
+pt2399.asm       the hardware build: the RAM starts at the word X:$213 points to, used as an X address (core 1 X:$2000)
 pt2399_test.asm  the same source with the RAM at X:$10000 (dsp_host hands out a Y base); the init lines differ
+
+Half rate (13 Nov 2026; the 12 Nov full-rate build is gen.py.prehalf): a polyphase IIR halfband decimator
+(halfband.py: 5 allpasses, >= 62 dB from 12.05 kHz) feeds the chip at 22.05 kHz, a sample every second full-rate
+sample, and an identical halfband interpolates the wet back to 44.1 kHz (only those and the mix run at 44.1 kHz). The
+chip clock is unchanged in bits a second (at most CAP = 6 bits a half-rate sample = 132.3 kbit/s, as the full-rate
+build's 3 a sample), so are the RAM, the times and the knobs.
 
 Per side (dual mono, hard panned, as the plugin):
   s = x + fb -> input lowpass (Q 0.62 at bw; the op-amp's 0.99 slope) -> CVSD encoder, 1 bit an edge of the chip clock
   (run-of-3 coincidence, syllabic step filter 3.5 ms, leak 25 Hz, steps 2.6 / 145 over sqrt(clock)), the input
   interpolated across a sample's edges -> 44,040 bits of RAM -> the same decoder at the read head -> the mean of the
   sample's decoded values, held (S&H: aliasing) -> output lowpasses (Q 0.54 at bw, Q 1.3 at 1.25 bw) -> DC block (10 Hz)
-  -> + noise floor + clock whine (folded) -> wet; fb = 1.05 regen hpf(wet). bw = clamp(0.048 clock, 2.4 k, 11.5 k) x TONE.
+  -> + noise floor + clock whine (folded) -> wet; fb = 1.05 regen hpf(wet). bw = clamp(0.048 clock, 2.4 k, 11.5 k) x TONE,
+  held under 0.45 x 22.05 kHz = 9.9 kHz (TONE above ~105 at the full clock; the full-rate build went to 19 kHz).
 NOT ported (no saturation): the input and output op-amp tanh (kept: their slopes) and the regen tanh. A gain rider on
-the wet (g = min(1, C/env), C = 0.95 FS, env a peak with 100 ms release) holds self-oscillation instead.
+the wet (g = min(1, C/env), C = 0.95 FS, env a peak with 100 ms release) holds self-oscillation instead; at half rate
+it also watches both interpolated outputs, so nothing the interpolator overshoots passes C either.
 Changed for the cost (numbers in test_results.md):
-  * the chip clock is held to CAP bits a sample; under RAMB/(CAP fs) the read tap shortens instead of the clock rising,
-    so short times keep that clock's bandwidth and grit (the plugin: bandwidth up to 11.5 kHz at short times);
-  * the step filter and the leak act once a sample (a sample's <= CAP edges share one step size; leak lambda^n) -- 3.5 ms
-    and 6.4 ms smoothers, against 23 us samples;
+  * the chip clock is held to CAP bits a half-rate sample; under RAMB/(CAP fs/2) the read tap shortens instead of the
+    clock rising, so short times keep that clock's bandwidth and grit (the plugin: bandwidth up to 11.5 kHz);
+  * the step filter and the leak act once a half-rate sample (its <= 7 edges share one step size; leak lambda^n);
+  * the bits are not decoded one by one: the decoder gathers its n bits (2 instructions a bit, the masked words added
+    and rotated into a pattern), and one word of the big table (1,020 words at base + $1000, built over the dry calls
+    after the clearing: index 4 (2^n - 1) + (pattern << 2 | the two bits before)) gives the runs of three (the step
+    filter's input), the new two-bit history, the count and the weighted sum of the set bits, from which the mean of
+    the n decoded values and the new estimate follow exactly (the same arithmetic as bit by bit, with the step fixed
+    over the sample). The encoder decides bit by bit (6 instructions a bit), then gathers what it wrote the same way;
+  * 28 dry calls at load (8 clear the RAM, 1 sets the masks, tables, halfbands and snaps to the knobs, 19 build the
+    big table) instead of 9;
   * FADE dips (25 ms out, the head moves, 25 ms in) instead of crossfading two lines: one decoder a side;
-  * the clock whine is a triangle (the plugin: a sine) at the same folded frequency, -75 dBFS.
+  * the clock whine is a triangle (the plugin: a sine) at the same folded frequency, -75 dBFS, folded again at 22.05 kHz.
 RAM: 1,835 words a side; stream bit p sits in word p mod 1835, bit p mod 24 (1835 and 24 are coprime: each of the
 44,040 bits has its own place, and a head is a word pointer (mod 1835) and a mask pointer (mod 24) stepped together).
 """
@@ -29,62 +44,75 @@ import math
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from asmgen import ins, q, finish, e2_sub  # noqa: E402
+import halfband as HB  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
-FS = 44100.0
+FS = 44100.0                    # the knobs' and the plugin's rate
+FSH = FS / 2                    # the chip's rate here
+HALF = 8                        # half-rate samples in a 16-sample frame
 RAMW = 1835
 RAMB = RAMW * 24                # 44,040 bits (the plugin: 44,000)
-CAP = 3                         # chip clock: at most CAP bits a sample (the writer)
-RCAP = 4                        # a reader may take one more while its tap shortens (SLEW)
+CAP = 6                         # chip clock: at most CAP bits a half-rate sample (the writer): 132.3 kbit/s
+RCAP = 7                        # a reader may take one more while its tap shortens (SLEW)
 T_MIN, T_MAX = 0.05, 1.0
 OCT = math.log2(T_MAX / T_MIN)
-CEQ_MAX = RAMB / (T_MIN * FS)   # the clock a 50 ms delay would want (bits a sample)
-T_CAP = RAMB / (CAP * FS)       # under this the tap shortens
+CEQ_MAX = RAMB / (T_MIN * FSH)  # the clock a 50 ms delay would want (bits a half-rate sample)
+T_CAP = RAMB / (CAP * FSH)      # under this the tap shortens
+assert CEQ_MAX / 64 < 1 and RAMB / (T_MAX * FSH) > 0.5
 CLK_PER_BIT = 15.55
 D_MIN, D_MAX = 2.6, 145.0
 BW_K, BW_LO, BW_HI = 0.048, 2400.0, 11500.0
+HH_MAX = math.pi * 0.45 / 2     # the filters' h/2 cap: 0.45 x 22.05 kHz
 IN_GAIN = 0.99
-NOISE = 0.00012
+NOISE = 0.00012 / math.sqrt(2)  # the plugin's white floor at 44.1 kHz: the same density under 11 kHz
 WHINE = 0.00018
-DC_K = 2 * math.pi * 10.0 / FS
+DC_K = 2 * math.pi * 10.0 / FSH
 FB_K = 1.05
 REGEN_MAX = 1.15
 HPF_HZ, HPF_Q = 320.0, 0.6
 TONE_REF, TONE_STEP = 100, 24
 GRIT_STEP = 32                  # dMax x 2^-((v - 64)/32)
 CEIL = 0.95
-C_REL = 1 - math.exp(-1 / (0.045 * FS))
-R_REL = 1 - math.exp(-1 / (0.100 * FS))
+C_REL = 1 - math.exp(-1 / (0.045 * FSH))
+R_REL = 1 - math.exp(-1 / (0.100 * FSH))
 GLIDE_HZ = 12.0
 DIP_S = 0.025
-WAIT_PAD = 96
+WAIT_PAD = 48                   # the plugin's 96 samples
 THR = 2.5e-4                    # input activity (-72 dBFS)
 THR_LOOP = 10 ** (-42 / 20)     # the loop's level under which, the input quiet too, the gate may close (the CVSD's own
                                 # granular noise regenerates at -50..-60 dBFS with feedback: the plugin does the same)
-HOLD = int(T_MAX * FS) + 4410
+HOLD = int(T_MAX * FS) + 4410   # (full-rate samples: counted in the block code)
 GATE_S = 0.010
 LFO_LO, LFO_HI = 0.02, 20.0
 LFO_R = 0.13 / 0.11
 TEST_XBASE = 0x10000
-HW_XBASE = 0x8000
+HW_XBASE = 0x2000
 MASK_OFF = 0x740                # the 24 masks, in the left RAM's tail (a multiple of 32)
-assert RAMW < MASK_OFF and MASK_OFF % 32 == 0 and MASK_OFF + 24 <= 0x800
+HB_OFF = 0x760                  # the halfbands, after the masks
+GEN_N = 64                      # big-table words built a dry call (19 dry calls)
+TBL_OFF = 0xf40                 # the right RAM's tail: POPW[128], MSKN[8] (for building the big table)
+BIG_OFF = 0x1000                # the big table: 1,020 words, entry OFF[n] + X, X = P << 2 | the two bits before
+assert RAMW < MASK_OFF and MASK_OFF % 32 == 0 and MASK_OFF + 24 <= HB_OFF
+assert 0x800 + RAMW <= TBL_OFF and TBL_OFF + 136 <= 0x1000
 SC = 8                          # the line runs at 1/8 scale (headroom for the CVSD's overshoot and the sums)
-KL = 2 * math.pi * 25.0 / FS    # leak: lambda = exp(-KL/c), c in bits a sample
-KB = 1 / (0.0035 * FS)          # syllabic: beta = exp(-KB/c)
-KD = 1 / math.sqrt(FS)          # d = D / sqrt(FS c)
+KL = 2 * math.pi * 25.0 / FSH   # leak: lambda^n = exp(-n KL/c), c in bits a half-rate sample
+KB = 1 / (0.0035 * FSH)         # syllabic: beta^n = exp(-n KB/c)
+KD = 1 / math.sqrt(FSH)         # d = D / sqrt(fs/2 c)
 
 
 def clock_of(T):
-    """(bits a sample the chip runs at, tap length in bits) for delay T."""
+    """(bits a FULL-RATE sample the chip runs at, tap length in bits) for delay T (the full-rate build's units, so
+    test.py's laws stand)."""
     ceq = RAMB / (T * FS)
-    c = min(CAP, ceq)
+    c = min(CAP / 2, ceq)
     return c, RAMB * c / ceq
 
 
 def bw_of(c, tone=TONE_REF):
-    return min(BW_HI, max(BW_LO, BW_K * c * FS)) * 2 ** ((tone - TONE_REF) / TONE_STEP)
+    """c in bits a full-rate sample (clock_of's)."""
+    return min(0.45 * FSH, min(BW_HI, max(BW_LO, BW_K * c * FS)) * 2 ** ((tone - TONE_REF) / TONE_STEP))
 
 
 def time_of(v, skew=64, right=False, tri=0.0, mod=0):
@@ -101,8 +129,8 @@ def grit_of(v):
     return 2 ** (-(v - 64) / GRIT_STEP)
 
 
-def hp_coefs(fc, qq):
-    w = 2 * math.pi * fc / FS
+def hp_coefs(fc, qq, fs=FSH):
+    w = 2 * math.pi * fc / fs
     c, al = math.cos(w), math.sin(w) / (2 * qq)
     n = 1 / (1 + al)
     return ((1 + c) * 0.5 * n, -(1 + c) * n, (1 + c) * 0.5 * n, -2 * c * n, (1 - al) * n)
@@ -126,50 +154,51 @@ def fit(fn, lo, hi, deg):
     return b, err
 
 
-U2_LO, U2_HI = 1 / (2 * CAP), 1 / (2 * RAMB / (T_MAX * FS))      # u/2 = 1/(2c)
-SQ_C, SQ_ERR = fit(lambda u2: math.sqrt(2 * u2) / 2, U2_LO * 0.98, U2_HI * 1.02, 2)   # sqrt(u)/2
+U2_LO, U2_HI = 1 / (2 * CAP), 1 / (2 * RAMB / (T_MAX * FSH))      # u/2 = 1/(2c)
+SQ_C, SQ_ERR = fit(lambda u2: math.sqrt(2 * u2) / 4, U2_LO * 0.98, U2_HI * 1.02, 2)   # sqrt(u)/4
 assert SQ_ERR < 0.01 and all(abs(c) < 1 for c in SQ_C), (SQ_C, SQ_ERR)
 
 
-def _sinfit():
-    b, _ = None, None
-    xs = [i / 400 for i in range(401)]
-    rows = [[x, x ** 3, x ** 5] for x in xs]
-    ys = [0.5 * math.sin(math.pi * x / 2) for x in xs]
-    M = [[sum(r[i] * r[j] for r in rows) for j in range(3)] for i in range(3)]
-    b = [sum(r[i] * y for r, y in zip(rows, ys)) for i in range(3)]
-    for i in range(3):
-        p = M[i][i]
-        M[i] = [v / p for v in M[i]]
-        b[i] /= p
-        for j in range(3):
-            if j != i:
-                f = M[j][i]
-                M[j] = [u - f * v for u, v in zip(M[j], M[i])]
-                b[j] -= f * b[i]
-    return b
+def popw(p):
+    """the table word for a bit pattern p (bit k = the k-th oldest of the sample's bits): popcount/8 in bits 23..20,
+    sum of k over the set bits (x 2^15: / 256 as a fraction) in bits 19..15."""
+    pop = bin(p).count('1')
+    ws = sum(k for k in range(7) if p >> k & 1)
+    return (pop << 20) | (ws << 15)
 
 
 # ------------------------------------------------------------------ r7 layout
 COMMON = """CLR FIRST MIXT MIXC KFBT TONS GRIT TJOB RNG RND FRZM TMOD MODK RATK SIDE R6S MSKB
-SC0 SC1 SC2 SC3 SC4 SC5 INV0 INV1 INV2 INV3 INV4""".split()
+SC0 SC1 SC2 SC3 SC4 SC5 PAR TBLB HBB LFOI TBIG GENI GRTS CPAR TLT TLW TLR TCNT GRK RTK INV0 INV1 INV2 INV3 INV4 INV5 INV6 INV7 OFF0 OFF1 OFF2 OFF3 OFF4 OFF5 OFF6 OFF7""".split()
 CO = {nm: i for i, nm in enumerate(COMMON)}
+CO['GX'] = CO['SC3']              # (only the dry building calls use it: zeroed after the setup call)
 HPC = len(COMMON)
-assert HPC + 5 <= 0x30
-SIDE = """BN0 BN1 BN2 BN3 BN4 LN0 LN1 LN2 LN3 LN4 NK0 NK1 NK2 NK3 NK4 RK0 RK1 RK2 RK3 RK4
-CW PHW CA PHA IW MW IA MA XI PREVIN WIN EE SS HH ED SD HD SUM HELD CEQ TGT NCUR NCL LFO CENV DCX DCH DCL RENV FB8 WET
-GA DGA GART DGG GEND KNO KWH WPH WINC FROZ KFB MODE PCNT CNEW WAIT H XENV""".split()
+CWORDS = HPC + 5                # the common block: names, then the feedback high-pass's five coefficients
+SIDE = """LN0 LN1 LN2 LN3 LN4 LN5 LN6 LN7 BN0 BN1 BN2 BN3 BN4 BN5 BN6 BN7
+CW PHW CA PHA IW MW IA MA PREVIN WIN EE SS HH ED SD HD HELD CEQ TGT NCUR NCL LFO CENV DCX DCH DCL RENV FB8 WET
+GA DGA GART DGG GEND KNO KWH WPH WINC FROZ KFB MODE PCNT CNEW WAIT H XENV K8MIN K8D DEC HBS U0 U1 NN NB8 IW0 MW0""".split()
 SD_ = {nm: i for i, nm in enumerate(SIDE)}
 SECTS = ('IN', 'O1', 'O2')
 COEFS = {s: len(SIDE) + 5 * k for k, s in enumerate(SECTS)}
-HIST = {'IN': len(SIDE) + 15, 'OUT': len(SIDE) + 19, 'HP': len(SIDE) + 25}
-SIDE_WORDS = len(SIDE) + 29
-SIDE_AT = (0x30, 0x98)          # r7 + : the sides' first words; the side registers point 64 words in
+HIST = {'IN': len(SIDE) + 15, 'OUT': len(SIDE) + 19, 'HP': len(SIDE) + 25}   # IN x1 x2 y1 y2; OUT x1 x2 u1 u2 y1 y2; HP s1 s2
+SIDE_WORDS = len(SIDE) + 27
+SIDE_AT = (CWORDS, CWORDS + SIDE_WORDS)   # r7 + : the sides' first words; the side registers point 64 words in
 MID = 64
-assert 0x30 + SIDE_WORDS <= 0x98 and 0x98 + SIDE_WORDS <= 0x100 and SIDE_WORDS - MID <= 63, SIDE_WORDS
-SREG = ('r1', 'r2')
+assert CWORDS + 2 * SIDE_WORDS <= 0x100 and SIDE_WORDS - MID <= 63, SIDE_WORDS
+SREG = ('r1', 'r2')             # (the block code's side registers; the sample loop keeps the sides in n1 / n2)
 ONE = '#>$7fffff'
 EDGE = '#>$100000'              # one edge in the phase words (phases kept / 8)
+# the halfbands at HB_OFF in X (r2 in the sample loop)
+HB_CE = 0                       # decimator A1 coefficients L, R (the even sample)
+HB_CO = HB_CE + 2 * HB.K1       # decimator A0 L, R (the odd sample)
+HB_CI = HB_CO + 2 * HB.K0       # interpolator A0 then A1 (in ptsamp, a side at a time)
+HB_SE = HB_CI + HB.K0 + HB.K1
+HB_SO = HB_SE + 2 * (HB.K1 + 1)
+HB_SI = HB_SO + 2 * (HB.K0 + 1)
+HB_END = HB_SI + 2 * (HB.K0 + HB.K1 + 2)
+P1 = (HB_SE + HB.K1, HB_SE + 2 * HB.K1 + 1)
+assert HB_OFF + HB_END <= 0x800 and HB_END < 64
+T_MSKN = 128                    # in the small table block after POPW
 
 
 def cs(nm):
@@ -197,6 +226,11 @@ class Asm:
     def __call__(self, op, *args, c=''):
         self.L.append(ins(op, *args, c=c))
 
+    def p(self, alu, move='', c=''):
+        """an ALU op with a parallel move."""
+        s = f'        {alu} {move}'.rstrip()
+        self.L.append(s + (f'  ; {c}' if c else ''))
+
     def lab(self, tag):
         self.n += 1
         return f'{self.pre}{tag}{self.n:03d}'
@@ -211,32 +245,7 @@ class Asm:
         self.L += lines if isinstance(lines, list) else [lines]
 
 
-def biquad(A, R, coef, hin, hout, last):
-    """DF1 section on x0 -> x0 (rounded). coef = an address text maker k -> 'x:(..)'."""
-    A('move', coef(0), 'y0')
-    A('mpy', 'y0', 'x0', 'a')
-    A('move', sd(R, hin, 0), 'y1')
-    A('move', coef(1), 'y0')
-    A('mac', 'y1', 'y0', 'a')
-    A('move', sd(R, hin, 1), 'x1')
-    A('move', coef(2), 'y0')
-    A('mac', 'x1', 'y0', 'a')
-    A('move', 'y1', sd(R, hin, 1))
-    A('move', 'x0', sd(R, hin, 0))
-    A('move', sd(R, hout, 0), 'y1')
-    A('move', coef(3), 'y0')
-    A('mac', '-y1', 'y0', 'a')
-    A('move', sd(R, hout, 1), 'x1')
-    A('move', coef(4), 'y0')
-    A('mac', '-x1', 'y0', 'a')
-    A('asl', 'a')
-    A('rnd', 'a')
-    A('move', 'a', 'x0')
-    if last:
-        A('move', 'y1', sd(R, hout, 1))
-        A('move', 'x0', sd(R, hout, 0))
-
-
+# ------------------------------------------------------------------ per-sample pieces
 def peak_env(A, R, slot, rho):
     A('move', sd(R, slot), 'x1')
     A('move', q(rho), 'y0')
@@ -245,71 +254,146 @@ def peak_env(A, R, slot, rho):
     A('move', 'b', sd(R, slot))
 
 
+def df1(A, R, sec, hist, nsec):
+    """nsec (1 or 2) RBJ sections in direct form I (the middle history shared), x0 -> a (the output, also stored);
+    coefficients b0/2 b1/2 b2/2 a1/2 a2/2 a section in the side block (r6 walks them), histories x1 x2 (u1 u2) y1 y2
+    (r3). Direct form I: the clock and TONE retune these sections while sound runs through them, and its states are
+    the signal itself (a coefficient step makes no transient)."""
+    A('lua', f'({R}{disp(COEFS[sec])})', 'r6')
+    A('lua', f'({R}{disp(HIST[hist])})', 'r3')
+    acc, oth = ('a', 'b') if nsec == 1 else ('b', 'a')     # the last section ends in a
+    A('move', 'x:(r6)+', 'y0')
+    A.p(f'mpy     y0,x0,{acc}', 'x:(r3)+,x1', c='b0 x; x1 = x[-1]')
+    A('move', 'x:(r6)+', 'y0')
+    A.p(f'mac     x1,y0,{acc}', 'x:(r3)-,y1', c='+ b1 x[-1]; y1 = x[-2]')
+    A('move', 'x:(r6)+', 'y0')
+    A.p(f'mac     y1,y0,{acc}', 'x0,x:(r3)+', c='+ b2 x[-2]; x[-1] := x')
+    A('move', 'x1', 'x:(r3)+', c='x[-2] := x[-1]')
+    for k in range(nsec):
+        last = k == nsec - 1
+        if k:
+            A.p(f'asl     {oth}', 'x:(r6)+,y0')
+            A('move', oth, 'x0', c='u')
+            A.p(f'mpy     y0,x0,{acc}', 'x:(r6)+,y0', c='next section: c0 u')
+            A.p(f'mac     x1,y0,{acc}', 'x:(r6)+,y0', c='+ c1 u[-1]')
+            A.p(f'mac     y1,y0,{acc}', 'x0,x:(r3)+', c='+ c2 u[-2]; u[-1] := u')
+            A('move', 'x1', 'x:(r3)+', c='u[-2] := u[-1]')
+        A('move', 'x:(r3)+', 'x1', c='y[-1]')
+        A('move', 'x:(r6)+', 'y0')
+        A.p(f'mac     -x1,y0,{acc}', 'x:(r3)' + ('' if last else '-') + ',y1', c='- a1 y[-1]; y1 = y[-2]')
+        A('move', 'x:(r6)+', 'y0')
+        if last:
+            A.p(f'macr    -y1,y0,{acc}', 'x1,x:(r3)-', c='- a2 y[-2]; y[-2] := y[-1]')
+            A('asl', acc)
+            A('move', acc, 'x:(r3)+', c='y[-1] := y')
+        else:
+            A('macr', '-y1', 'y0', acc, c='- a2 u[-2]: u/2')
+            acc, oth = oth, acc
+
+
+def tdf2(A, xi, xo):
+    """one RBJ section, transposed direct form II (fixed coefficients: the feedback high-pass), 11 instructions. Pre:
+    xi = the input, r6 -> b0/2 b1/2 a1/2 b2/2 a2/2, r3 -> s1/2 s2/2. Post: xo = the output."""
+    m = {'x0': 'y0,x0', 'x1': 'x1,y0'}
+    A('move', 'x:(r6)+', 'y0')
+    A('move', 'x:(r3)+', 'a')
+    A.p(f'macr    {m[xi]},a', 'x:(r6)+,y0')
+    A.p('asl     a', 'x:(r3)-,b')
+    A.p(f'mac     {m[xi]},b', f'a,{xo}')
+    A('move', 'x:(r6)+', 'y0')
+    A.p(f'mac     -{m[xo]},b', 'x:(r6)+,y0')
+    A.p(f'mpy     {m[xi]},a', 'b,x:(r3)+')
+    A('move', 'x:(r6)+', 'y0')
+    A.p(f'mac     -{m[xo]},a')
+    A('move', 'a', 'x:(r3)+')
+
+
 def edges(A, R, ph, rate):
-    """phase/8 += rate/8; n = the integer part -> n3, b1 and x0; the phase keeps the fraction."""
+    """phase/8 += rate/8; n (the whole edges) -> n3, b (integer, b0 = 0), x0, NN; n/8 -> NB8; the phase keeps the
+    fraction."""
     A('move', sd(R, ph), 'a')
     A('move', sd(R, rate), 'x0')
     A('add', 'x0', 'a')
     A('move', 'a1', 'b')
+    A('and', '#>$f00000', 'b')
+    A('move', 'b1', sd(R, 'NB8'), c='n/8')
     A('asr', '#$14', 'b', 'b')
-    A('move', 'b1', 'b')
     A('and', '#>$0fffff', 'a')
     A('move', 'a1', sd(R, ph))
     A('move', 'b1', 'n3')
     A('move', 'b1', 'x0')
+    A('move', 'b1', sd(R, 'NN'))
 
 
-def arr(A, R, name, dst):
-    """dst = the side array name[n3]."""
-    A('lua', f'({R}{disp(SD_[name + "0"])})', 'r3')
-    A('move', 'x:(r3+n3)', dst)
-
-
-def cvsd_tail(A, R, est, step):
-    """after a head's n edges (n3) and runs (r6): E = lambda^n E, S = beta^n S + n kMin + runs (kMax - kMin)."""
-    arr(A, R, 'LN', 'x0')
-    A('move', sd(R, est), 'y0')
-    A('mpy', 'y0', 'x0', 'a')
-    A('move', 'a', sd(R, est))
-    arr(A, R, 'BN', 'x0')
+def cvsd_step(A, R, est, step, hist):
+    """after a head's n bits: a = runs/8, x1 = the new history -> HIST; S = beta^n S + n kMin + runs kd; E = lambda^n E."""
+    A('move', 'x1', sd(R, hist))
+    A('move', 'a', 'x0')
+    A('move', sd(R, 'K8D'), 'y0')
+    A('mpy', 'y0', 'x0', 'a', c='runs kd')
+    A('move', sd(R, 'NB8'), 'x0')
+    A('move', sd(R, 'K8MIN'), 'y0')
+    A('mac', 'y0', 'x0', 'a', c='+ n kMin')
+    A('lua', f'({R}{disp(SD_["BN0"])})', 'r6')
+    A('move', sd(R, 'NN'), 'n6')
+    A('move', 'x:(r6+n6)', 'x0')
     A('move', sd(R, step), 'y0')
-    A('mpy', 'y0', 'x0', 'a')
-    arr(A, R, 'NK', 'x0')
-    A('add', 'x0', 'a')
-    A('move', 'r6', 'n3')
-    arr(A, R, 'RK', 'x0')
-    A('add', 'x0', 'a')
+    A('mac', 'y0', 'x0', 'a', c='+ beta^n S')
     A('move', 'a', sd(R, step))
+    A('lua', f'({R}{disp(SD_["LN0"])})', 'r6')
+    A('move', 'x:(r6+n6)', 'x0')
+    A('move', sd(R, est), 'y0')
+    A('mpy', 'y0', 'x0', 'a', c='lambda^n E')
+    A('move', 'a', sd(R, est))
 
 
-def run_count(A):
-    """a1 = the history just shifted (newest bit in bit 0): a run of three equal bits -> r6 + 1."""
-    nr = A.lab('nr')
-    A('add', '#>$1', 'a')
-    A('and', '#>$6', 'a')
-    A('bne', nr)
-    A('move', '(r6)+')
-    A.put(nr)
+def big_lookup(A, R, hist):
+    """b1 = P (a head's n bits, the oldest at bit 0): x1 = the big table's word for (n, the two bits before, P)."""
+    A('move', 'b1', 'a')
+    A('lsl', '#$2', 'a')
+    A('move', sd(R, hist), 'x0')
+    A('or', 'x0', 'a', c='X: the two bits before under the pattern')
+    A('lua', f'(r7+${CO["OFF0"]:02x})', 'r3')
+    A('move', sd(R, 'NN'), 'n3')
+    A('move', 'x:(r3+n3)', 'x0', c='OFF[n] = 4 (2^n - 1): the n blocks of 2^(n+2) words packed')
+    A('add', 'x0', 'a')
+    A('move', cs('TBIG'), 'r3')
+    A('move', 'a1', 'n3')
+    A('move', 'x:(r3+n3)', 'x1', c='runs (23..20) | the last two bits (19..18) | pop (17..15) | wsum (14..10)')
 
 
-def side_sample(A, R, c):
-    A.com('======== one side (r1 = its block, 64 words in); x:(r0) in, x:(r0)+ out ========')
-    A('move', 'x:(r0)', 'a')
-    A('asr', '#$3', 'a', 'a')
+def big_fields(A):
+    """x1 = a big-table word: a = runs/8, x1 = the last two bits (for cvsd_step)."""
+    A('move', 'x1', 'b')
+    A('and', '#>$0c0000', 'b')
+    A('lsr', '#$12', 'b')
+    A('move', 'x1', 'a')
+    A('and', '#>$700000', 'a', c='runs/8')
+    A('move', 'b1', 'x1')
+
+
+def side_sample(A):
+    """ptsamp: one half-rate sample of one side, r1 = its block (64 words in). In: DEC (the decimated input / 4).
+    Out: U0, U1 (the interpolated wet / 8, this full-rate sample's and the next's), WET, FB8."""
+    R = 'r1'
+    A.put('ptsamp')
+    A.com('the line input s/8 = d/8 + fb/8 (d: the decimated input / 4); the detectors')
+    A('move', sd(R, 'DEC'), 'a')
+    A('asr', 'a')
     A('move', sd(R, 'FB8'), 'x0')
     A('add', 'x0', 'a')
     A('move', 'a', 'x0', c='s/8')
     A('abs', 'a')
     peak_env(A, R, 'CENV', 1 - C_REL)
-    A('move', 'x:(r0)', 'a')
+    A('move', sd(R, 'DEC'), 'a')
     A('abs', 'a')
     peak_env(A, R, 'XENV', 1 - C_REL)
     A.com('input lowpass (bw, Q 0.62; the op-amp\'s 0.99 folded in)')
-    h = HIST['IN']
-    biquad(A, R, lambda k: sd(R, COEFS['IN'] + k), h, h + 2, True)
-    A('move', 'x0', sd(R, 'WIN'))
-    A.com('---- the decoder (head A): n <= %d edges; HELD = the mean of its values over the sample' % RCAP)
-    ddone, dend, np_ = A.lab('dd'), A.lab('de'), A.lab('dp')
+    df1(A, R, 'IN', 'IN', 1)
+    A('move', 'a', sd(R, 'WIN'))
+    # ---------------------------------------------------------------- decoder
+    A.com('---- the decoder (head A): n <= %d edges; HELD = the mean of its n decoded values (from the bit pattern)' % RCAP)
+    ddone, np_ = A.lab('dd'), A.lab('dp')
     edges(A, R, 'PHA', 'CA')
     A('move', sd(R, 'PCNT'), 'a')
     A('tst', 'a')
@@ -324,103 +408,102 @@ def side_sample(A, R, c):
     A.put(np_)
     A('tst', 'b')
     A('beq', ddone)
-    A('lua', f'(r7+${CO["INV0"]:02x})', 'r3')
-    A('move', 'x:(r3+n3)', 'y0', c='1/n')
     A('move', sd(R, 'IA'), 'r4')
     A('move', sd(R, 'MA'), 'r5')
-    A('move', sd(R, 'SD'), 'y1')
-    A('move', sd(R, 'ED'), 'b')
-    A('move', '#>$0', 'r6')
-    A('clr', 'a')
-    A('move', 'a', sd(R, 'SUM'))
-    A('do', 'n3', f'>{dend}')
-    if True:
-        z, nx = A.lab('dz'), A.lab('dn')
-        A('move', 'x:(r5)+', 'x0')
-        A('move', 'x:(r4)+', 'a')
-        A('and', 'x0', 'a')
-        A('beq', z)
-        A('add', 'y1', 'b')
-        A('move', sd(R, 'HD'), 'a')
-        A('asl', 'a')
-        A('add', '#>$1', 'a')
-        A('bra', nx)
-        A.put(z)
-        A('sub', 'y1', 'b')
-        A('move', sd(R, 'HD'), 'a')
-        A('asl', 'a')
-        A.put(nx)
-        A('move', 'a1', sd(R, 'HD'))
-        run_count(A)
-        A('move', 'b', 'x0')
-        A('move', sd(R, 'SUM'), 'a')
-        A('mac', 'y0', 'x0', 'a')
-        A('move', 'a', sd(R, 'SUM'))
-    A.put(dend)
+    A('bsr', '>ptgath')
     A('move', 'r4', sd(R, 'IA'))
     A('move', 'r5', sd(R, 'MA'))
-    A('move', 'b', sd(R, 'ED'))
-    A('move', sd(R, 'SUM'), 'a')
-    A('move', 'a', sd(R, 'HELD'))
-    cvsd_tail(A, R, 'ED', 'SD')
+    big_lookup(A, R, 'HD')
+    A.com('E_n = E + S (2 pop - n); mean = E_n + S n/2 - S/2 - 2 S wsum/n (pop, wsum = the sum of k over the set bits: '
+          'the table); the step and the leak as the full-rate build (once a sample)')
+    A('move', 'x1', 'a')
+    A('and', '#>$038000', 'a')
+    A('move', 'a1', 'x0', c='pop/256')
+    A('move', sd(R, 'SD'), 'y0')
+    A('mpy', 'y0', 'x0', 'a')
+    A('asl', '#$9', 'a', 'a', c='2 S pop')
+    A('move', sd(R, 'NB8'), 'x0')
+    A('mpy', 'y0', 'x0', 'b')
+    A('asl', '#$3', 'b', 'b', c='S n')
+    A('sub', 'b', 'a')
+    A('move', sd(R, 'ED'), 'x0')
+    A('add', 'x0', 'a', c='E_n')
+    A('move', 'a', sd(R, 'ED'))
+    A('asr', 'b')
+    A('add', 'a', 'b')
+    A('move', q(0.5), 'x0')
+    A('mac', '-y0', 'x0', 'b', c='E_n + S n/2 - S/2')
+    A('move', 'x1', 'a')
+    A('and', '#>$007c00', 'a')
+    A('move', 'a1', 'x0', c='wsum/8192')
+    A('lua', f'(r7+${CO["INV0"]:02x})', 'r6')
+    A('move', sd(R, 'NN'), 'n6')
+    A('move', 'x:(r6+n6)', 'y1', c='1/n')
+    A('mpy', 'x0', 'y1', 'a')
+    A('move', 'a', 'x0')
+    A('mpy', 'y0', 'x0', 'a')
+    A('asl', '#$e', 'a', 'a', c='2 S wsum/n')
+    A('sub', 'a', 'b')
+    A('move', 'b', sd(R, 'HELD'), c='the mean')
+    big_fields(A)
+    cvsd_step(A, R, 'ED', 'SD', 'HD')
     A.put(ddone)
-    A.com('---- the encoder: n <= %d edges; the input interpolated prev -> u across them; RAM bit p = word p mod %d, '
-          'mask p mod 24' % (CAP, RAMW))
-    edone, eend, efz = A.lab('ed'), A.lab('ee'), A.lab('ez')
+    # ---------------------------------------------------------------- encoder
+    A.com('---- the encoder: n <= %d edges, decided bit by bit on D = E - u (u: the input interpolated prev -> now across '
+          'them); RAM bit p = word p mod %d, mask p mod 24; then the written bits gathered for the runs' % (CAP, RAMW))
+    edone, eend, efz, zero, last = A.lab('ed'), A.lab('ee'), A.lab('ez'), A.lab('e0'), A.lab('el')
     edges(A, R, 'PHW', 'CW')
     A('move', sd(R, 'FROZ'), 'a')
     A('tst', 'a')
     A('bne', efz)
     A('tst', 'b')
     A('beq', edone)
-    A('lua', f'(r7+${CO["INV0"]:02x})', 'r3')
-    A('move', 'x:(r3+n3)', 'y0', c='1/n')
+    A('lua', f'(r7+${CO["INV0"]:02x})', 'r6')
+    A('move', sd(R, 'NN'), 'n6')
+    A('move', 'x:(r6+n6)', 'y0', c='1/n')
     A('move', sd(R, 'WIN'), 'b')
     A('move', sd(R, 'PREVIN'), 'x1')
     A('sub', 'x1', 'b')
     A('move', 'b', 'x0')
     A('mpy', 'y0', 'x0', 'b')
-    A('move', 'b', 'x1', c='dx')
-    A('move', sd(R, 'PREVIN'), 'a')
-    A('move', 'a', sd(R, 'XI'))
+    A('move', 'b', 'x1', c='du a bit')
+    A('move', sd(R, 'EE'), 'b')
+    A('move', sd(R, 'PREVIN'), 'x0')
+    A('sub', 'x0', 'b', c='D = E - u')
+    A('move', sd(R, 'SS'), 'y1')
     A('move', sd(R, 'IW'), 'r4')
     A('move', sd(R, 'MW'), 'r5')
-    A('move', sd(R, 'SS'), 'y1')
-    A('move', sd(R, 'EE'), 'b')
-    A('move', '#>$0', 'r6')
+    A('move', 'r4', sd(R, 'IW0'))
+    A('move', 'r5', sd(R, 'MW0'))
+    A('clr', 'a')
+    A('move', 'x:(r5)+', 'x0', c='the first bit\'s mask')
     A('do', 'n3', f'>{eend}')
     if True:
-        one, nx = A.lab('e1'), A.lab('en')
-        A('move', sd(R, 'XI'), 'a')
-        A('add', 'x1', 'a')
-        A('move', 'a', sd(R, 'XI'))
-        A('cmp', 'b', 'a', c='u - E')
-        A('move', 'x:(r5)+', 'x0', c='(moves keep the flags) this bit\'s mask')
-        A('move', 'x:(r4)', 'a')
-        A('bgt', one)
+        A.p('sub     x1,b', 'x:(r4),a1', c='D -= du; the word')
+        A('bge', zero)
+        A('or', 'x0', 'a', c='u > E: bit 1')
+        A.p('add     y1,b', 'a1,x:(r4)+', c='E += S')
+        A('bra', last)
+        A.put(zero)
         A('or', 'x0', 'a')
-        A('eor', 'x0', 'a')
-        A('move', 'a1', 'x:(r4)+', c='bit 0')
-        A('sub', 'y1', 'b', c='E -= S')
-        A('move', sd(R, 'HH'), 'a')
-        A('asl', 'a')
-        A('bra', nx)
-        A.put(one)
-        A('or', 'x0', 'a')
-        A('move', 'a1', 'x:(r4)+', c='bit 1')
-        A('add', 'y1', 'b', c='E += S')
-        A('move', sd(R, 'HH'), 'a')
-        A('asl', 'a')
-        A('add', '#>$1', 'a')
-        A.put(nx)
-        A('move', 'a1', sd(R, 'HH'))
-        run_count(A)
-        A('nop')
+        A('eor', 'x0', 'a', c='bit 0')
+        A.p('sub     y1,b', 'a1,x:(r4)+', c='E -= S')
+        A.put(last)
+        A('move', 'x:(r5)+', 'x0', c='the next bit\'s mask')
     A.put(eend)
+    A('move', '(r5)-')
+    A('move', sd(R, 'WIN'), 'x0')
+    A('add', 'x0', 'b', c='E = D + u')
+    A('move', 'b', sd(R, 'EE'))
     A('move', 'r4', sd(R, 'IW'))
     A('move', 'r5', sd(R, 'MW'))
-    A('move', 'b', sd(R, 'EE'))
-    cvsd_tail(A, R, 'EE', 'SS')
+    A('move', sd(R, 'IW0'), 'r4')
+    A('move', sd(R, 'MW0'), 'r5')
+    A('move', sd(R, 'NN'), 'n3')
+    A('bsr', '>ptgath')
+    big_lookup(A, R, 'HH')
+    big_fields(A)
+    cvsd_step(A, R, 'EE', 'SS', 'HH')
     A('bra', edone)
     A.put(efz)
     A.com('frozen: nothing is written; the writer still moves with the clock')
@@ -435,15 +518,14 @@ def side_sample(A, R, c):
     A.put(edone)
     A('move', sd(R, 'WIN'), 'x0')
     A('move', 'x0', sd(R, 'PREVIN'))
-    A.com('---- out: HELD x the dip gain -> output lowpasses -> DC block -> + noise + whine -> gate -> rider')
+    # ---------------------------------------------------------------- out
+    A.com('---- out: HELD x the dip gain -> output lowpasses -> DC block -> + noise + whine -> gate -> interpolator, rider')
     A('move', sd(R, 'HELD'), 'x0')
     A('move', sd(R, 'GA'), 'y0')
     A('mpy', 'y0', 'x0', 'a')
     A('move', 'a', 'x0')
-    h = HIST['OUT']
-    biquad(A, R, lambda k: sd(R, COEFS['O1'] + k), h, h + 2, False)
-    biquad(A, R, lambda k: sd(R, COEFS['O2'] + k), h + 2, h + 4, True)
-    A('move', 'x0', 'a')
+    df1(A, R, 'O1', 'OUT', 2)
+    A('move', 'a', 'x0')
     A('move', sd(R, 'DCX'), 'y0')
     A('sub', 'y0', 'a')
     A('move', 'x0', sd(R, 'DCX'))
@@ -459,20 +541,18 @@ def side_sample(A, R, c):
     A('move', cs('RND'), 'x0')
     A('move', sd(R, 'KNO'), 'y0')
     A('mac', 'y0', 'x0', 'a', c='+ noise')
-    A('move', 'a', sd(R, 'WET'))
     A.com('clock whine: a triangle at the folded clock x 15.55')
-    A('move', sd(R, 'WPH'), 'a')
+    A('move', sd(R, 'WPH'), 'b')
     A('move', sd(R, 'WINC'), 'x0')
-    A('add', 'x0', 'a')
-    A('and', '#>$7fffff', 'a')
-    A('move', 'a1', sd(R, 'WPH'))
-    A('move', 'a1', 'a')
-    A('sub', q(0.5), 'a')
-    A('abs', 'a')
-    A('sub', q(0.25), 'a')
-    A('move', 'a', 'x0', c='tri / 4')
+    A('add', 'x0', 'b')
+    A('and', '#>$7fffff', 'b')
+    A('move', 'b1', sd(R, 'WPH'))
+    A('move', 'b1', 'b')
+    A('sub', q(0.5), 'b')
+    A('abs', 'b')
+    A('sub', q(0.25), 'b')
+    A('move', 'b', 'x0', c='tri / 4')
     A('move', sd(R, 'KWH'), 'y0')
-    A('move', sd(R, 'WET'), 'a')
     A('mac', 'y0', 'x0', 'a')
     A.com('gate (ramped)')
     A('move', 'a', 'x0')
@@ -482,10 +562,28 @@ def side_sample(A, R, c):
     A('move', sd(R, 'DGG'), 'x1')
     A('add', 'x1', 'b')
     A('move', 'b', sd(R, 'GART'))
-    A.com('wet rider: g = min(1, C/env)')
-    one, dn, dv = A.lab('gn'), A.lab('gd'), A.lab('gv')
+    A.com('the interpolator (both outputs of this half-rate sample), then the wet rider over the sample and both '
+          'outputs: g = min(1, C/env), env a peak (100 ms release) of the largest; g scales the loop\'s wet and both '
+          'outputs (no output passes C, whatever the interpolator overshoots)')
+    one, dv = A.lab('gn'), A.lab('gv')
+    A('move', 'a', sd(R, 'WET'))
     A('move', 'a', 'x0')
+    A('move', sd(R, 'HBS'), 'r3')
+    A('lua', f'(r2+${HB_CI:02x})', 'r6')
+    HB.path(A, HB.K0, st='r3', cf='r6')
+    A('move', 'x0', sd(R, 'U0'))
+    A('move', sd(R, 'WET'), 'x0')
+    HB.path(A, HB.K1, st='r3', cf='r6')
+    A('move', 'x0', sd(R, 'U1'))
+    A('move', 'x0', 'a')
     A('abs', 'a')
+    A('move', sd(R, 'U0'), 'b')
+    A('abs', 'b')
+    A('max', 'a', 'b')
+    A('move', sd(R, 'WET'), 'a')
+    A('abs', 'a')
+    A('max', 'a', 'b')
+    A('move', 'b', 'a')
     peak_env(A, R, 'RENV', 1 - R_REL)
     A('move', q(CEIL / SC), 'x1')
     A('cmp', 'x1', 'b')
@@ -500,35 +598,271 @@ def side_sample(A, R, c):
     A('move', 'a0', 'b')
     A('asl', '#$b', 'b', 'b')
     A('move', 'b', 'y0')
-    A('mpy', 'y0', 'x0', 'a')
-    A('bra', dn)
+    for nm in ('U0', 'U1', 'WET'):
+        A('move', sd(R, nm), 'x0')
+        A('mpy', 'y0', 'x0', 'a')
+        A('move', 'a', sd(R, nm))
     A.put(one)
-    A('move', 'x0', 'a')
-    A.put(dn)
-    A('move', 'a', 'x0')
-    A('move', 'x0', sd(R, 'WET'))
+    A('move', sd(R, 'WET'), 'x0')
     A.com('feedback high-pass (identity when off); fb/8 = (kfb/2) hpf(wet/8) 2')
-    biquad(A, R, lambda k: f'x:(r7+${HPC + k:02x})', HIST['HP'], HIST['HP'] + 2, True)
+    A('lua', f'(r7+${HPC:02x})', 'r6')
+    A('lua', f'({R}{disp(HIST["HP"])})', 'r3')
+    tdf2(A, 'x0', 'x1')
     A('move', sd(R, 'KFB'), 'y0')
-    A('mpy', 'y0', 'x0', 'a')
+    A('mpy', 'x1', 'y0', 'a')
     A('asl', 'a')
     A('move', 'a', sd(R, 'FB8'))
     A('move', sd(R, 'GA'), 'a')
     A('move', sd(R, 'DGA'), 'x0')
     A('add', 'x0', 'a', c='(the block code stops the ramp a call early: it never leaves [0, 1])')
     A('move', 'a', sd(R, 'GA'))
-    A.com('mix')
-    A('move', sd(R, 'WET'), 'a')
-    A('asl', '#$3', 'a', 'a')
+    A('rts')
+    # ---------------------------------------------------------------- the pattern subroutines
+    A.put('ptgath')
+    A.com('r4 (word) and r5 (mask) at a head\'s first bit, n3 = n >= 1: b1 = P, the n bits with the oldest at bit 0; '
+          'r4, r5 past them. 2 instructions a bit (the masked words added: each bit has its own place), then the sum '
+          'rotated right by the first mask\'s place')
+    A('move', 'r5', 'a')
+    A('and', '#>$1f', 'a')
+    A('move', 'a1', 'y1')
+    A('clr', 'a')
+    A('clr', 'b')
+    A('move', 'x:(r5)+', 'x0')
+    A('move', 'x:(r4)+', 'a1')
+    A('do', 'n3', '>ptgthe')
+    A.p('and     x0,a', 'x:(r5)+,x0')
+    A.p('add     a,b', 'x:(r4)+,a1')
+    A.put('ptgthe')
+    A('move', '(r4)-')
+    A('move', '(r5)-')
+    A('normf', 'y1', 'b', c='right by the first place: the wrapped bits land in b0\'s top')
+    A('move', 'b0', 'x1')
+    A('move', 'b1', 'b')
+    A('or', 'x1', 'b')
+    A('rts')
+
+
+# ------------------------------------------------------------------ the full-rate loop: halfbands and the mix
+def mix(A):
+    """x0 = the interpolated wet / 8: x:(r0)+ <- dry + m (wet - dry) (m = 0: exactly dry)."""
     A('move', cs('MIXC'), 'y1')
-    A('move', 'x:(r0)', 'b')
-    A('sub', 'b', 'a')
-    A('asr', 'a')
-    A('move', 'a', 'x0')
-    A('mpy', 'x0', 'y1', 'a')
-    A('asl', 'a')
-    A('add', 'b', 'a')
+    A.p('mpy     x0,y1,a', 'x:(r0),x1', c='m wet/8; x1 = dry')
+    A('asl', '#$3', 'a', 'a')
+    A('mac', '-y1', 'x1', 'a')
+    A('add', 'x1', 'a')
     A('move', 'a', 'x:(r0)+')
+
+
+def dec_in(A, k, K):
+    """the decimator path K on channel k's sample: x/4 (the asr's carry the path's first loads)."""
+    A('move', ('x:(r0)', 'x:(r0+$1)')[k], 'a')
+    A.p('asr     a', 'x:(r6)+,y0')
+    A.p('asr     a', 'x:(r3),b')
+    A('move', 'a', 'x0')
+    HB.path(A, K, pre=True, st='r3', cf='r6')
+
+
+def loop_body(A):
+    """one 44.1 kHz sample: r0 -> (L, R); r2 = the halfband block; n1 / n2 the sides."""
+    A.com('the pair\'s parity: 1 = its first (even) sample, 0 = its second (the chip runs)')
+    odd, last = A.lab('od'), A.lab('ol')
+    A('move', cs('PAR'), 'a')
+    A('eor', '#$1', 'a')
+    A('move', 'a1', cs('PAR'))
+    A('beq', odd)
+    A.com('even: the decimator\'s A1 paths take this sample; out: the interpolator\'s second output of the last chip sample')
+    A('lua', f'(r2+${HB_CE:02x})', 'r6')
+    A('lua', f'(r2+${HB_SE:02x})', 'r3')
+    for k in range(2):
+        dec_in(A, k, HB.K1)
+    for k in range(2):
+        A('move', ('n1', 'n2')[k], 'r1')
+        A('move', sd('r1', 'U1'), 'x0')
+        mix(A)
+    A('bra', last)
+    A.put(odd)
+    A.com('odd: the decimator\'s A0 paths finish the pair: d = (A0 + A1) / 2; the chip runs (and interpolates); out: '
+          'the first output of the new chip sample')
+    A('lua', f'(r2+${HB_CO:02x})', 'r6')
+    A('lua', f'(r2+${HB_SO:02x})', 'r3')
+    for k in range(2):
+        dec_in(A, k, HB.K0)
+        A('move', f'x:(r2+${P1[k]:02x})', 'b')
+        A('add', 'x0', 'b')
+        A('asr', 'b')
+        A('move', ('n1', 'n2')[k], 'r1')
+        A('move', 'b', sd('r1', 'DEC'))
+    A.com('the noise word (24-bit LCG) and the mix smoothing, a chip sample')
+    A('move', cs('RNG'), 'x0')
+    A('move', '#>$0343fd', 'y0')
+    A('mpy', 'y0', 'x0', 'a')
+    A('asr', 'a')
+    A('move', 'a0', 'x0')
+    A('move', 'x0', 'a')
+    A('add', '#>$269ec3', 'a')
+    A('move', 'a1', cs('RNG'))
+    A('move', 'a1', cs('RND'))
+    A('move', cs('MIXT'), 'a')
+    A('move', cs('MIXC'), 'b')
+    A('sub', 'b', 'a')
+    A('asr', '#$6', 'a', 'a')
+    A('add', 'a', 'b')
+    A('move', 'b', cs('MIXC'))
+    A('move', 'n1', 'r1')
+    A('bsr', '>ptsamp')
+    A('move', 'n2', 'r1')
+    A('bsr', '>ptsamp')
+    for k in range(2):
+        A('move', ('n1', 'n2')[k], 'r1')
+        A('move', sd('r1', 'U0'), 'x0')
+        mix(A)
+    A.put(last)
+    A('nop', c='(the loop\'s last instruction: never a bsr near it)')
+
+
+def setup_call(A):
+    """ptsetup: the last dry call: masks, tables, halfbands, then everything snapped to the knobs (FIRST)."""
+    A.put('ptsetup')
+    A.com('the 24 masks')
+    A('move', cs('MSKB'), 'r4')
+    A('move', '#>$1', 'a')
+    A('do', '#24', '>ptmsk')
+    A('move', 'a1', 'x:(r4)+')
+    A('lsl', 'a')
+    A.put('ptmsk')
+    A('nop')
+    A.com('POPW[128]: POPW[2j] = POPW[j] + pop(j) 2^15 (each bit one place up: wsum + pop), POPW[2j+1] = that + 2^20')
+    A('move', cs('TBLB'), 'r4')
+    A('move', cs('TBLB'), 'r5')
+    A('clr', 'a')
+    A('move', 'a', 'x:(r4)')
+    A('do', '#64', '>ptpopwe')
+    A('move', 'x:(r5)+', 'a')
+    A('move', 'a1', 'x0')
+    A('and', '#>$f00000', 'a')
+    A('asr', '#$5', 'a', 'a')
+    A('add', 'x0', 'a')
+    A('move', 'a1', 'x:(r4)+')
+    A('add', '#>$100000', 'a')
+    A('move', 'a1', 'x:(r4)+')
+    A.put('ptpopwe')
+    A('nop')
+    A.com('MSKN[8] = (1 << n) - 1')
+    A('clr', 'a')
+    A('do', '#8', '>ptlomask')
+    A('move', 'a1', 'x:(r4)+')
+    A('lsl', 'a')
+    A('or', '#$1', 'a')
+    A.put('ptlomask')
+    A('nop')
+    A.com('the halfbands: coefficients in the order the paths run, the state chains zeroed')
+    A('move', cs('HBB'), 'r4')
+    A('lua', f'(r4+${HB_CI:02x})', 'r5')
+    for c in HB.A0 + HB.A1:
+        A('move', q(c), 'a')
+        A('move', 'a', 'x:(r5)+')
+    A.com('copies: the decimator\'s A1 (L, R) then A0 (L, R) from the interpolator\'s set')
+    for k, (src, kk) in enumerate(((HB_CI + HB.K0, HB.K1), (HB_CI, HB.K0))):
+        lab = A.lab('hc')
+        A('move', cs('HBB'), 'r5')
+        A('lua', f'(r5+${src:02x})', 'r5')
+        A('do', '#2', f'>{lab}')
+        A('move', 'r5', 'r3')
+        for _ in range(kk):
+            A('move', 'x:(r3)+', 'a')
+            A('move', 'a', 'x:(r4)+')
+        A.put(lab)
+        A('nop')
+    A('move', cs('HBB'), 'r4')
+    A('lua', f'(r4+${HB_SE:02x})', 'r4')
+    A('clr', 'a')
+    A('do', f'#${HB_END - HB_SE:x}', '>ptzhb')
+    A('move', 'a', 'x:(r4)+')
+    A.put('ptzhb')
+    A('nop')
+    A('move', '#>$0', 'a')
+    A('move', 'a', cs('GENI'))
+    A('rts')
+    A.put('ptgen')
+    A.com(f'the big table, at most {GEN_N} words a dry call, an n at a time (GENI = n, GX = X; 19 calls): word OFF[n] + X, '
+          'X = P << 2 | the two bits before (h) < 2^(n+2): runs among the n (bits equal to the two before them) << 20 | '
+          '(X >> n) & 3 << 18 | pop(P) << 15 | wsum(P) << 10, P = (X >> 2) & ((1 << n) - 1)')
+    A('move', cs('GENI'), 'b')
+    A('move', 'b1', 'x1', c='n')
+    A('move', cs('TBLB'), 'r5')
+    A('add', lit(T_MSKN), 'b')
+    A('move', 'b1', 'n5')
+    A('move', 'x:(r5+n5)', 'y1', c='(1 << n) - 1')
+    A('lua', f'(r7+${CO["OFF0"]:02x})', 'r4')
+    A('move', 'x1', 'n4')
+    A('move', 'x:(r4+n4)', 'b', c='OFF[n]')
+    A('move', cs('TBIG'), 'x0')
+    A('add', 'x0', 'b')
+    A('move', cs('GX'), 'x0')
+    A('add', 'x0', 'b')
+    A('move', 'b1', 'r4')
+    A('move', 'y1', 'b')
+    A('add', '#>$1', 'b')
+    A('lsl', '#$2', 'b', c='2^(n+2)')
+    A('sub', 'x0', 'b', c='left in this n')
+    A('move', lit(GEN_N), 'a')
+    A('cmp', 'a', 'b')
+    lab = A.lab('gm')
+    A('ble', lab)
+    A('move', 'a', 'b')
+    A.put(lab)
+    A('move', 'b1', 'n6', c='this call\'s count')
+    A('move', 'b1', cs('SC5'))
+    A('move', 'x0', 'a', c='X')
+    A('do', 'n6', '>ptgnend')
+    A('move', 'a1', 'y0')
+    A('lsr', '#$2', 'a')
+    A('and', 'y1', 'a', c='P')
+    A('move', 'a1', 'n5')
+    A('move', 'x:(r5+n5)', 'b', c='POPW[P]: pop << 20 | wsum << 15')
+    A('lsr', '#$5', 'b')
+    A('move', 'y0', 'a')
+    A('move', 'a1', 'x0')
+    A('lsr', 'a')
+    A('eor', 'x0', 'a')
+    A('move', 'a1', 'x0')
+    A('lsr', 'a')
+    A('or', 'x0', 'a')
+    A('not', 'a')
+    A('and', 'y1', 'a', c='the run bits')
+    A('move', 'a1', 'n5')
+    A('move', 'x:(r5+n5)', 'a')
+    A('and', '#>$700000', 'a', c='their count << 20')
+    A('move', 'a1', 'x0')
+    A('or', 'x0', 'b')
+    A('move', 'y0', 'a')
+    A('normf', 'x1', 'a')
+    A('and', '#>$3', 'a')
+    A('lsl', '#$12', 'a')
+    A('move', 'a1', 'x0')
+    A('or', 'x0', 'b')
+    A('move', 'b1', 'x:(r4)+')
+    A('move', 'y0', 'a')
+    A('add', '#>$1', 'a')
+    A.put('ptgnend')
+    A.com('GX += the count; at 2^(n+2) the next n')
+    lab = A.lab('gx')
+    A('move', cs('GX'), 'a')
+    A('move', cs('SC5'), 'x0')
+    A('add', 'x0', 'a')
+    A('move', 'y1', 'b')
+    A('add', '#>$1', 'b')
+    A('lsl', '#$2', 'b')
+    A('move', 'b1', 'x0')
+    A('cmp', 'x0', 'a')
+    A('blt', lab)
+    A('clr', 'a')
+    A('move', cs('GENI'), 'b')
+    A('add', '#>$1', 'b')
+    A('move', 'b1', cs('GENI'))
+    A.put(lab)
+    A('move', 'a1', cs('GX'))
+    A('rts')
 
 
 def knob7(A, word, hi):
@@ -543,33 +877,27 @@ def side_block(A, kg, gstep, dstep):
     """ptside: r3 = the side's register value (64 words in), SIDE = 1 / 2."""
     R = 'r3'
     A.put('ptside')
-    A.com('the head moved by the last call\'s rates: NCUR (bits, / 65536) += 16 (CW - CA) / 8 ...')
+    A.com('the head moved by the last call\'s rates: NCUR (bits, / 65536) += 8 (CW - CA) (8 half-rate samples a call)')
     A('move', sd(R, 'CW'), 'a')
     A('move', sd(R, 'CA'), 'x0')
     A('sub', 'x0', 'a')
-    A('asr', '#$9', 'a', 'a', c='16 x 8 (c/8) bits = (c/8)/512 in NCUR units (bits / 65536), 48 bits: nothing is lost')
+    A('asr', '#$a', 'a', 'a', c='8 x 8 (c/8) bits = (c/8)/1024 in NCUR units (bits / 65536), 48 bits: nothing is lost')
     A('move', sd(R, 'NCUR'), 'b')
     A('move', sd(R, 'NCL'), 'b0')
     A('add', 'b', 'a')
     A('move', 'a1', sd(R, 'NCUR'))
     A('move', 'a0', sd(R, 'NCL'))
-    A.com('LFO')
-    A('move', '#>$7f0000', 'a')
-    A('move', cs('RATK'), 'x0')
-    A('sub', 'x0', 'a')
-    A('move', 'a', 'x0')
-    A('move', q(math.log2(LFO_HI / LFO_LO) * 128 / 127 / 32), 'y0')
-    A('mpy', 'y0', 'x0', 'a')
-    A('bsr', '>ptexp')
-    A('move', 'b', 'x0')
-    A('move', q(LFO_HI * 16 / FS), 'y0')
-    A('move', cs('SIDE'), 'a')
-    A('cmp', '#>$1', 'a')
+    A.com('LFO: the call increment LFOI (the left), x 1.18 on the right')
+    A('move', cs('LFOI'), 'a')
+    A('move', cs('SIDE'), 'b')
+    A('cmp', '#>$1', 'b')
     lab = A.lab('lr')
     A('beq', lab)
-    A('move', q(LFO_HI * 16 / FS * LFO_R), 'y0')
-    A.put(lab)
+    A('move', 'a', 'x0')
+    A('move', q(LFO_R / 2), 'y0')
     A('mpy', 'y0', 'x0', 'a')
+    A('asl', 'a')
+    A.put(lab)
     A('move', sd(R, 'LFO'), 'x0')
     A('add', 'x0', 'a')
     A('and', '#>$7fffff', 'a')
@@ -612,8 +940,8 @@ def side_block(A, kg, gstep, dstep):
     A('tgt', 'x0', 'a')
     A('bsr', '>ptexp')
     A('move', 'b', 'x0')
-    A('move', q(CEQ_MAX / 32), 'y0')
-    A('mpy', 'y0', 'x0', 'a', c='TGT = the clock-equivalent RAMB/(T fs), / 32')
+    A('move', q(CEQ_MAX / 64), 'y0')
+    A('mpy', 'y0', 'x0', 'a', c='TGT = the clock-equivalent RAMB/(T fs/2) (bits a half-rate sample), / 64')
     A('move', 'a', sd(R, 'TGT'))
     A.com('freeze')
     A('move', 'x:(r6+$6)', 'a')
@@ -627,7 +955,7 @@ def side_block(A, kg, gstep, dstep):
     A('move', cs('FIRST'), 'a')
     A('tst', 'a')
     A('beq', lab)
-    A.com('first call: snap: CEQ = TGT, the clock, the head N bits behind the writer')
+    A.com('first call (the last dry call): snap: CEQ = TGT, the clock, the head N bits behind the writer')
     A('move', sd(R, 'TGT'), 'a')
     A('move', 'a', sd(R, 'CEQ'))
     A('bsr', '>ptclk', c='CW, and N (a) for CEQ')
@@ -672,7 +1000,7 @@ def side_block(A, kg, gstep, dstep):
     A('move', q(-0.00097), 'x0')
     A('cmp', 'x0', 'a')
     A('tlt', 'x0', 'a')
-    A('asl', '#$9', 'a', 'a', c='(N - NCUR)/16 bits a sample, /8')
+    A('asl', '#$a', 'a', 'a', c='(N - NCUR)/8 bits a half-rate sample, /8')
     A('move', 'a', 'x0')
     A('move', sd(R, 'CW'), 'a')
     A('sub', 'x0', 'a')
@@ -698,7 +1026,7 @@ def side_block(A, kg, gstep, dstep):
     A('move', q(-dstep), 'a')
     A('move', 'a', sd(R, 'DGA'))
     A('move', sd(R, 'GA'), 'a')
-    A('cmp', q(dstep * 16 * 1.01), 'a')
+    A('cmp', q(dstep * HALF * 1.01), 'a')
     A('bge', after)
     A('move', '#>$0', 'a')
     A('move', 'a', sd(R, 'GA'))
@@ -707,7 +1035,7 @@ def side_block(A, kg, gstep, dstep):
     full = A.lab('nf')
     seek = A.lab('sj')
     A('move', sd(R, 'CA'), 'a')
-    A('asr', '#$2', 'a', 'a', c='c_A/32')
+    A('asr', '#$3', 'a', 'a', c='c_A/64')
     A('move', sd(R, 'TGT'), 'x0')
     A('cmp', 'x0', 'a')
     A('bge', full)
@@ -738,11 +1066,6 @@ def side_block(A, kg, gstep, dstep):
     A('mpy', 'y0', 'x0', 'a')
     A('move', 'a', sd(R, 'CW'))
     A('move', 'a', sd(R, 'CNEW'))
-    A('move', sd(R, 'NCUR'), 'a')
-    A('asl', '#$7', 'a', 'a', c='bits / 65536 -> bits / 512 ...')
-    A('move', sd(R, 'NCUR'), 'x0')
-    A('move', 'x0', 'a')
-    A('asr', '#$7', 'a', 'a')
     A('move', sd(R, 'NCUR'), 'x0')
     A('bsr', '>ptbits', c='a1 = NCUR in whole bits')
     A('move', 'a1', sd(R, 'PCNT'))
@@ -755,7 +1078,7 @@ def side_block(A, kg, gstep, dstep):
     A('move', q(dstep), 'a')
     A('move', 'a', sd(R, 'DGA'))
     A('move', sd(R, 'GA'), 'a')
-    A('cmp', q(1 - dstep * 16 * 1.01), 'a')
+    A('cmp', q(1 - dstep * HALF * 1.01), 'a')
     A('blt', after)
     A('move', ONE, 'a')
     A('move', 'a', sd(R, 'GA'))
@@ -766,7 +1089,7 @@ def side_block(A, kg, gstep, dstep):
     A.put(m2)
     A.com('MODE 2: the ring refills at the new clock')
     A('move', sd(R, 'WAIT'), 'a')
-    A('sub', '#>$10', 'a')
+    A('sub', lit(HALF), 'a')
     A('move', 'a', sd(R, 'WAIT'))
     A('bgt', after)
     A('move', '#>$1', 'a')
@@ -813,14 +1136,12 @@ def side_block(A, kg, gstep, dstep):
     A('move', 'a1', sd(R, 'PCNT'))
     A('move', q(2 ** -7), 'a')
     A('move', sd(R, 'TGT'), 'x0')
-    A('bsr', '>ptdiv', c='b = 2^-7 / (TGT/32)')
-    A('move', 'b1', 'a')
-    A('asr', '#$3', 'a', 'a')
-    A.com('wait = RAMB/TGT samples = (2^-7/(TGT/32)) RAMB / 2^12')
+    A('bsr', '>ptdiv', c='b = 2^-7 / (TGT/64) = 0.5 / ceq')
+    A.com('wait = RAMB / ceq half-rate samples = b 2 RAMB')
     A('move', 'b', 'x0')
-    A('move', q(RAMB / 2 ** 17), 'y0')
-    A('mpy', 'y0', 'x0', 'a', c='b RAMB/2^17; samples = that x 2^23 / 16')
-    A('asr', '#$4', 'a', 'a')
+    A('move', q(2 * RAMB / 2 ** 17), 'y0')
+    A('mpy', 'y0', 'x0', 'a')
+    A('asr', '#$6', 'a', 'a')
     A('move', 'a1', 'a')
     A('add', lit(WAIT_PAD), 'a')
     A('move', 'a1', sd(R, 'WAIT'))
@@ -837,25 +1158,45 @@ def side_block(A, kg, gstep, dstep):
 
 
 def side_coefs(A, R, gstep):
-    A.com('---- CVSD constants from the clock c (CW/8): u/2 = 1/(2c) = (1/16)/(c/8)')
+    skip = A.lab('cq')
+    A.com('---- CVSD constants from the clock c (CW/8), a side a call (CPAR), both on the first: u/2 = 1/(2c) = '
+          '(1/16)/(c/8)')
+    A('move', cs('FIRST'), 'a')
+    A('tst', 'a')
+    lab = A.lab('cf')
+    A('bne', lab)
+    A('move', cs('CPAR'), 'a')
+    A('move', cs('SIDE'), 'x0')
+    A('cmp', 'x0', 'a')
+    A('bne', skip)
+    A.put(lab)
     A('move', q(1 / 16), 'a')
     A('move', sd(R, 'CW'), 'x0')
     A('bsr', '>ptdiv')
     A('move', 'b', cs('SC0'), c='u/2')
     A('move', 'b', 'x1')
     for nm, k in (('LN', KL), ('BN', KB)):
-        A.com(f'{nm}[n] = exp(-n {k:.6f} u) ~ 1 - z + z^2/2, z = n {k:.6f} u')
-        for n in range(5):
-            A('move', q(2 * k * n), 'y0')
-            A('mpy', 'x1', 'y0', 'a', c='z')
-            A('move', 'a', 'x0')
-            A('mpy', 'x0', 'x0', 'b')
-            A('asr', 'b')
-            A('neg', 'a')
-            A('add', 'b', 'a')
-            A('add', ONE, 'a')
-            A('move', 'a', sd(R, f'{nm}{n}'))
-    A.com('1 - beta = z - z^2/2 (z = KB u); sqrt(u)/2 by a quadratic; dMin/8, dMax/8 x GRIT')
+        A.com(f'{nm}[n] = exp(-{k:.6f} u)^n: e1 = 1 - z + z^2/2 (z = {k:.6f} u <= 0.007), then its powers')
+        lab = A.lab('pw')
+        A('move', q(2 * k), 'y0')
+        A('mpy', 'x1', 'y0', 'a', c='z')
+        A('move', 'a', 'x0')
+        A('mpy', 'x0', 'x0', 'b')
+        A('asr', 'b')
+        A('neg', 'a')
+        A('add', 'b', 'a')
+        A('add', ONE, 'a')
+        A('move', 'a', 'y0', c='e1')
+        A('lua', f'({R}{disp(SD_[nm + "0"])})', 'r4')
+        A('move', ONE, 'a')
+        A('move', 'a', 'x:(r4)+')
+        A('do', f'#{RCAP}', f'>{lab}')
+        A('move', 'a', 'x0')
+        A('mpy', 'y0', 'x0', 'a')
+        A('move', 'a', 'x:(r4)+')
+        A.put(lab)
+        A('nop')
+    A.com('1 - beta = z - z^2/2 (z = KB u); sqrt(u)/4 by a quadratic; dMin/8, dMax/8 x GRIT')
     A('move', q(2 * KB), 'y0')
     A('mpy', 'x1', 'y0', 'a')
     A('move', 'a', 'x0')
@@ -870,14 +1211,14 @@ def side_coefs(A, R, gstep):
     A('move', 'a', 'y0')
     A('mpy', 'y0', 'x0', 'a')
     A('add', q(SQ_C[0]), 'a')
-    A('move', 'a', 'x0', c='sqrt(u)/2')
-    A('move', q(2 * D_MIN * KD / SC), 'y0')
+    A('move', 'a', 'x0', c='sqrt(u)/4')
+    A('move', q(4 * D_MIN * KD / SC), 'y0')
     A('mpy', 'y0', 'x0', 'a')
     A('move', 'a', cs('SC2'), c='dMin/8')
-    A('move', q(2 * D_MAX * KD / SC / 4), 'y0')
+    A('move', q(4 * D_MAX * KD / SC / 4), 'y0')
     A('mpy', 'y0', 'x0', 'a', c='dMax/8 / 4')
     A('move', 'a', 'x0')
-    A('move', cs('GRIT'), 'y0')
+    A('move', cs('GRTS'), 'y0')
     A('mpy', 'y0', 'x0', 'a', c='x grit/4')
     A('asl', '#$4', 'a', 'a', c='dMax/8 x grit')
     A('move', cs('SC2'), 'x0')
@@ -885,33 +1226,32 @@ def side_coefs(A, R, gstep):
     A('move', 'a', 'x0', c='dMax - dMin')
     A('move', cs('SC1'), 'y0')
     A('mpy', 'y0', 'x0', 'a', c='kd')
-    A('move', 'a', 'y1')
+    A('asl', '#$3', 'a', 'a')
+    A('move', 'a', sd(R, 'K8D'), c='8 kd (times runs/8)')
     A('move', cs('SC2'), 'x0')
     A('mpy', 'y0', 'x0', 'b', c='kMin')
-    A('move', 'b', 'x1')
-    A('clr', 'a')
-    A('clr', 'b')
-    for n in range(5):
-        A('move', 'a', sd(R, f'NK{n}'))
-        A('move', 'b', sd(R, f'RK{n}'))
-        if n < 4:
-            A('add', 'x1', 'a')
-            A('add', 'y1', 'b')
-    A.com('whine increment: fold(frac(15.55 c)) cycles a sample')
+    A('asl', '#$3', 'b', 'b')
+    A('move', 'b', sd(R, 'K8MIN'), c='8 kMin (times n/8)')
+    A.com('whine increment: the plugin\'s fold(frac(15.55 R / 44.1 kHz)), then folded again at 22.05 kHz (cycles a '
+          'half-rate sample): R = c 22.05 kHz, so 15.55 R / 44.1 kHz = 15.55 c / 2')
     A('move', sd(R, 'CW'), 'x0')
-    A('move', q(CLK_PER_BIT * 8 / 128), 'y0')
-    A('mpy', 'y0', 'x0', 'a', c='15.55 c / 128')
+    A('move', q(CLK_PER_BIT * 8 / 2 / 128), 'y0')
+    A('mpy', 'y0', 'x0', 'a', c='15.55 (c/2) / 128')
     A('asl', '#$7', 'a', 'a')
-    A('and', '#>$7fffff', 'a')
-    A('move', 'a1', 'a')
-    A('move', q(0.5), 'x0')
-    A('cmp', 'x0', 'a')
-    lab = A.lab('wf')
-    A('ble', lab)
-    A('neg', 'a')
-    A('add', ONE, 'a')
-    A.put(lab)
+    lab, lab2 = A.lab('wf'), A.lab('wh')
+    for lb in (lab, lab2):
+        A('and', '#>$7fffff', 'a')
+        A('move', 'a1', 'a')
+        A('move', q(0.5), 'x0')
+        A('cmp', 'x0', 'a')
+        A('ble', lb)
+        A('neg', 'a')
+        A('add', ONE, 'a')
+        A.put(lb)
+        if lb == lab:
+            A('asl', 'a', c='x 2: at 22.05 kHz')
     A('move', 'a', sd(R, 'WINC'))
+    A.put(skip)
     A.com('activity gate (as the BBD)')
     A('move', sd(R, 'H'), 'a')
     A('add', '#>$10', 'a')
@@ -926,7 +1266,7 @@ def side_coefs(A, R, gstep):
     A('clr', 'a')
     A.put(lab)
     A('move', sd(R, 'XENV'), 'b')
-    A('move', q(THR), 'x0')
+    A('move', q(THR / 4), 'x0', c='(XENV follows the decimated input, / 4)')
     A('cmp', 'x0', 'b')
     lab = A.lab('gx')
     A('blt', lab)
@@ -953,7 +1293,7 @@ def side_coefs(A, R, gstep):
     A('cmp', 'y0', 'b')
     A('tlt', 'y0', 'b')
     A('move', 'b', 'a')
-    A('asr', '#$4', 'a', 'a')
+    A('asr', '#$3', 'a', 'a')
     A('move', 'a', sd(R, 'DGG'))
     A('add', 'x0', 'b')
     A('move', 'b', sd(R, 'GEND'))
@@ -982,12 +1322,12 @@ def side_coefs(A, R, gstep):
 def subroutines(A):
     R = 'r3'
     A.put('ptclk')
-    A.com('CEQ (/32) -> CW = min(CAP, CEQ) (/8); a = N = RAMB min(CAP, CEQ)/CEQ (bits / 65536)')
+    A.com('CEQ (/64) -> CW = min(CAP, CEQ) (/8); a = N = RAMB min(CAP, CEQ)/CEQ (bits / 65536)')
     lab, done = A.lab('ck'), A.lab('cd')
     A('move', sd(R, 'CEQ'), 'a')
-    A('cmp', q(CAP / 32), 'a')
+    A('cmp', q(CAP / 64), 'a')
     A('bgt', lab)
-    A('asl', '#$2', 'a', 'a')
+    A('asl', '#$3', 'a', 'a')
     A('move', 'a', sd(R, 'CW'))
     A('move', q(RAMB / 65536), 'a')
     A('bra', done)
@@ -995,7 +1335,7 @@ def subroutines(A):
     A('move', q(CAP / 8), 'b')
     A('move', 'b', sd(R, 'CW'))
     A('move', 'a', 'x0')
-    A('move', q(CAP / 32), 'a')
+    A('move', q(CAP / 64), 'a')
     A('bsr', '>ptdiv', c='CAP/CEQ')
     A('move', 'b', 'x0')
     A('move', q(RAMB / 65536), 'y0')
@@ -1017,11 +1357,6 @@ def subroutines(A):
         A('move', lit(math.floor((1 << 23) / mod)), 'y0')
         A('mpy', 'y0', 'x0', 'a', c=f'floor(N/{mod}) (maybe one short)')
         A('move', 'a1', 'x1')
-        A('move', lit(mod), 'y0')
-        A('move', 'x1', 'a')
-        A('move', '#>$0', 'b')
-        for _ in range(1):
-            pass
         A.com(f'r = N - {mod} q (q x {mod} by repeated adds is too long: multiply as integers via the fraction product)')
         A('move', lit(mod), 'y0')
         A('mpy', 'x1', 'y0', 'a')
@@ -1085,12 +1420,46 @@ def tone_job(A):
     A('move', cs('FIRST'), 'a')
     A('tst', 'a')
     A('beq', one)
-    for k in range(6):
-        A('move', lit(k), 'a')
-        A('move', 'a', cs('TJOB'))
-        A('bsr', '>ptsect')
+    lab = A.lab('ta')
+    A('clr', 'a')
+    A('move', 'a', cs('TJOB'))
+    A('do', '#6', f'>{lab}')
+    A('bsr', '>ptsect')
+    A('move', cs('TJOB'), 'a')
+    A('add', '#>$1', 'a')
+    A('move', 'a', cs('TJOB'), c='(three words after the bsr: never a bsr at the loop end)')
+    A.put(lab)
     A('rts')
     A.put(one)
+    A.com('a section a call while TONE or a clock moves; once all six have the settled values, nothing')
+    chg, go, skp = A.lab('tc'), A.lab('tg'), A.lab('tx')
+    for nm, src in (('TLT', cs('TONS')), ('TLW', sd('r3', 'CW')), ('TLR', sd('r3', 'CW'))):
+        if nm == 'TLW':
+            A('move', 'n1', 'r3')
+        if nm == 'TLR':
+            A('move', 'n2', 'r3')
+        A('move', src, 'a')
+        A('move', cs(nm), 'x0')
+        A('cmp', 'x0', 'a')
+        A('bne', chg)
+    A('bra', go)
+    A.put(chg)
+    A('move', cs('TONS'), 'a')
+    A('move', 'a', cs('TLT'))
+    A('move', 'n1', 'r3')
+    A('move', sd('r3', 'CW'), 'a')
+    A('move', 'a', cs('TLW'))
+    A('move', 'n2', 'r3')
+    A('move', sd('r3', 'CW'), 'a')
+    A('move', 'a', cs('TLR'))
+    A('clr', 'a')
+    A('move', 'a', cs('TCNT'))
+    A.put(go)
+    A('move', cs('TCNT'), 'a')
+    A('cmp', '#>$6', 'a')
+    A('bge', skp)
+    A('add', '#>$1', 'a')
+    A('move', 'a', cs('TCNT'))
     A('move', cs('TJOB'), 'a')
     A('add', '#>$1', 'a')
     A('cmp', '#>$6', 'a')
@@ -1099,24 +1468,27 @@ def tone_job(A):
     A('clr', 'a')
     A.put(lab)
     A('move', 'a', cs('TJOB'))
+    A('bra', 'ptsect')
+    A.put(skp)
+    A('rts')
     A.put('ptsect')
     A.com('side = TJOB / 3, section = TJOB mod 3; hh = h/2 = pi bw/(2 fs): clamp(0.6032 (c/8), 2.4 k, 11.5 k) x TONE')
     A('move', cs('TJOB'), 'a')
-    A('move', SREG[0], 'r3')
+    A('move', 'n1', 'r3')
     A('cmp', '#>$3', 'a')
     lab = A.lab('ts')
     A('blt', lab)
-    A('move', SREG[1], 'r3')
+    A('move', 'n2', 'r3')
     A('sub', '#>$3', 'a')
     A.put(lab)
     A('move', 'a1', cs('SC5'), c='the section 0..2')
     A('move', sd('r3', 'CW'), 'x0')
-    A('move', q(math.pi * BW_K * FS * 8 / (2 * FS)), 'y0')
+    A('move', q(math.pi * BW_K * 8 / 2), 'y0', c='hh = pi 0.048 c fs/2 / (2 fs/2) = pi 0.048 8 (c/8) / 2')
     A('mpy', 'y0', 'x0', 'a')
-    A('move', q(math.pi * BW_LO / (2 * FS)), 'x0')
+    A('move', q(math.pi * BW_LO / (2 * FSH)), 'x0')
     A('cmp', 'x0', 'a')
     A('tlt', 'x0', 'a')
-    A('move', q(math.pi * BW_HI / (2 * FS)), 'x0')
+    A('move', q(math.pi * BW_HI / (2 * FSH)), 'x0')
     A('cmp', 'x0', 'a')
     A('tgt', 'x0', 'a')
     A('move', 'a', cs('SC1'))
@@ -1144,7 +1516,7 @@ def tone_job(A):
     A('mpy', 'y0', 'x0', 'a')
     A('asl', 'a', c='x 1.25 for the second output section')
     A.put(lab)
-    A('move', q(0.7), 'x0')
+    A('move', q(HH_MAX), 'x0', c='(0.45 x 22.05 kHz)')
     A('cmp', 'x0', 'a')
     A('tgt', 'x0', 'a')
     A('move', 'a', cs('SC1'), c='hh')
@@ -1241,26 +1613,32 @@ def lp_section(A):
     A('rts')
 
 
+
+
 def build(xbase=HW_XBASE, test=False):
     A = Asm('pt')
     kg = 1 - math.exp(-2 * math.pi * GLIDE_HZ * 16 / FS)
     gstep = 16 / (GATE_S * FS)
-    dstep = 1 / (DIP_S * FS)
+    dstep = 1 / (DIP_S * FSH)
     head = f"""; CYCLES_FORWARD_BRANCHES
 ; AERIA PT2399 -- Chloaelis' PT2399 delay (DSP.h PT2399Line in DelayCell) in 24-bit fixed point. Generated by pt2399/gen.py.
+; HALF RATE: a halfband decimator (polyphase IIR, {HB.N_COEF} allpasses) -> the chip at 22.05 kHz, a sample a pair -> a
+; halfband interpolator -> the dry/wet mix at 44.1 kHz. Halfband coefficients (A0 | A1): {' '.join(f'{c:.6f}' for c in HB.A0)} |
+; {' '.join(f'{c:.6f}' for c in HB.A1)}
 ; Dual mono, hard panned. Per side: s = x + fb -> input lowpass (bw) -> CVSD encoder at the chip clock (<= {CAP} bits a
-; sample; under {T_CAP * 1000:.0f} ms the read tap shortens instead) -> {RAMB} bits of RAM -> decoder at the read head -> the
-; sample's mean held -> output lowpasses (bw, 1.25 bw) -> DC block -> + noise + clock whine -> wet rider ({CEIL} FS)
-; -> fb = 1.05 regen hpf(wet). bw = clamp(0.048 clock, 2.4 k, 11.5 k) x TONE. No tanh anywhere (see gen.py).
+; half-rate sample = {CAP * FSH / 1000:.1f} kbit/s; under {T_CAP * 1000:.0f} ms the read tap shortens instead) -> {RAMB} bits of RAM -> decoder
+; at the read head -> the sample's mean held -> output lowpasses (bw, 1.25 bw) -> DC block -> + noise + clock whine ->
+; interpolator + wet rider ({CEIL} FS) -> fb = 1.05 regen hpf(wet). bw = clamp(0.048 clock, 2.4 k, 11.5 k) x TONE, <= 9.9 kHz.
 ;  knob 0 TIME  {T_MIN * 1000:.0f} ms x {T_MAX / T_MIN:.0f}^(v/127)    knob 1 SKEW  right time x 2^((v-64)/64)
 ;  knob 2 FDBK  regen {REGEN_MAX} v/127 (x 1.05)  knob 3 TONE  bw x 2^((v-{TONE_REF})/{TONE_STEP})
 ;  knob 4 GRIT  dMax x 2^-((v-64)/{GRIT_STEP}) (127: overloads sooner)   knob 5 MIX
 ;  FUNC r6+$c: HPF (22..16) FRZ (14..8); r6+$d: RFRZ (the ColdFire's) TMOD (14..8: 0 SLEW, 1 FADE);
 ;  r6+$e: MOD (22..16, LFO>Time depth) RATE (14..8, 0.02 .. 20 Hz). r6+6: the ColdFire's freeze word (bit 0 L, bit 1 R).
-; RAM in X: {RAMW} words a side (left at the base, right at base + $800; masks at base + ${MASK_OFF:x}); the base a multiple of
-; $1000: {'X:$10000 (TEST BUILD)' if test else 'the word X:$213 points to, used as an X address (core 1 X:$8000)'}
-; common r7: {' '.join(f'{v:02x} {k}' for k, v in CO.items())}, HPF coefs ${HPC:02x}
-; sides at r7+$30 / r7+$98 (r1 / r2 = 64 words in): {' '.join(f'{v:02x} {k}' for k, v in SD_.items())} coefs {COEFS} hist {HIST}
+; X, from the base (a multiple of $1000): left RAM +0 ({RAMW} words), masks +${MASK_OFF:x} (24), halfbands +${HB_OFF:x} ({HB_END}),
+; right RAM +$800, tables +${TBL_OFF:x} (POPW 128, MSKN 8, INV 8): {'X:$10000 (TEST BUILD)' if test else 'the word X:$213 points to, used as an X address (core 1 X:$2000)'}
+; common r7: {' '.join(f'{v:02x} {k}' for k, v in CO.items())}, HPF coefs ${HPC:02x} (TDF2 order b0 b1 a1 b2 a2)
+; sides at r7+${SIDE_AT[0]:02x} / r7+${SIDE_AT[1]:02x} (n1 / n2 in the loop, r1 in ptsamp, r3 in ptside: 64 words in): {' '.join(f'{v:02x} {k}' for k, v in SD_.items())}
+; coefs {COEFS} hist {HIST}; halfband block: coefs +{HB_CE} +{HB_CO} +{HB_CI}, chains +{HB_SE} +{HB_SO} +{HB_SI}
 """
     A.raw(head.rstrip('\n').split('\n'))
     # ---------------------------------------------------------------- init
@@ -1278,9 +1656,10 @@ def build(xbase=HW_XBASE, test=False):
         A('move', 'x:>$213', 'r4')
         A('nop')
         A('move', 'x:(r4)', 'a')
-    A('move', 'a', 'b')
-    A('add', lit(MASK_OFF), 'b')
-    A('move', 'b', cs('MSKB'))
+    for nm, off in (('MSKB', MASK_OFF), ('HBB', HB_OFF), ('TBLB', TBL_OFF), ('TBIG', BIG_OFF)):
+        A('move', 'a', 'b')
+        A('add', lit(off), 'b')
+        A('move', 'b', cs(nm))
     for c in range(2):
         A('move', 'r7', 'b')
         A('add', lit(SIDE_AT[c] + MID), 'b')
@@ -1290,11 +1669,37 @@ def build(xbase=HW_XBASE, test=False):
         A('move', cs('MSKB'), 'x0')
         for nm in ('MW', 'MA'):
             A('move', 'x0', sd('r4', nm))
+        A('move', cs('HBB'), 'b')
+        A('add', lit(HB_SI + c * (HB.K0 + HB.K1 + 2)), 'b')
+        A('move', 'b1', sd('r4', 'HBS'), c='this side\'s interpolator chains')
         A('add', '#>$800', 'a')
-    for k, v in enumerate((0, 1.0, 0.5, 1 / 3, 0.25)):
-        A('move', q(min(v, 1 - 2 ** -23)), 'a')
-        A('move', 'a', cs(f'INV{k}'))
-    A('move', '#>$8', 'a')
+    A.com('INV[n] = 1/n (INV1 = 1 - 2^-23, INV0 = 0)')
+    A('move', ONE, 'a')
+    A('move', 'a', cs('INV1'))
+    A('lua', f'(r7+${CO["INV2"]:02x})', 'r5')
+    A('move', '#>$2', 'y1')
+    A('do', '#6', '>ptinv')
+    A('move', '#>$1', 'a')
+    A('move', 'y1', 'x0')
+    A('bsr', '>ptdiv', c='1/n (integers: the ratio of fractions)')
+    A('move', 'b', 'x:(r5)+')
+    A('move', 'y1', 'a')
+    A('add', '#>$1', 'a')
+    A('move', 'a1', 'y1')
+    A.put('ptinv')
+    A('nop')
+    A('move', '#>$1', 'a')
+    A('move', 'a', cs('CPAR'))
+    A.com('OFF[n] = 4 (2^n - 1)')
+    A('lua', f'(r7+${CO["OFF0"]:02x})', 'r5')
+    A('clr', 'a')
+    A('do', '#8', '>ptoffs')
+    A('move', 'a1', 'x:(r5)+')
+    A('lsl', 'a')
+    A('add', '#>$4', 'a')
+    A.put('ptoffs')
+    A('nop')
+    A('move', '#>$9', 'a')
     A('move', 'a', cs('CLR'))
     A('move', '#>$1', 'a')
     A('move', 'a', cs('FIRST'))
@@ -1303,47 +1708,72 @@ def build(xbase=HW_XBASE, test=False):
     A('rts')
     # ---------------------------------------------------------------- proc
     A.put('proc')
-    A('move', '#>$ffffff', 'm1')
-    A('move', '#>$ffffff', 'm2')
-    A('move', '#>$ffffff', 'm4')
-    A('move', '#>$ffffff', 'm5')
-    A('move', '#>$ffffff', 'm3')
+    for m in ('m1', 'm2', 'm3', 'm4', 'm5'):
+        A('move', '#>$ffffff', m)
     for c in range(2):
         A('move', 'r7', 'a')
         A('add', lit(SIDE_AT[c] + MID), 'a')
-        A('move', 'a1', SREG[c])
-    A.com('bounded clearing: 8 dry calls, 256 words of each side\'s 2,048 a call; then the 24 masks')
+        A('move', 'a1', ('n1', 'n2')[c])
+    A.com('bounded clearing: 8 dry calls, 256 words of each side\'s 2,048 a call; then a dry call for the masks, the '
+          'tables, the halfbands and the first snap to the knobs')
     A('move', cs('CLR'), 'a')
     A('tst', 'a')
     A('beq', 'ptready')
     A('sub', '#>$1', 'a')
     A('move', 'a', cs('CLR'))
+    lab = A.lab('cs')
+    A('beq', lab)
+    A('sub', '#>$1', 'a')
     A('asl', '#$8', 'a', 'a')
     A('move', 'a1', 'x0')
     for c in range(2):
-        lab = A.lab('cz')
-        A('move', sd(SREG[c], 'IW'), 'a')
+        lb = A.lab('cz')
+        A('move', ('n1', 'n2')[c], 'r1')
+        A('move', sd('r1', 'IW'), 'a')
         A('add', 'x0', 'a')
         A('move', 'a1', 'r4')
         A('move', '#>$aaaaaa', 'a', c='the idle pattern: stream bit p = p & 1, and p & 1 = (p mod 24) & 1')
-        A('do', '#256', f'>{lab}')
+        A('do', '#256', f'>{lb}')
         A('move', 'a', 'x:(r4)+')
-        A.put(lab)
+        A.put(lb)
         A('nop')
-    A('move', cs('CLR'), 'a')
-    A('tst', 'a')
-    lab = A.lab('cm')
-    A('bne', lab)
-    A('move', cs('MSKB'), 'r4')
-    A('move', '#>$1', 'a')
-    A('do', '#24', '>ptmsk')
-    A('move', 'a1', 'x:(r4)+')
-    A('lsl', 'a')
-    A.put('ptmsk')
-    A('nop')
+    A('rts')
     A.put(lab)
+    A('bsr', '>ptsetup')
+    A('bsr', '>ptknobs')
+    A('clr', 'a')
+    A('move', 'a', cs('GX'))
+    A('move', '#>$0', 'a')
+    A('move', 'a', cs('FIRST'))
     A('rts')
     A.put('ptready')
+    lab = A.lab('gr')
+    A('move', cs('GENI'), 'a')
+    A('cmp', '#>$8', 'a')
+    A('bge', lab)
+    A('bsr', '>ptgen')
+    A('rts')
+    A.put(lab)
+    A('bsr', '>ptknobs')
+    # ---------------------------------------------------------------- the sample loop
+    A('move', 'r6', cs('R6S'))
+    A('move', cs('HBB'), 'r2')
+    A('move', '#>$ffffff', 'm6')
+    A('move', lit(RAMW - 1), 'm4')
+    A('move', '#>$17', 'm5')
+    A('do', 'n7', '>ptloop')
+    loop_body(A)
+    A.put('ptloop')
+    A('move', '#>$ffffff', 'm4')
+    A('move', '#>$ffffff', 'm5')
+    A('move', cs('R6S'), 'r6')
+    for c in range(2):
+        A('move', ('n1', 'n2')[c], 'r1')
+        A('move', sd('r1', 'GEND'), 'a')
+        A('move', 'a', sd('r1', 'GART'))
+    A('rts')
+    # ---------------------------------------------------------------- the knobs and the block code (a call)
+    A.put('ptknobs')
     lab = A.lab('mt')
     A('move', 'x:(r6+$5)', 'a')
     A('move', '#>$7f0000', 'x0')
@@ -1365,12 +1795,34 @@ def build(xbase=HW_XBASE, test=False):
     A('move', q(FB_K * REGEN_MAX * 128 / 127 / 2), 'y0')
     A('mpy', 'y0', 'x0', 'a')
     A('move', 'a', cs('KFBT'))
-    A.com('GRIT/4 = 2^-(v/32) (dMax x 4 .. x 1/4)')
+    A.com('GRIT/4 = 2^-(v/32) (dMax x 4 .. x 1/4), when the knob moved (or the first call)')
+    lab, lab2 = A.lab('gk'), A.lab('gl')
     A('move', 'x:(r6+$4)', 'x0')
+    A('move', cs('FIRST'), 'a')
+    A('tst', 'a')
+    A('bne', lab2)
+    A('move', cs('GRK'), 'a')
+    A('cmp', 'x0', 'a')
+    A('beq', lab)
+    A.put(lab2)
+    A('move', 'x0', cs('GRK'))
     A('move', q(128 / GRIT_STEP / 32), 'y0')
     A('mpy', 'y0', 'x0', 'a')
     A('bsr', '>ptexp')
     A('move', 'b', cs('GRIT'))
+    A.put(lab)
+    A.com('GRIT glides (1/8 a call: the bits in flight were coded with the old step; snapped on the first call)')
+    lab = A.lab('gs')
+    A('move', cs('GRIT'), 'a')
+    A('move', cs('FIRST'), 'b')
+    A('tst', 'b')
+    A('bne', lab)
+    A('move', cs('GRTS'), 'b')
+    A('sub', 'b', 'a')
+    A('asr', '#$3', 'a', 'a')
+    A('add', 'b', 'a')
+    A.put(lab)
+    A('move', 'a', cs('GRTS'))
     lab = A.lab('tf')
     A('move', 'x:(r6+$3)', 'a')
     A('move', cs('TONS'), 'b')
@@ -1387,7 +1839,8 @@ def build(xbase=HW_XBASE, test=False):
     lab, lab2 = A.lab('hp'), A.lab('hq')
     A('tst', 'a')
     A('beq', lab)
-    for k, v in enumerate(hp_coefs(HPF_HZ, HPF_Q)):
+    b0, b1, b2, a1, a2 = hp_coefs(HPF_HZ, HPF_Q)
+    for k, v in enumerate((b0, b1, a1, b2, a2)):
         A('move', q(v / 2), 'a')
         A('move', 'a', f'x:(r7+${HPC + k:02x})')
     A('bra', lab2)
@@ -1404,58 +1857,41 @@ def build(xbase=HW_XBASE, test=False):
     A('move', 'a', cs('MODK'))
     knob7(A, 0xe, False)
     A('move', 'a', cs('RATK'))
+    A.com('the LFO increment a call: 16 x 0.02 x 1000^(RATE/127) Hz / fs (when RATE moved, or the first call)')
+    lab, lab2 = A.lab('rk'), A.lab('rl')
+    A('move', cs('RATK'), 'x0')
+    A('move', cs('FIRST'), 'a')
+    A('tst', 'a')
+    A('bne', lab2)
+    A('move', cs('RTK'), 'a')
+    A('cmp', 'x0', 'a')
+    A('beq', lab)
+    A.put(lab2)
+    A('move', 'x0', cs('RTK'))
+    A('move', '#>$7f0000', 'a')
+    A('sub', 'x0', 'a')
+    A('move', 'a', 'x0')
+    A('move', q(math.log2(LFO_HI / LFO_LO) * 128 / 127 / 32), 'y0')
+    A('mpy', 'y0', 'x0', 'a')
+    A('bsr', '>ptexp')
+    A('move', 'b', 'x0')
+    A('move', q(LFO_HI * 16 / FS), 'y0')
+    A('mpy', 'y0', 'x0', 'a')
+    A('move', 'a', cs('LFOI'))
+    A.put(lab)
+    A.com('CPAR: whose CVSD constants this call (1 left, 2 right)')
+    A('move', cs('CPAR'), 'a')
+    A('eor', '#$3', 'a')
+    A('move', 'a1', cs('CPAR'))
     for c in range(2):
-        A('move', SREG[c], 'r3')
+        A('move', ('n1', 'n2')[c], 'r3')
         A('move', '#>$%x' % (1 << c), 'a')
         A('move', 'a', cs('SIDE'))
         A('bsr', '>ptside')
     A('bsr', '>pttone')
-    A('move', '#>$0', 'a')
-    A('move', 'a', cs('FIRST'))
-    # ---------------------------------------------------------------- the sample loop
-    A('move', 'r6', cs('R6S'))
-    A('move', 'r1', 'n1')
-    A('move', 'r2', 'n2')
-    A('move', lit(RAMW - 1), 'm4')
-    A('move', '#>$17', 'm5')
-    A('do', 'n7', '>ptloop')
-    A('move', cs('MIXT'), 'a')
-    A('move', cs('MIXC'), 'b')
-    A('sub', 'b', 'a')
-    A('asr', '#$7', 'a', 'a')
-    A('add', 'a', 'b')
-    A('move', 'b', cs('MIXC'))
-    A('move', cs('RNG'), 'x0')
-    A('move', '#>$0343fd', 'y0')
-    A('mpy', 'y0', 'x0', 'a')
-    A('asr', 'a')
-    A('move', 'a0', 'x0')
-    A('move', 'x0', 'a')
-    A('add', '#>$269ec3', 'a')
-    A('move', 'a1', cs('RNG'))
-    A('move', 'a1', cs('RND'))
-    A('move', 'n1', 'r1')
-    A('bsr', '>ptsamp')
-    A('move', 'n2', 'r1')
-    A('bsr', '>ptsamp')
-    # (13 Nov 2026) the loop must not END on the call: a BSR/JSR at LA or LA-1 is documented undefined (DSP56300FM
-    # A.3.1, "Restrictions Near the End of DO Loops"); the emulators run it as the reference simulator does, the
-    # silicon is not promised to. The only such loop end in AERIA's DSP code. One nop a sample.
-    A('nop')
-    A.put('ptloop')
-    A('nop')
-    A('move', '#>$ffffff', 'm4')
-    A('move', '#>$ffffff', 'm5')
-    A('move', cs('R6S'), 'r6')
-    A('move', 'n1', 'r1')
-    A('move', 'n2', 'r2')
-    for c in range(2):
-        A('move', sd(SREG[c], 'GEND'), 'a')
-        A('move', 'a', sd(SREG[c], 'GART'))
     A('rts')
-    A.put('ptsamp')
-    side_sample(A, 'r1', 0)
-    A('rts')
+    side_sample(A)
+    setup_call(A)
     side_block(A, kg, gstep, dstep)
     tone_job(A)
     subroutines(A)

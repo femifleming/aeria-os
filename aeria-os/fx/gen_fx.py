@@ -47,8 +47,8 @@ EFFECTS = [  # folder, org, ybase (None = no buffer), core (0, 1, or 2 = either:
     # 12 Nov 2026: WARM (a soft clipper, no buffer, either core) in the free half of PITCH's slot; Chloaelis' three delays
     # (core 1 only, a full 2K each) in the shared window above the FFT SMEAR's memory (Y:$3c000-$3e3ff), P:$3e800-$3ffff
     ('warm',    0x34400, None, 2, 150),     # aeria-fx/warm: 811 words with the stub; worst block 149.8
-    ('bbd',     0x3F000, 0x02000, 1, 780),  # core 1's X:$2000-$3fff (the base word used as an X address): never with HAIL or AURORA
-    ('pt2399',  0x3F800, 0x02000, 1, 970),  # core 1's X:$2000-$2fff (as an X address; moved from X:$8000 13 Nov 2026: that region is unproven on core 1): never with BBD, HAIL, AURORA
+    ('gone_bbd', 0, None, 1, 0),             # BBD, removed at the owner's request 13 Nov 2026: an empty row keeps the numbers saved projects use (PT2399 20, TAPE 21)
+    ('pt2399',  0x3F800, 0x02000, 1, 630),  # half rate since 13 Nov 2026 (was 970); core 1's X:$2000-$3fff, its CVSD table at +$1000 (as an X address; moved from X:$8000 13 Nov 2026: that region is unproven on core 1): never with HAIL or AURORA
     ('tape',    0x3E800, 0x08000, 1, 388),  # ECHO's memory exactly (Y:$8000-$bf7f, X:$4000-$7eff): never with ECHO
 ]
 MEMORY = """core 0: P:$33000 engine, P:$34000-$37fff effects (2K words each), Y:$0000-$89cf GRAINS (800 ms), Y:$a000-$bfff RESO
@@ -56,9 +56,9 @@ segments, shared window Y:$38000-$3bdfd PITCH ring, Y:$3c000-$3fdfd SMEAR ring; 
 core 1 (its own X and Y, each core: Y $0-$bfff, X $0-$8fff, measured 10 Nov 2026): P:$30000-$32fff effects (shared),
 Y:$0000-$7fff VERB ring, Y:$8000-$bfff ECHO left, X:$4000-$7fff ECHO right
 P:$37800 AURORA (926 words), P:$37c00-$37fff FILT (830 words with the stub; no buffer)
-P:$34400-$347ff WARM (811 words, after PITCH's 802); shared window P:$3e400-$3e7ff free, P:$3e800 TAPE (2,045), P:$3f000 BBD
-(1,785), P:$3f800 PT2399 (1,671): above the FFT SMEAR's Y:$3c000-$3e3ff, in the same 8K block as its last 1K
-core 1 X:$2000-$3fff HAIL or AURORA or BBD; X:$8000-$8fff TWISTER or PT2399; Y:$8000-$bfff + X:$4000-$7fff ECHO or TAPE"""
+P:$34400-$347ff WARM (811 words, after PITCH's 802); shared window P:$3e400-$3e7ff free, P:$3e800 TAPE (2,045), P:$3f000-$3f7ff
+free (BBD removed 13 Nov 2026), P:$3f800 PT2399 (2,042, half rate): above the FFT SMEAR's Y:$3c000-$3e3ff, in the same 8K block as its last 1K
+core 1 X:$2000-$3fff HAIL or AURORA or PT2399; X:$8000-$8fff TWISTER; Y:$8000-$bfff + X:$4000-$7fff ECHO or TAPE"""
 
 # a stand-in for octabam's remix.schema: just keep what the manifests pass
 class _Obj:
@@ -190,7 +190,7 @@ LAW = {
  ('warm', 'LEVL'): lambda v: 'OFF' if v == 0 else _sg(round(20 * math.log10(v / 64), 1), 'DB'),
  # BBD (12 Nov 2026): FDBK is the regen (the loop gain is 1.05 x it)
  ('bbd', 'TIME'): lambda v: _ms(47 * (1000 / 47) ** (v / 127)), ('bbd', 'SKEW'): _skew, ('bbd', 'FDBK'): lambda v: _pct(v, 115),
- ('bbd', 'TONE'): lambda v: _hz(6800 * 2 ** ((v - 100) / 24)), ('bbd', 'MOD'): _offpct,
+ ('bbd', 'TONE'): lambda v: _hz(min(9920, 6800 * 2 ** ((v - 100) / 24))), ('bbd', 'MOD'): _offpct,
  ('bbd', 'HPF'): lambda v: ('OFF', 'ON')[v], ('bbd', 'FRZ'): lambda v: ('OFF', 'HOLD')[v], ('bbd', 'RFRZ'): _offpct,
  ('bbd', 'TMOD'): lambda v: ('SLEW', 'FADE')[v], ('bbd', 'RATE'): lambda v: _hz(0.02 * 1000 ** (v / 127)),
  # PT2399 (12 Nov 2026): TONE scales the chip's clock-following bandwidth; GRIT is the CVSD step (64 = the plugin's)
@@ -240,6 +240,9 @@ def assemble(folder, org, asmfile):
 
 rows = []
 for folder, org, ybase, core, cost in EFFECTS:
+    if folder.startswith('gone_'):                       # a removed effect: no code, no knobs, never offered
+        rows.append(('AERIA -', 0, None, [('', 0, 0)] * 6, [0, 0, 0], 0, [None] * 12, [('', 0, 0)] * 6))
+        print('%-12s removed' % folder); continue
     mod = manifest(folder)
     words = assemble(folder, org, ASM_PIN.get(folder, mod.dsp.asm))
     ps = mod.params
@@ -287,8 +290,9 @@ with open(os.path.join(HERE, '..', 'src', 'fx_table.inc'), 'w') as f:
                 ', '.join('"%s"' % k[0] for k in p1b), ', '.join(str(k[1]) for k in p1b), ', '.join(str(k[2]) for k in p1b),
                 ', '.join(('fxv_%d_%d' % (i, k)) if fm[k] else '0' for k in range(6, 12))))
     f.write('};\n')
-    for name, org, *_ in rows:
-        n = 'fx_' + [e[0] for e in EFFECTS if e[1] == org][0]
+    for e, (name, org, *_) in zip(EFFECTS, rows):
+        n = 'fx_' + e[0]
+        if e[0].startswith('gone_'): f.write('static const uint32_t %s_code[1] = {0};\n' % n); continue
         b = open(os.path.join(DSP, n + '.bin'), 'rb').read()
         w = [b[i] | b[i + 1] << 8 | b[i + 2] << 16 for i in range(0, len(b), 3)]
         f.write('static const uint32_t %s_code[%d] = {%s};\n' % (n, len(w), ','.join('0x%06xu' % x for x in w)))

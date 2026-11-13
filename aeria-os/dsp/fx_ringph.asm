@@ -9,7 +9,8 @@
 ;  RING  carrier sin(pi p), p a wrapping 24-bit phase; frequency 20 Hz ..
 ;        5 kHz (FREQ, log); FOLW: the step is multiplied by
 ;        1 + 6 FOLW min(1, 3 env) (env: |mono in|, 3 ms attack, 120 ms
-;        release); BIAS mixes the carrier toward 1 (0 = ring, 127 = nearly
+;        release), held under 0.9 x Nyquist (19.8 kHz: past Nyquist it folded
+;        back down; 13 Nov 2026); BIAS mixes the carrier toward 1 (0 = ring, 127 = nearly
 ;        dry AM); SPRD offsets the right carrier 0..90 degrees: at 127 the
 ;        two carriers are in quadrature (sin / cos), so the sidebands sit
 ;        +-90 degrees apart between the sides -- wide, and the mono sum is
@@ -37,7 +38,7 @@ init:
         move    #>$ffffff,m4
         move    r7,r4
         clr     a
-        do      #48,>rpizero
+        do      #64,>rpizero
         move    a,x:(r4)+
 rpizero:
         nop     
@@ -124,6 +125,104 @@ rpbring:
         clr     a
         move    a,x:(r7+$24)
 rprrun:
+; RING input low-pass for this block: step = inc (1 + 6 FOLW min(1, 3 env)) from the state, as below
+        move    x:(r7+$0e),x0
+        move    #>$300000,y0
+        mpy     y0,x0,a
+        move    #>$100000,x0
+        cmp     x0,a
+        tgt     x0,a
+        move    a,x0
+        move    x:(r7+$07),y0
+        mpy     y0,x0,a
+        move    a,x0
+        move    #>$600000,y0
+        mpy     y0,x0,a
+        asl     #$3,a,a
+        add     #>$100000,a
+        move    a,x0
+        move    x:(r7+$05),y0
+        mpy     y0,x0,a
+        asl     #$3,a,a
+        move    #>$733333,x0
+        cmp     x0,a
+        tgt     x0,a
+        move    #>$116873,x0
+        cmp     x0,a
+        bge     rplpon
+; carrier under 3 kHz: no filter (B = 1/2, the rest 0: y/2 = x/2)
+        move    #>$400000,x0
+        move    x0,x:(r7+$2b)
+        clr     a
+        move    a,x:(r7+$2c)
+        move    a,x:(r7+$2d)
+        move    a,x:(r7+$2e)
+        bra     rplpdone
+rplpon:
+        sub     #>$424dd3,a
+        move    a,x0
+        move    #>$53c507,y0
+        mpy     y0,x0,a
+        asl     #$2,a,a
+        move    a,y1  ; t
+        move    #>$027af0,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$005782,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$2d0b9e,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$021fb5,a
+        asl     a
+        move    a,x:(r7+$2c)
+        move    #>$fb3617,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$ff107c,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$e9da5b,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$fdee77,a
+        move    a,x0
+        mpy     x0,y1,a
+        add     #>$f4f4db,a
+        asl     a
+        move    a,x:(r7+$2d)
+        move    #>$100000,a
+        move    x:(r7+$2c),x0
+        move    #>$200000,y0
+        mac     -y0,x0,a
+        move    x:(r7+$2d),x0
+        move    #>$100000,y0
+        mac     -y0,x0,a
+        move    a,x:(r7+$2b)  ; (1 - 2 A1H - A2)/8
+        move    #>$7fffff,x0
+        move    x0,x:(r7+$2e)
+rplpdone:
+; a rounding limit cycle (a few LSB) left in the filter states is cleared
+        move    x:(r7+$2f),a
+        abs     a
+        move    x:(r7+$30),b
+        abs     b
+        add     b,a
+        move    x:(r7+$31),b
+        abs     b
+        add     b,a
+        move    x:(r7+$32),b
+        abs     b
+        add     b,a
+        cmp     #>$000040,a
+        bgt     rplpkeep
+        clr     a
+        move    a,x:(r7+$2f)
+        move    a,x:(r7+$30)
+        move    a,x:(r7+$31)
+        move    a,x:(r7+$32)
+rplpkeep:
         do      n7,>rprend
         move    x:(r7+$04),a
         move    x:(r7+$05),b
@@ -155,6 +254,42 @@ rprrun:
         asr     #$7,a,a
         add     a,b
         move    b,x:(r7+$0d)
+; RING input low-pass, L: y/2 -> x:(r7+$33)
+        move    x:(r0),x0
+        move    x:(r7+$2b),y0
+        mpy     y0,x0,a
+        move    x:(r7+$2f),x1
+        move    x:(r7+$2c),y0
+        mac     x1,y0,a
+        mac     x1,y0,a
+        move    x:(r7+$30),x0
+        move    x:(r7+$2d),y0
+        macr    y0,x0,a
+        move    x1,x:(r7+$30)
+        move    a,x:(r7+$2f)
+        move    x:(r7+$2e),y0
+        mac     x1,y0,a
+        mac     x1,y0,a
+        mac     y0,x0,a
+        move    a,x:(r7+$33)
+; RING input low-pass, R: y/2 -> x:(r7+$34)
+        move    x:(r0+n0),x0
+        move    x:(r7+$2b),y0
+        mpy     y0,x0,a
+        move    x:(r7+$31),x1
+        move    x:(r7+$2c),y0
+        mac     x1,y0,a
+        mac     x1,y0,a
+        move    x:(r7+$32),x0
+        move    x:(r7+$2d),y0
+        macr    y0,x0,a
+        move    x1,x:(r7+$32)
+        move    a,x:(r7+$31)
+        move    x:(r7+$2e),y0
+        mac     x1,y0,a
+        mac     x1,y0,a
+        mac     y0,x0,a
+        move    a,x:(r7+$34)
 ; envelope of |mono|: attack 3 ms, release 120 ms
         move    x:(r0),a
         move    x:(r0+n0),x0
@@ -192,6 +327,9 @@ rprrun:
         move    x:(r7+$05),y0
         mpy     y0,x0,a
         asl     #$3,a,a
+        move    #>$733333,x0  ; carrier held under 0.90 x Nyquist (19845 Hz): FREQ x FOLW past it used to fold
+        cmp     x0,a
+        tgt     x0,a  ; back down (aliased carrier, 13 Nov 2026)
         move    x:(r7+$0f),x0
         add     x0,a
         move    a1,x:(r7+$0f)  ; phase wraps mod 2 in a1
@@ -221,8 +359,9 @@ rprrun:
         move    x:(r7+$09),y0
         mac     x1,y0,a
         move    a,x0
-        move    x:(r0),y1
+        move    x:(r7+$33),y1
         mpy     x0,y1,a
+        asl     a  ; the low-passed input is y/2
         move    x:(r7+$0d),y1
         move    x:(r0),b
         sub     b,a
@@ -261,8 +400,9 @@ rprrun:
         move    x:(r7+$09),y0
         mac     x1,y0,a
         move    a,x0
-        move    x:(r0),y1
+        move    x:(r7+$34),y1
         mpy     x0,y1,a
+        asl     a  ; the low-passed input is y/2
         move    x:(r7+$0d),y1
         move    x:(r0),b
         sub     b,a

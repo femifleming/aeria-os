@@ -43,8 +43,9 @@ MODULE = Module(
     dsp=DspSection(asm="pt2399/pt2399.asm", priority=15,
                    bus_role=BusRole.NONE, ybase=YBase.NEVER,
                    r7_latch_slot=None, gate_label=None),
-    # RAM: 1,835 X words a side (left at the base, right at +$800), the 24 masks at +$740; base a multiple of $1000
-    claims=Claims(dsp_ranges=(DspRange("x", 0x8000, 4096, "AERIA PT2399 RAM (core 1 X:$8000-$8fff)"),)),
+    # RAM: 1,835 X words a side (left at the base, right at +$800), the 24 masks at +$740, the halfbands at +$760, small
+    # tables at +$f40, the big table +$1000..+$1fff (half-rate build, 13 Nov 2026); base a multiple of $2000
+    claims=Claims(dsp_ranges=(DspRange("x", 0x2000, 8192, "AERIA PT2399 RAM + tables (core 1 X:$2000-$3fff)"),)),
     harness=Harness(layout_char="7", is_server=False),
     dear={'TIME': 0, 'SKEW': 0, 'FDBK': 127, 'TONE': 127, 'GRIT': 127, 'MIX': 127, 'HPF': 1, 'TMOD': 0,
           'MOD': 127, 'RATE': 127},

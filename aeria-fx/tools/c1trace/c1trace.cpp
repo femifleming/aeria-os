@@ -24,7 +24,7 @@
 using namespace dsp56k;
 class AllowAll final : public IMemoryValidator { public: bool memValidateAccess(EMemArea, TWord, bool) const override { return true; } };
 
-static const char* DIR = "/Users/femishonugafleming/octa/aeria-os/dsp/";
+static const char* DIR = "/Users/you/octa/aeria-os/dsp/";
 struct Fx { const char* name; const char* bin; TWord org, ybase; TWord len; };
 static std::vector<Fx> FX = {
     {"echo", "fx_echo.bin", 0x31000, 0x08000, 0}, {"filt", "fx_filt.bin", 0x37c00, 0, 0}, {"warm", "fx_warm.bin", 0x34400, 0, 0},

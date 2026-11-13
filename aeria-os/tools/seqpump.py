@@ -1,5 +1,5 @@
 """the stream's throughput against DSP load in the sequencer. seqpump.py (dev build; sp_dbg at 0x4006da94)"""
-import sys,time,struct; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, sq, c1dbg
+import sys,time,struct; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, sq, c1dbg
 d=sq.d; B=0x100C0000; A=0x4006dd60
 keep=aos.rd(d,B,0x400+12*64*8)
 def op(a,b=0): d.ctrl_transfer(0x40,0x16,a,b,None,timeout=2000); time.sleep(0.05)

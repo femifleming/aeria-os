@@ -1,5 +1,5 @@
 """the sequencer under use: frames the DSP found the stream dry, and the longest the pump was away. seqdry.py"""
-import sys,time,struct; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, sq, c1dbg
+import sys,time,struct; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, sq, c1dbg
 d=sq.d
 was=sq.seqmode(1)
 sq.key(0x28)

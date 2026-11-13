@@ -1,8 +1,8 @@
 """audio quality, digital and through the cables (main L -> in B, phones -> in C): a test sample is put into slot 6.1
 and played by track 1; the unit is recorded over USB (A B C D main L R). audioq.py"""
-import sys,time,struct,subprocess; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, sq, place, c1dbg
+import sys,time,struct,subprocess; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, sq, place, c1dbg
 import numpy as np, wave
-d=sq.d; B=0x100C0000; S='/private/tmp/claude-501/-Users-femishonugafleming-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad'
+d=sq.d; B=0x100C0000; S='/private/tmp/claude-501/-Users-you-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad'
 SYM={l.split()[-1]:int(l.split()[0],16) for l in open(S+'/sym.txt')}
 FS=44100; MEM=0x46400000; TAG='0'
 def op(a,b=0): d.ctrl_transfer(0x40,0x16,a,b,None,timeout=2000); time.sleep(0.05)

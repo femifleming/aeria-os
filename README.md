@@ -13,7 +13,7 @@ Two faces on one unit:
 - **The sequencer** — an 8-track groovebox: machines SMPL, SUB, FM, NOIS, PLUK (Karplus-Strong) and MIDI (polyphonic, with chords); parameter locks, ratchets with curves, conditions, per-track rate, direction, density, warp; a curved clock (after norns' *clockabout*) and a cellular automaton per track (after norns' *less-concepts*); mute scenes and scenes for track knobs; resampling; MIDI sync, transport, program change and notes in; 18-channel stems over USB.
 - **MOD** (both faces) — three LFOs, a Lorenz attractor and a flock of boids, routed to any knob.
 
-Effects (hand-written DSP56300 assembly): PITCH, GRAINS, RING, RESO, SMEAR (FFT), ROSE, COMP, VERB, ECHO (hard-panned L/R), VOWL, FILT (morphing filter driven by the Lorenz attractor), WARM, the weather's WIND, FOG, TWISTER, HAIL, AURORA — BBD, PT2399 and TAPE. Many are ports of the author's plugins *Cloudfin*, *Pinkie Pie's Balloon Shop* and *Chloaelis*.
+Effects (hand-written DSP56300 assembly): PITCH, GRAINS, RING, RESO, SMEAR (FFT), ROSE, COMP, VERB, ECHO (hard-panned L/R), VOWL, FILT (morphing filter driven by the Lorenz attractor), WARM, the weather's WIND, FOG, TWISTER, HAIL, AURORA — PT2399 (half rate) and TAPE. Many are ports of the author's plugins *Cloudfin*, *Pinkie Pie's Balloon Shop* and *Chloaelis*.
 
 ## Manuals
 
@@ -42,7 +42,7 @@ The full manual (165 pages) and an 18-page quick start guide, in English (dark),
 
 ## Building (as the author does)
 
-Paths in the scripts assume this layout under `~/octa/`. Roughly:
+Paths in the scripts assume this layout under `~/octa/` (absolute paths read `/Users/you/...`: change them to your home folder). Roughly:
 
 ```sh
 cd cloudfin && ./assemble.sh                     # UI parts -> aeria12.c
@@ -59,7 +59,8 @@ AERIA Flasher (`aeria-os/flasher`) expects the same layout, the Modwerk venv and
 
 ## Beta notes
 
-- Latest (v0.9.2): less aliasing — PITCH, GRAINS and AURORA filter before shifting up, RING's carrier stays below Nyquist; the MOD page shows its routing in columns.
+- Latest (v0.9.3): more DSP room — the engine runs from the first DSP core's private memory (its load halved; filters 3x cheaper); PT2399 at half rate (cost 970 -> 630); BBD removed; effect placement tries both cores; the card preview starts at once.
+- v0.9.2: less aliasing — PITCH, GRAINS and AURORA filter before shifting up, RING's carrier stays below Nyquist; the MOD page shows its routing in columns.
 - Before that: a quality pass on fifteen effects, and BBD, PT2399 and TAPE are in (a DSP crash found in testing is fixed).
 - Never press TRIG 2 (EMPTY RESET) in the Startup Menu unless you mean to wipe the unit.
 - AERIA OS and the Elektron OS keep their saved data in the same battery-backed memory: back up before switching between them.

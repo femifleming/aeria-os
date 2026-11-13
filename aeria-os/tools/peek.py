@@ -1,7 +1,7 @@
 import sys; sys.exit("DO NOT RUN: peek.py is stale (hard-coded METER_MAX address and an old host-port protocol). On 12 Nov 2026 it wrote into the running image and stopped DSP core 0 until a power cycle. Rewrite it from sym.txt before using it.")
 """peek DSP X memory through the engine's bring-up peek (meter 5): peek.py addr [addr...]"""
 import sys, struct, time
-sys.path.insert(0, '/Users/femishonugafleming/octa/aeria-os/tools')
+sys.path.insert(0, '/Users/you/octa/aeria-os/tools')
 import aos
 METER_MAX = 0x40042924
 def setpeek(d, a):

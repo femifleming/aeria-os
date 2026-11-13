@@ -312,8 +312,7 @@ mixend:
         nop
         move    r1,x:>$2c5
         bsr     >stream
-; main feedback (HEAD's), then the chain; the chain's output is kept for the next frame's feedback
-        bsr     >fback
+; the chain (main feedback was taken out 13 Nov 2026: the owner removed it from the OS on 12 Nov)
         move    #>$9a0,r0
         clr     a
         do      #64,qclr
@@ -322,13 +321,6 @@ qclr:
         nop
         bsr     >chain
         bsr     >record
-        move    #>$900,r4
-        move    #>$940,r5
-        do      #32,fbcopy
-        move    x:(r4)+,x0
-        move    x0,x:(r5)+
-fbcopy:
-        nop
         bsr     >wthr
 ; out: main 2/3 = (chain + front bus) x master ($2e8 left, $2ec right: the balance); cue x $2eb (its level); cue 0/1 = (back bus + chain x $2ea) x master (the chain is copied
 ; to cue while nothing is routed back); phones 4/5 = main + back; slots 6/7 silent. X:$2f8-$2fd the six results.
@@ -517,83 +509,58 @@ lmrs:
         move    #>$9a0,r1
         move    #>$9c0,r2
         do      #16,outend
+; (13 Nov 2026) each output once: cue = (chain x $2ea + back) x $2eb; main = the limiter's delayed block x its gain;
+; phones = back x the balance + the limited main. (The main used to be made twice, the second time only to be taken
+; out of the phones again: 107 instructions a sample, now 62.)
         move    x:(r0)+,x0
         move    x:>$2ea,y0
         mpy     y0,x0,b
         move    x:(r2)+,x1
         add     x1,b
-        move    x:(r1)+,a
-        add     x0,a
-        move    a,x:>$2f8
-        move    b,x:>$2fa
-        move    x1,x:>$2f7
-        move    x:>$2e8,y0
-        move    x:>$2f8,x0
-        mpy     y0,x0,a
-        move    a,x:>$2f8
+        move    b,x0
         move    x:>$2eb,y0
-        move    x:>$2fa,x0
         mpy     y0,x0,b
         move    b,x:>$2fa
         move    x:>$2e8,y0
-        move    x:>$2f7,x0
-        mpy     y0,x0,b
-        move    x:>$2f8,x0
-        add     x0,b
+        mpy     y0,x1,b
         move    b,x:>$2fc
         move    x:(r0)+,x0
         move    x:>$2ea,y0
         mpy     y0,x0,b
         move    x:(r2)+,x1
         add     x1,b
-        move    x:(r1)+,a
-        add     x0,a
-        move    a,x:>$2f9
-        move    b,x:>$2fb
-        move    x1,x:>$2f7
-        move    x:>$2ec,y0
-        move    x:>$2f9,x0
-        mpy     y0,x0,a
-        move    a,x:>$2f9
+        move    b,x0
         move    x:>$2eb,y0
-        move    x:>$2fb,x0
         mpy     y0,x0,b
         move    b,x:>$2fb
         move    x:>$2ec,y0
-        move    x:>$2f7,x0
-        mpy     y0,x0,b
-        move    x:>$2f9,x0
-        add     x0,b
+        mpy     y0,x1,b
         move    b,x:>$2fd
         move    x:>$322,a
         move    x:>$323,x0
         add     x0,a
         move    a,x:>$322
-        move    x:>$322,y0
+        move    a,y0
         move    x:(r4),x1
         move    x:(r3)+,x0
         move    x0,x:(r4)+
         mpy     x1,y0,a
         asl     #2,a,a
         move    a,x0
+        move    x0,x:>$2f8
         move    x:>$2fc,b
-        move    x:>$2f8,x1
-        sub     x1,b
         add     x0,b
         move    b,x:>$2fc
-        move    x0,x:>$2f8
         move    x:(r4),x1
         move    x:(r3)+,x0
         move    x0,x:(r4)+
         mpy     x1,y0,a
         asl     #2,a,a
         move    a,x0
+        move    x0,x:>$2f9
         move    x:>$2fd,b
-        move    x:>$2f9,x1
-        sub     x1,b
         add     x0,b
         move    b,x:>$2fd
-        move    x0,x:>$2f9
         move    x:>$2fa,x0
         move    x0,x:(r5)+
         move    x:>$2fb,x0
@@ -924,157 +891,51 @@ wthp:
         bsr     >bqd
 wtdone:
         rts
-; one EQ band over a channel of the limiter's block: r0 its first sample (stride 2), r1 the filter and g / 4, r2 state
+; one EQ band over a channel of the limiter's block: r0 its first sample (stride 2), r1 the filter and g / 4, r2 its
+; state. The same ten-instruction biquad as bqd; then the band's g times the filter's output is added to the sample.
 eqone:
+        move    r3,x:>$330
+        move    r4,x:>$331
+        move    n0,x:>$332
+        move    x:(r1),x0
+        move    x0,y:>$89e8
+        move    x:(r1+$2),x0
+        move    x0,y:>$89e9
+        move    x:(r1+$1),x0
+        move    x0,y:>$89ea
+        move    x:(r1+$4),x0
+        move    x0,y:>$89eb
+        move    x:(r1+$3),x0
+        move    x0,y:>$89ec
+        move    x:(r1+$5),y1
+        move    #>$89e8,r4
+        move    #>$4,m4
+        move    #>$1,m2
+        move    #>$1,m3
+        lua     (r2+$2),r3
+        move    #>$2,n0
         do      #16,eqfin
-        move    x:(r0),x0
-        move    x:(r1),y0
-        mpy     y0,x0,a
-        move    x:(r2),x0
-        move    x:(r1+$1),y0
-        mac     y0,x0,a
-        move    x:(r2+$1),x0
-        move    x:(r1+$2),y0
-        mac     y0,x0,a
-        move    x:(r2+$2),x0
-        move    x:(r1+$3),y0
-        mac     y0,x0,a
-        move    x:(r2+$3),x0
-        move    x:(r1+$4),y0
-        mac     y0,x0,a
+        move    x:(r0),x0 y:(r4)+,y0
+        mpy     y0,x0,a x:(r2)+,x1 y:(r4)+,y0
+        mac     x1,y0,a x:(r2)-,x1 y:(r4)+,y0
+        mac     x1,y0,a x0,x:(r2)+ y:(r4)+,y0
+        move    x:(r3)+,x1
+        mac     x1,y0,a x:(r3)-,x1 y:(r4)+,y0
+        mac     x1,y0,a
         asl     a
-        move    x:(r2),x0
-        move    x0,x:(r2+$1)
-        move    x:(r0),x0
-        move    x0,x:(r2)
-        move    x:(r2+$2),x0
-        move    x0,x:(r2+$3)
-        move    a,x:(r2+$2)
-        move    x:(r2+$2),x0
-        move    x:(r1+$5),y0
-        mpy     y0,x0,b
+        move    a,x1
+        mpy     y1,x1,b a,x:(r3)+
         asl     #2,b,b
-        move    x:(r0),a
-        add     b,a
-        move    a,x:(r0)+
-        move    (r0)+
+        add     x0,b
+        move    b,x:(r0)+n0
 eqfin:
         nop
-        rts
-
-; ---- main feedback (AERIA HEAD's, after Cloudfin's global loop): the previous frame's chain output ($940, L R)
-; high-passed at 70 Hz, low-passed at the tone, ridden by g = min(1, 0.3/envelope), soft-clipped with WARM's drive
-; (clip(d u)/d, u - u^3/3), times FDBK -- added into the work buffer. FDBK 0 adds nothing and clears the state.
-; ColdFire sets: $2d8 k = FDBK*0.95/d, $2d9 the tone coefficient, $2da d/4. State: $2d0-$2d5 (xp, yp, lp per
-; channel, L at even, R at odd), $2d6 envelope, $2d7 g, $2dc peak scratch.
-fback:
-        move    x:>$2d8,a
-        tst     a
-        beq     fbclear
-        clr     a
-        move    a,x:>$2dc
-        move    #>$940,r4
-        do      #32,fbpkend
-        move    x:(r4)+,a
-        abs     a
-        move    x:>$2dc,x1
-        cmp     x1,a
-        ble     fbpkn
-        move    a1,x:>$2dc
-fbpkn:
-        nop
-fbpkend:
-        nop
-        move    x:>$2d6,x0
-        move    #>$7fdde0,y0
-        mpy     y0,x0,a
-        move    x:>$2dc,x1
-        cmp     x1,a
-        bge     fbenv
-        move    x1,a
-fbenv:
-        move    a,x:>$2d6
-        move    #>$7fffff,b
-        move    #>$266666,x1
-        cmp     x1,a
-        ble     fbgok
-        move    a,x0
-        move    #>$266666,a
-        andi    #$fe,ccr
-        do      #24,fbdiv
-        div     x0,a
-fbdiv:
-        nop
-        move    a0,x0
-        move    x0,b
-fbgok:
-        move    b,x:>$2d7
-        move    #>$940,r4
-        move    #>$900,r5
-        do      #16,fbloop
-        move    x:(r4)+,x0
-        move    #>$2d0,r6
-        bsr     >fbch
-        move    x:(r4)+,x0
-        move    #>$2d1,r6
-        bsr     >fbch
-        nop
-fbloop:
-        nop
-        rts
-fbclear:
-        clr     a
-        move    #>$2d0,r4
-        do      #8,fbclr
-        move    a,x:(r4)+
-fbclr:
-        nop
-        rts
-; one sample of one channel: x0 in, r6 the channel's state (xp +0, yp +2, lp +4), adds into x:(r5)+
-fbch:
-        move    x:(r6),x1
-        move    x0,x:(r6)
-        move    x0,a
-        sub     x1,a
-        move    x:(r6+2),x1
-        add     x1,a
-        move    a,x0
-        move    #>$7eb852,y0
-        mpy     y0,x0,a
-        move    a,x:(r6+2)
-        move    x:(r6+4),x1
-        sub     x1,a
-        move    a,x0
-        move    x:>$2d9,y0
-        mpy     y0,x0,a
-        add     x1,a
-        move    a,x:(r6+4)
-        move    a,x0
-        move    x:>$2d7,y0
-        mpy     y0,x0,a
-        move    a,x0
-        move    x:>$2da,y0
-        mpy     y0,x0,a
-        asl     #2,a,a
-        move    a,x1
-        move    x1,x0
-        move    x1,y0
-        mpy     y0,x0,a
-        move    a,y0
-        move    x1,x0
-        mpy     y0,x0,a
-        move    a,x0
-        move    #>$2aaaab,y0
-        mpy     y0,x0,a
-        move    a,y1
-        move    x1,b
-        sub     y1,b
-        move    b,x0
-        move    x:>$2d8,y0
-        mpy     y0,x0,a
-        move    x:(r5),b
-        add     a,b
-        move    b,x:(r5)+
+        move    #>$ffffff,m2
+        move    #>$ffffff,m3
+        move    #>$ffffff,m4
+        move    x:>$330,r3
+        move    x:>$331,r4
+        move    x:>$332,n0
         rts
 
 ; ---- the chain: 8 slots at X:$280 ----
@@ -1400,36 +1261,48 @@ tldup:
         add     x0,a
         move    a1,x:>$8a00
         rts
-; one biquad over a channel of the work buffer: r0 its first sample (stride 2), r1 the coefficients, r2 its state
+; ---- the biquads, with parallel moves (13 Nov 2026): the coefficients copied to Y:$89e0 (b0 b2 b1 -a2 -a1, a ring
+; of five), the input's and the output's last two values in X rings of two (state +0/+1 and +2/+3), so a sample is
+; ten instructions (it was 29). A frame is sixteen samples, an even number: each ring is back where it began.
 bqd:
+        move    r3,x:>$330
+        move    r4,x:>$331
+        move    n0,x:>$332
+        move    x:(r1),x0
+        move    x0,y:>$89e0
+        move    x:(r1+$2),x0
+        move    x0,y:>$89e1
+        move    x:(r1+$1),x0
+        move    x0,y:>$89e2
+        move    x:(r1+$4),x0
+        move    x0,y:>$89e3
+        move    x:(r1+$3),x0
+        move    x0,y:>$89e4
+        move    #>$89e0,r4
+        move    #>$4,m4
+        move    #>$1,m2
+        move    #>$1,m3
+        lua     (r2+$2),r3
+        move    #>$2,n0
         do      #16,bqfin
-        move    x:(r0),x0
-        move    x:(r1),y0
-        mpy     y0,x0,a
-        move    x:(r2),x0
-        move    x:(r1+$1),y0
-        mac     y0,x0,a
-        move    x:(r2+$1),x0
-        move    x:(r1+$2),y0
-        mac     y0,x0,a
-        move    x:(r2+$2),x0
-        move    x:(r1+$3),y0
-        mac     y0,x0,a
-        move    x:(r2+$3),x0
-        move    x:(r1+$4),y0
-        mac     y0,x0,a
+        move    x:(r0),x0 y:(r4)+,y0
+        mpy     y0,x0,a x:(r2)+,x1 y:(r4)+,y0
+        mac     x1,y0,a x:(r2)-,x1 y:(r4)+,y0
+        mac     x1,y0,a x0,x:(r2)+ y:(r4)+,y0
+        move    x:(r3)+,x1
+        mac     x1,y0,a x:(r3)-,x1 y:(r4)+,y0
+        mac     x1,y0,a
         asl     a
-        move    x:(r2),x0
-        move    x0,x:(r2+$1)
-        move    x:(r0),x0
-        move    x0,x:(r2)
-        move    x:(r2+$2),x0
-        move    x0,x:(r2+$3)
-        move    a,x:(r2+$2)
-        move    a,x:(r0)+
-        move    (r0)+
+        move    a,x:(r3)+
+        move    a,x:(r0)+n0
 bqfin:
         nop
+        move    #>$ffffff,m2
+        move    #>$ffffff,m3
+        move    #>$ffffff,m4
+        move    x:>$330,r3
+        move    x:>$331,r4
+        move    x:>$332,n0
         rts
 
 ; ---- input peaks: x:$221.. C D A B -> $3a $3b $38 $39 ----

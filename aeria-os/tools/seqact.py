@@ -1,5 +1,5 @@
 """which sequencer actions cost dry frames while it plays. seqact.py"""
-import sys,time,struct; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, sq, c1dbg
+import sys,time,struct; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, sq, c1dbg
 d=sq.d; B=0x100C0000; keep=aos.rd(d,B,0x400+0x6000); was=sq.seqmode(1)
 for t in range(8):
     aos.wr(d,B+64+32*t+19,bytes([1])); aos.wr(d,B+64+32*t+1,bytes([50+5*t])); aos.wr(d,B+64+32*t+4,bytes([50]))

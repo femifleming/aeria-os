@@ -2,7 +2,7 @@
 """Load a program into a cold DSP core by hand over AERIA's link (usb.c 0x10/0x11), at the bootstrap's bus
 timing: stage 1 through the boot ROM, then the program through stage 1; then print every word the core sends."""
 import sys, struct, time
-sys.path.insert(0, '/Users/femishonugafleming/octa/aeria-os/tools')
+sys.path.insert(0, '/Users/you/octa/aeria-os/tools')
 import aos
 core = int(sys.argv[2]) if len(sys.argv) > 2 else 0
 d = aos.dev(20)
@@ -17,7 +17,7 @@ def words(path): b = open(path, 'rb').read(); return [b[i] | b[i+1] << 8 | b[i+2
 d.ctrl_transfer(0x40, 0x11, 0xFC00, 0x8020, struct.pack('>I', 0x1180), timeout=2000)   # CSCR2: slow
 d.ctrl_transfer(0x40, 0x10, core, 2, struct.pack('>I', 0x81), timeout=2000)          # ICR: interface reset
 d.ctrl_transfer(0x40, 0x10, core, 3, struct.pack('>I', 0), timeout=2000)             # CVR 0
-s1 = words('/Users/femishonugafleming/octa/aeria-os/dsp/stage1.bin' if core == 0 else '/Users/femishonugafleming/octa/aeria-os/dsp/stage1b.bin')
+s1 = words('/Users/you/octa/aeria-os/dsp/stage1.bin' if core == 0 else '/Users/you/octa/aeria-os/dsp/stage1b.bin')
 for v in [len(s1), 0x31000 if core == 0 else 0x32000] + s1: put(v)
 print('stage 1 sent'); time.sleep(0.05)
 prog = words(sys.argv[1])

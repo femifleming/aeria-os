@@ -1,7 +1,7 @@
 """the stems over USB: eight tracks, each its own pitch, recorded as 18 channels and checked. stemtest.py [heavy]"""
-import sys,time,struct,subprocess; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, sq, c1dbg, place
+import sys,time,struct,subprocess; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, sq, c1dbg, place
 import numpy as np, wave
-d=sq.d; B=0x100C0000; C='/private/tmp/claude-501/-Users-femishonugafleming-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad/ca/fmt'; S='/private/tmp/claude-501/-Users-femishonugafleming-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad'
+d=sq.d; B=0x100C0000; C='/private/tmp/claude-501/-Users-you-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad/ca/fmt'; S='/private/tmp/claude-501/-Users-you-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad'
 SD=[int(l.split()[0],16) for l in open(S+'/sym.txt') if l.split()[-1]=='stem_dbg'][0]
 keep=aos.rd(d,B,0x400+12*64*8); PB=place.SYM['params']
 def op(a,b=0): d.ctrl_transfer(0x40,0x16,a,b,None,timeout=2000); time.sleep(0.05)

@@ -110,7 +110,7 @@ static void sq_text(int tp, int v, char *n)
 /* Measured on the unit (12 Nov 2026), eight pitched tracks sounding on every step with all sixteen filters on: core 0
  * is at 64-80 % before any effect, so the effects go to core 1 first (1,257 instructions a sample of them ran there
  * with none late) and core 0 keeps room for the two that can only run there (519 together: 95 % in the worst frame). */
-#define SQ_ROOM0 560
+#define SQ_ROOM0 1060   /* 560 until 13 Nov 2026: the engine in core 0's private P took the torture test's worst frame from 89 % to 50 % */
 #define SQ_ROOM1 1300
 static int sq_fx_place(int t, int row)   /* 0, 1: the core; -1: no room; -2: that effect is on another track */
 {

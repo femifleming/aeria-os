@@ -762,7 +762,7 @@ static int fx_named(int row, const char *w)   /* the effect in a row is "AERIA "
     while (w[i] && n[i] == w[i]) i++;
     return !w[i] && !n[i];
 }
-/* where each effect takes its random freeze: ECHO bit 0 of FUNC word +$d (p2_word), BBD and PT2399 knob word +6
+/* where each effect takes its random freeze: ECHO bit 0 of FUNC word +$d (p2_word), PT2399 knob word +6
  * (bit 0 left, bit 1 right), TAPE knob words +6 (left) and +7 (right), non-zero = hold */
 static void rfrz_tick(int s, int row)
 {
@@ -780,7 +780,7 @@ static void rfrz_tick(int s, int row)
     uint8_t b = (uint8_t)(rfrz_bit[s][0] | rfrz_bit[s][1] << 1);
     if (b == rfrz_sent[s] || k < 0) return;
     rfrz_sent[s] = b;
-    if (fx_named(row, "BBD") || fx_named(row, "PT2399")) dsp_write(slot_knobs[s] + 6u, b, 0);
+    if (fx_named(row, "PT2399")) dsp_write(slot_knobs[s] + 6u, b, 0);
     else if (fx_named(row, "TAPE")) { dsp_write(slot_knobs[s] + 6u, b & 1, 0); dsp_write(slot_knobs[s] + 7u, b >> 1, 0); }
 }
 static int p2_raw(int s, int k) { return seq_mode ? SQH->fx_knob[s & 7][6 + k] & 0x7F : preview_slot_p2[s][k] & 0x7F; }
@@ -801,8 +801,8 @@ static int slots_ready;
 #define C1_KNOBS(s) (0x33C00u + 32u * (uint32_t)(s))
 #define C1_IN(s) (0x33E00u + 64u * (uint32_t)(s))
 #define C1_OUT(s) (0x33E20u + 64u * (uint32_t)(s))
-#define PROXY_INIT 0x33002u
-#define PROXY_PROC 0x33003u
+#define PROXY_INIT (DSP_SLOTS_ORG + 2u)   /* the engine's proxy entries (it lives in core 0's private P since 13 Nov 2026) */
+#define PROXY_PROC (DSP_SLOTS_ORG + 3u)
 int aos_place(int s, int row); int aos_slot_core(int s);   /* the UI's shelf.c: which core each slot's effect runs on, by the room each has */
 static int8_t slot_on_core[FX_SLOTS];
 /* a slot's first knob values and its core: the chain's from the UI's lanes, a sequencer track's from the sequence */
@@ -959,7 +959,7 @@ static void seq_fx(void)
     const SqHead *h = SQH;
     for (int s = 0; s < FX_SLOTS; s++) {
         int row = h->fx_row[s]; if (row > FX_COUNT) row = 0;
-        if (row && fx_named(row, "DIST")) row = 0;   /* no distortion */
+        if (row && (fx_named(row, "DIST") || (row <= FX_COUNT && !fx_words[row - 1]))) row = 0;   /* no distortion; a removed effect (BBD) */
         if (row != slot_row[s] || (row && (h->fx_core[s] == 1) != (slot_on_core[s] == 1))) { slot_row[s] = (uint8_t)row; fx_configure(s, row); }
         if (!row) continue;
         for (int k = 0; k < 6; k++) {
@@ -990,6 +990,7 @@ static void fx_slots(void)
     if (!slots_ready) { for (int s = 0; s < CHAIN_SLOTS; s++) { slot_row[s] = 0xFF; slot_knobs[s] = 0x1800u + 0x20u * (uint32_t)s; } slots_ready = 1; }
     for (int s = 0; s < CHAIN_SLOTS; s++) {
         int t = slot_t(s), f = slot_f(s), row = preview_live_fx[f * 8 + t];
+        if (row > 0 && row <= FX_COUNT && !fx_words[row - 1]) row = 0;   /* a removed effect (BBD): an empty slot */
         if (row != slot_row[s]) { slot_row[s] = (uint8_t)row; aos_place(s, row); fx_configure(s, row); }
         else if (row > 0 && row <= FX_COUNT && aos_slot_core(s) != slot_on_core[s]) fx_configure(s, row);   /* moved across to make room */
         if (row <= 0 || row > FX_COUNT) continue;

@@ -1,4 +1,4 @@
-import sys,time; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import place as P, load as L, aos, c1dbg
+import sys,time; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import place as P, load as L, aos, c1dbg
 d=P.d
 def counts(t=2.0):
     a=c1dbg.reports(d,0.4); time.sleep(t); b=c1dbg.reports(d,0.4)

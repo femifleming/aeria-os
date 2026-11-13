@@ -12,6 +12,26 @@ The full request-by-request log is in [LOG.md](LOG.md).
 
 ## Release builds
 
+### AERIA OS Nov 13 2026 09:26:48
+
+- Tested on the unit: yes
+- BBD removed at the owner's request (its row stays empty so saved projects keep their numbers; an old BBD slot loads empty). PT2399 (half rate, cost 630) and TAPE stay. Includes the half-rate PT2399, the DSP-room engine and the placement fix. Checked on the unit: effects, old BBD rows load as empty, 8/8 features.
+
+### AERIA OS Nov 13 2026 09:22:34
+
+- Tested on the unit: yes
+- BBD and PT2399 run at half rate (22.05 kHz inside, polyphase halfband filters, images -64 dB): BBD 780 -> 485, PT2399 970 -> 630. Their top end now stops near 10 kHz. Checked on the unit: every effect, 54 delay swaps incl. PT2399 -> BBD, 8/8 features.
+
+### AERIA OS Nov 13 2026 08:21:44
+
+- Tested on the unit: yes
+- Effect placement tries both DSP cores (a big effect like SMEAR is no longer refused, or put where it overloads, because of the order effects were picked). Headphone output measured clean for 4+ minutes (sky with the owner's chain, sequencer, effects swapped every 2 s). Includes the 08:03 DSP-room build.
+
+### AERIA OS Nov 13 2026 08:03:09
+
+- Tested on the unit: yes
+- More DSP room: the engine runs from core 0's private memory (no wait states): the first core's own load halved (sky worst case 700 -> 370; sequencer torture 89% -> 50%), master EQ and weather/track filters 3x cheaper, main feedback code removed. Room on core 0 for effects 990 -> 1280 in the sky, 560 -> 1060 in the sequencer. Card preview starts after half a second instead of loading the whole file. Checked on the unit: effects, 8/8 features, torture, full chains with EQ + weather + USB recording.
+
 ### AERIA OS Nov 13 2026 07:10:51
 
 - Tested on the unit: yes
@@ -32,14 +52,9 @@ The full request-by-request log is in [LOG.md](LOG.md).
 - Tested on the unit: yes
 - FILT (Lorenz filter), new hard-panned ECHO, WARM; MOD page; crossfader modes incl. DJ filter (works in the sequencer too); sequencer scenes for track knobs; CLK curved clock (clockabout); cellular automaton RULE/SEED/CAMD (less-concepts); STOP = dry + clear sky; LOOP PLAY/STOP; bright/dim steps. BBD, PT2399 and TAPE held back (a DSP crash under investigation). Checked on the unit: 8/8 new-feature tests, regression, MIDI.
 
-### AERIA OS Nov 13 2026 01:34:42
-
-- Tested on the unit: no
-- New effects from Chloaelis: FILT (morphing filter + Lorenz), ECHO now hard-panned L/R delays with HPF/freeze/random freeze/slew-fade, WARM soft clip, BBD, PT2399, TAPE (hiss, wear). Crossfader modes (XMOD: scenes, DJ filter, effects wet, MOD depth), scenes for sequencer track knobs, STOP = dry + clear sky, PLAY/STOP on LOOP, bright/dim sequencer steps, random-freeze clocks. Not yet tried on the unit.
-
 ### AERIA OS Nov 12 2026 22:57:53
 
 - Tested on the unit: yes
 - MOD page (LFOs, Lorenz, flock), random freeze on the master delay, LRNZ panner mode, no main feedback; storm, no DIST, phones fix, lamps, screen fix (the build flashed on 12 Nov at 22:58)
 
-GitHub pre-releases: v0.9.0-beta (04:18:16), v0.9.1-beta (05:53:11), v0.9.2-beta (07:10:51).
+GitHub pre-releases: v0.9.0-beta (04:18:16), v0.9.1-beta (05:53:11), v0.9.2-beta (07:10:51), v0.9.3-beta (09:26:48).

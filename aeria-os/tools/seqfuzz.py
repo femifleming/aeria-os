@@ -1,6 +1,6 @@
 """a soak: random keys and knobs in the sequencer while it plays, watching for dry frames, overruns, a dead DSP or a
 fault. The sequence is saved first and put back. seqfuzz.py [seconds]"""
-import sys,time,struct,random; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, sq, c1dbg
+import sys,time,struct,random; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, sq, c1dbg
 d=sq.d; B=0x100C0000; secs=float(sys.argv[1]) if len(sys.argv)>1 else 120
 keep=aos.rd(d,B,0x400+0x6000); random.seed(7)
 was=sq.seqmode(1)

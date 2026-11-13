@@ -30,8 +30,9 @@ static int part_knob(int t, int fx2, int k) { return preview_part_fx[t][fx2 * 6 
 #ifndef CORE_ROOM
 #define CORE_ROOM 1700
 #endif
-#define CORE0_BASE 710     /* the engine's own share of core 0 -- with the time it spends sorting the host's words counted (the meter
-                            * left that out until 12 Nov 2026: 1,081 of effects then read 93 % in the worst frame) */
+#define CORE0_BASE 420     /* the engine's own share of core 0 at its worst (master EQ on all four bands, rain and helium, USB recording):
+                            * 370 measured on the unit 13 Nov 2026 once the engine ran from core 0's private P (it was 700 from the
+                            * shared window, where every fetch waits a cycle and core 1 contends for the block) */
 #define CORE1_BASE 250     /* core 1 is the weaker in practice: VERB + ECHO (1,404) run clean, VERB + ECHO + SMEAR (1,673) drop
                             * blocks (measured on the unit with USB recording on, 12 Nov 2026) -- so its room ends near 1,450 */
 static int8_t slot_core[7] = {-1, -1, -1, -1, -1, -1, -1};
@@ -50,10 +51,24 @@ static int place_effect(int s, int row, int commit)
     /* one big effect alone on core 0 may take a little more than the shared room (the FFT SMEAR, 1,137: so it can
      * stand beside VERB on core 1); nothing else joins it there */
 #define ROOM_OF(k) ((k) == 0 && load[0] == CORE0_BASE ? CORE0_BASE + 1170 : CORE_ROOM)   /* 1170: SMEAR after its quality pass (1,165), measured on the unit 13 Nov 2026 */
-    int c = want < 2 ? want : (load[1] <= load[0] ? 1 : 0);
-    if (load[c] + cost > ROOM_OF(c) && want == 2 && load[c ^ 1] + cost <= ROOM_OF(c ^ 1)) c ^= 1;
-    for (int i = 0; i < 7 && load[c] + cost > ROOM_OF(c); i++)              /* make room: movable effects go across */
-        if (core[i] == c && slot_any[i] && load[c ^ 1] + slot_cost[i] <= ROOM_OF(c ^ 1)) { core[i] = (int8_t)(c ^ 1); load[c] -= slot_cost[i]; load[c ^ 1] += slot_cost[i]; }
+    /* try the emptier core first, then (an effect that may run on either) the other; on each, movable effects may go
+     * across to make room. 13 Nov 2026: trying one core only refused SMEAR beside GRAINS when moving PITCH or RING
+     * off core 1 would have made room there */
+    int c = want < 2 ? want : (load[1] <= load[0] ? 1 : 0), tries = want == 2 ? 2 : 1;
+    int8_t core0[7]; int load0[2] = {load[0], load[1]};
+    for (int i = 0; i < 7; i++) core0[i] = core[i];
+    for (int t = 0; t < tries; t++, c ^= 1) {
+        for (int i = 0; i < 7; i++) core[i] = core0[i];
+        load[0] = load0[0]; load[1] = load0[1];
+        for (int i = 0; i < 7 && load[c] + cost > ROOM_OF(c); i++)              /* make room: movable effects go across */
+            if (core[i] == c && slot_any[i] && load[c ^ 1] + slot_cost[i] <= ROOM_OF(c ^ 1)) { core[i] = (int8_t)(c ^ 1); load[c] -= slot_cost[i]; load[c ^ 1] += slot_cost[i]; }
+        if (load[c] + cost <= ROOM_OF(c)) break;
+    }
+    if (load[c] + cost > ROOM_OF(c)) {                                           /* fits nowhere: say so for the first choice */
+        c = want < 2 ? want : (load0[1] <= load0[0] ? 1 : 0);
+        for (int i = 0; i < 7; i++) core[i] = core0[i];
+        load[0] = load0[0]; load[1] = load0[1];
+    }
     int fits = load[c] + cost <= ROOM_OF(c);
     if (commit) {
         if (fits) for (int i = 0; i < 7; i++) if (i != s) slot_core[i] = core[i];
@@ -71,9 +86,7 @@ static int fx_clash(int a, int b)
 {
     return fx_pair(a, b, "WIND", "FOG") || fx_pair(a, b, "HAIL", "AURORA")
         || fx_pair(a, b, "TAPE", "ECHO")                                     /* core 1's Y:$8000-$bfff and X:$4000-$7fff */
-        || fx_pair(a, b, "BBD", "HAIL") || fx_pair(a, b, "BBD", "AURORA")    /* core 1's X:$2000-$3fff */
-        || fx_pair(a, b, "PT2399", "BBD") || fx_pair(a, b, "PT2399", "HAIL") || fx_pair(a, b, "PT2399", "AURORA");   /* PT2399 moved to core 1's X:$2000 (13 Nov 2026) */
-    /* BBD with PT2399 (780 + 970 on core 1) is kept apart by the room alone: CORE1_BASE + both > CORE_ROOM, SQ_ROOM1 */
+        || fx_pair(a, b, "PT2399", "HAIL") || fx_pair(a, b, "PT2399", "AURORA");   /* PT2399 moved to core 1's X:$2000 (13 Nov 2026) */
 }
 static int pick_effect(int t, int fx2, int row)
 {
@@ -82,7 +95,7 @@ static int pick_effect(int t, int fx2, int row)
     if (row > 0 && row <= FX_COUNT && fx_info[row - 1].has_y)
         for (int i = 0; i < 16; i++) if (i != fx2 * 8 + t && preview_live_fx[i] == row) return 0;
     /* ... and two effects that keep their sound in the same memory are never in the chain together
-     * (WIND and FOG; HAIL and AURORA; BBD and HAIL or AURORA; PT2399 and TWISTER; TAPE and ECHO: fx_clash) */
+     * (WIND and FOG; HAIL and AURORA; PT2399 and HAIL or AURORA; TAPE and ECHO: fx_clash) */
     if (row > 0 && row <= FX_COUNT)
         for (int i = 0; i < 16; i++) { int o = preview_live_fx[i]; if (i != fx2 * 8 + t && o > 0 && o <= FX_COUNT && fx_clash(row, o)) return 0; }
     preview_live_fx[fx2 * 8 + t] = (uint8_t)row;
@@ -260,7 +273,7 @@ static int name_has(const char *name, const char *part)
 }
 /* effects the owner does not want offered (12 Nov 2026: no clipping or distortion): kept in the firmware so saved
  * rows still mean the same, but never on a list, never lent, never set up */
-static int fx_banned(const char *name) { return name_has(name, "DIST"); }   /* (BBD, PT2399 and TAPE were held back on 13 Nov 2026 until a crash was found: PT2399 now lives at X:$2000) */
+static int fx_banned(const char *name) { return name_has(name, "DIST") || name_has(name, "AERIA -"); }   /* "AERIA -": a removed effect's empty row (BBD, 13 Nov 2026) */   /* (BBD, PT2399 and TAPE were held back on 13 Nov 2026 until a crash was found: PT2399 now lives at X:$2000) */
 static int rule_of(const char *knob)
 {
     for (int r = 0; r < N_RULES; r++) {

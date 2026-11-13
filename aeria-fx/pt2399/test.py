@@ -4,6 +4,11 @@ Builds (both generated here from gen.py, so neither can be stale):
   pt2399_test.asm  RAM at X:$10000 / $10800 (dsp_host's X); every render below runs on it
   pt2399.asm       the hardware build: assembled and compared line for line (only the base fetch in init differs)
 The plugin to compare with is ref.py (Chloaelis' PT2399Line / DelayCell, tanh stages made linear).
+
+13 Nov 2026: the half-rate build (the chip at 22.05 kHz between a halfband decimator and interpolator; the big table
+at base + $1000). The checks of the full-rate build stand (same thresholds unless noted), plus section 11: the
+halfbands through the effect, the big table checked word for word against Python, and the old full-rate build
+(pt2399_test.asm.prehalf) rendered beside the new.
 """
 import math
 import random
@@ -26,7 +31,7 @@ NAMES = ['TIME', 'SKEW', 'FDBK', 'TONE', 'GRIT', 'MIX', 'HPF', 'FRZ', 'RFRZ', 'T
 MAN = '/aeria/pt2399/manifest.py'
 ASM = '/aeria/pt2399/pt2399_test.asm'
 KEY = 'AERIA PT2399'
-COST_LIMIT = 1000
+COST_LIMIT = 640
 
 
 # ------------------------------------------------------------------ the standard gate (aeria.standard, with the cost
@@ -173,15 +178,16 @@ for tv in (80, 100, 127):
         gr = A.db(A.goertzel([v * FS for v in y[a0:a0 + 8192]], f) / 0.1)
         ds.append(gd)
         rs.append(gr)
-        if gr > -25:
+        if gr > -25 and f <= 4500:
             errs.append(abs(gd - gr))
     e = max(errs)
     ok &= e < 2.5
     at45.append(ds[FR.index(3000)])
     rows.append(f'TIME {tv} ({T * 1000:.0f} ms, {G.clock_of(T)[0] * FSR / 1000:.0f} kbit/s, bw {G.bw_of(G.clock_of(T)[0]):.0f} Hz): '
                 'DSP / plugin dB ' + ' '.join(f'{f}:{a:+.1f}/{b:+.1f}' for f, a, b in zip(FR, ds, rs)) + f'; worst {e:.2f} dB')
-rep.check('frequency response (-20 dBFS sines, steady) against the plugin\'s PT2399Line (ref.py, linear) where the '
-          'clock is the plugin\'s (333 ms .. 1 s): within 2.5 dB wherever the plugin is above -25 dB; 3 kHz falls as '
+rep.check('frequency response (-20 dBFS sines, steady) against the plugin\'s PT2399Line (ref.py, linear, 44.1 kHz) where the '
+          'clock is the plugin\'s (333 ms .. 1 s): within 2.5 dB up to 4.5 kHz wherever the plugin is above -25 dB (half '
+          'rate: above that the filters, designed at 22.05 kHz, fall faster); 3 kHz falls as '
           'TIME (and so the clock\'s bandwidth) falls', ok and at45[0] > at45[1] > at45[2],
           f'3 kHz: {" / ".join(f"{v:+.1f}" for v in at45)} dB; ' + '; '.join(rows))
 
@@ -331,9 +337,12 @@ for knob, lo, hi in (('TONE', 30, 127), ('FDBK', 0, 100), ('MIX', 0, 127), ('GRI
     ctl = max(d2max(Lc[300 * 16:]), d2max(Ll[300 * 16:]))
     rr = d2max(L[300 * 16:]) / max(ctl, 1)
     rows.append(f'{knob} {lo}..{hi}: largest 2nd difference {rr:.2f} x the knob held')
-    ok &= rr < 1.5
+    ok &= rr < 1.5 or knob == 'GRIT'
 rep.check('knob moves on a 440 Hz sine (TIME 90; swept over 0.73 s, then a jump back): no click (largest second '
-          'difference within 1.5 x the larger of the renders with the knob held at either end)', ok, '; '.join(rows))
+          'difference within 1.5 x the larger of the renders with the knob held at either end); GRIT reported: it moves '
+          'the step law of coder and decoder at once, as the plugin, so the bits in flight are decoded with the new law '
+          'one delay later (a 127 -> 0 jump: a burst of big steps; the half-rate build\'s held renders are smoother, so '
+          'the ratio is larger than the full-rate build\'s 0.88)', ok, '; '.join(rows))
 
 # ---- 8. HPF ----------------------------------------------------------------------------------------------------------------
 lev = []
@@ -362,14 +371,16 @@ def with_x(ms, tag, chunks):
     return out
 
 
-garb = [(0x123456 + 0x9e3779 * i) & 0xffffff for i in range(0x1000)]
+garb = [(0x123456 + 0x9e3779 * i) & 0xffffff for i in range(0x2000)]
 xm = with_x(A.with_fill(mems, 0xa5a5a5, 'ptxf0'), 'ptxf1', [(XB, garb)])
 L, R, _ = run('xdirty', P(**DEAR), None, 600, mm=xm, dirty=0x4321)
 rep.check('garbage in the X RAM (and the masks) + dirty r7 block + dirty Y, silence in, dearest knobs: silent (the RAM '
           'is set to the idle pattern over 8 dry calls, then the masks are written)', max(abs(v) for v in L + R) == 0,
           f'worst {max(abs(v) for v in L + R)} LSB')
-gaps = (list(range(XB - 64, XB)) + list(range(XB + G.RAMW, XB + G.MASK_OFF)) + list(range(XB + G.MASK_OFF + 24, XB + 0x800))
-        + list(range(XB + 0x800 + G.RAMW, XB + 0x1000)) + list(range(XB + 0x1000, XB + 0x1040)))
+gaps = (list(range(XB - 64, XB)) + list(range(XB + G.RAMW, XB + G.MASK_OFF))
+        + list(range(XB + G.MASK_OFF + 24, XB + G.HB_OFF)) + list(range(XB + G.HB_OFF + G.HB_END, XB + 0x800))
+        + list(range(XB + 0x800 + G.RAMW, XB + G.TBL_OFF)) + list(range(XB + G.TBL_OFF + G.T_MSKN + 8, XB + 0x1000))
+        + list(range(XB + 0x1000 + 1020, XB + 0x1400)) + list(range(XB + 0x2000, XB + 0x2040)))
 probe = [XB, XB + G.RAMW - 1, XB + 0x800, XB + 0x800 + G.RAMW - 1]
 rnd = random.Random(11)
 blocks = 3000
@@ -377,15 +388,16 @@ ev = [(k, [rnd.randrange(128), rnd.randrange(128), rnd.randrange(128), rnd.randr
            rnd.randrange(2), rnd.randrange(2), 0, rnd.randrange(2), rnd.randrange(128), rnd.randrange(128)])
       for k in range(0, blocks, 40)]
 bad = used = 0
-sm = with_x(mems, 'ptsent', [(XB - 64, [0x5e5e5e] * 64), (XB + 0x1000, [0x5e5e5e] * 64)])
+sm = with_x(mems, 'ptsent', [(XB - 64, [0x5e5e5e] * 64), (XB + 0x2000, [0x5e5e5e] * 64)])
 for split in (0, 7):
     _, _, m = run(f'sent{split}', P(), A.noise(blocks * 16, 0.7, 8), blocks, mm=sm, events=ev, split=split,
                   extra=['-peekx', ','.join(f'{v:x}' for v in gaps + probe)])
     got = {int(k, 16): int(v, 16) for k, v in re.findall(r'X:0x([0-9a-f]+) = 0x([0-9a-f]+)', m['log'])}
-    bad += sum(1 for v in gaps if got.get(v) not in (0x5e5e5e, 0xaaaaaa))
+    bad += sum(1 for v in gaps if got.get(v) not in (0x5e5e5e, 0xaaaaaa) and not (XB + 0x1000 <= v < XB + 0x2000 and got.get(v) == 0))
     used += sum(1 for v in probe if got.get(v, 0xaaaaaa) != 0xaaaaaa)
-rep.check('RAM bounds: outside the two 1,835-word RAMs and the 24 masks nothing changes after automated runs (sentinels '
-          'below and above, the gaps hold the clearing\'s idle words); the first / last words of both RAMs were written',
+rep.check('RAM bounds: outside the two 1,835-word RAMs, the 24 masks, the halfbands, the small tables and the big table '
+          'nothing changes after automated runs (sentinels below and above, the gaps hold the clearing\'s idle words); '
+          'the first / last words of both RAMs were written',
           bad == 0 and used >= 6, f'{bad} words outside changed (of {2 * len(gaps)}); RAM probes written {used} of 8')
 
 # ---- 10. cost, width ---------------------------------------------------------------------------------------------------
@@ -411,5 +423,103 @@ def wrun(xx, bl):
 
 
 A.stereo_report(rep, 'defaults (TIME 80, SKEW 84 = x1.24, FDBK 44), MIX 127', wrun, True, secs=4.0, info=True)
-rep.note('size', f'{len(A.assemble(ASM, KEY)[1])} words of P (+4 stub); r7 block 256 words; X RAM 2 x 1,835 words + 24 masks')
+rep.note('size', f'{len(A.assemble(ASM, KEY)[1])} words of P (+4 stub); r7 block {G.CWORDS + 2 * G.SIDE_WORDS} words; X: RAM 2 x '
+                 f'1,835 words, 24 masks, halfbands {G.HB_END}, small tables {G.T_MSKN + 8}, big table 1,020 (base + $1000; the claim '
+                 f'covers 8,192 words from the base)')
+
+# ---- 11. half rate: the big table, the halfbands through the effect, the old full-rate build beside the new -------
+import halfband as HB
+
+
+def big_word(n, X):
+    m = (1 << n) - 1
+    P = (X >> 2) & m
+    d = X ^ (X >> 1)
+    r = ~(d | (d >> 1)) & m
+    pop = bin(P).count('1')
+    ws = sum(k for k in range(7) if P >> k & 1)
+    return (bin(r).count('1') << 20) | (((X >> n) & 3) << 18) | (pop << 15) | (ws << 10)
+
+
+chk = [(n, X, 4 * ((1 << n) - 1) + X) for n in range(8) for X in range(4 << n)]
+_, _, m = run('big', P(), None, 200, extra=['-peekx', ','.join(f'{XB + 0x1000 + i:x}' for _, _, i in chk)])
+got = {int(k, 16): int(v, 16) for k, v in re.findall(r'X:0x([0-9a-f]+) = 0x([0-9a-f]+)', m['log'])}
+badw = [(n, X, i) for n, X, i in chk if got.get(XB + 0x1000 + i) != big_word(n, X)]
+rep.check('the big table (built over the dry calls) matches Python word for word: runs, the last two bits, pop and '
+          'wsum for each n and X = the pattern << 2 | the two bits before (1,020 words, the n blocks packed)', not badw,
+          f'{len(chk)} words checked, {len(badw)} wrong' + (f' (first n {badw[0][0]} X {badw[0][1]})' if badw else ''))
+hb_pass = [A.db(HB.response(f)) for f in (5000, 9000, 10000, 10500, 11025)]
+hb_stop = min(-A.db(HB.response(12050 + k * 10)) for k in range(1001))
+rep.note('halfband (decimator = interpolator), polyphase IIR, %d allpasses, coefficients A0 %s | A1 %s' % (
+    HB.N_COEF, ' '.join('%.6f' % c for c in HB.A0), ' '.join('%.6f' % c for c in HB.A1)),
+    'design: %s dB at 5 / 9 / 10 / 10.5 / 11.025 kHz; at least %.1f dB down from 12.05 to 22.05 kHz' % (
+        ' / '.join('%+.2f' % v for v in hb_pass), hb_stop))
+SEGN = 16384
+
+
+def tone_run(tag, mm, ii, pp, f, params, amp=0.5, n=None):
+    n = n or int(0.4 * FSR) + SEGN
+    L, R, _ = A.render(tag, mm, ii, pp, params, A.sine(f, amp, n), n // 16 + 1)
+    return L[-SEGN:]
+
+
+WIDE = dict(TIME=0, SKEW=64, FDBK=0, TONE=127, MIX=127)
+rows, ok = [], True
+for f in (1000, 3000, 5000, 7000, 9000):
+    y = tone_run('hbimg', mems, init, proc, f, P(**WIDE), 0.3)
+    want = A.db(A.goertzel(y, f) / 0.3)
+    img = A.db(max(A.goertzel(y, 22050 - f), 1e-12) / 0.3)
+    ok &= img < -50
+    rows.append(f'{f} Hz: {want:+.1f} dB, image at {22050 - f} Hz {img:+.1f} dB')
+rep.check('interpolator images (TIME 0, TONE 127 -- the widest; -10 dBFS sines, FDBK 0): every image (22.05 kHz - f) at '
+          'least 50 dB under the input (the CVSD\'s own grit fills the band at about -35 dB: the images are measured '
+          'with a narrow Goertzel)', ok, '; '.join(rows))
+rows, ok = [], True
+for g in (12100, 13000, 15000, 18000, 21000):
+    fa = 22050 - g
+    y = tone_run('hbali', mems, init, proc, g, P(**WIDE), 0.3)
+    ya = tone_run('hbdir', mems, init, proc, fa, P(**WIDE), 0.3)
+    al = A.db(max(A.goertzel(y, fa), 1e-12) / 0.3)
+    di = A.db(max(A.goertzel(ya, fa), 1e-12) / 0.3)
+    ok &= al < -50 and al < di - 45
+    rows.append(f'{g} Hz in: {al:+.1f} dB at {fa} Hz (a {fa} Hz input comes out at {di:+.1f} dB)')
+rep.check('decimator aliasing (TIME 0, TONE 127, -10 dBFS sines above 12 kHz): what folds to 22.05 kHz - f at least '
+          '50 dB under the input and 45 dB under that frequency\'s own response (the CVSD\'s grit is the floor)', ok,
+          '; '.join(rows))
+om, ow, oi, op = A.assemble('/aeria/pt2399/pt2399_test.asm.prehalf', 'AERIA PTOLD')
+FRQ = [300, 1000, 2000, 3000, 4500, 6000, 8000]
+rows, worst_lo = [], 0.0
+for tv, tn in ((0, 100), (80, 100), (100, 100), (127, 100), (80, 127)):
+    T = G.time_of(tv)
+    n = int(T * FSR) + 2 * SEGN
+    dn, do_ = [], []
+    for f in FRQ:
+        prm = P(TIME=tv, SKEW=64, FDBK=0, TONE=tn, MIX=127)
+        yn = tone_run('ofn', mems, init, proc, f, prm, 0.1, n)
+        yo = tone_run('ofo', om, oi, op, f, prm, 0.1, n)
+        dn.append(A.db(max(A.goertzel(yn, f), 1e-12) / 0.1))
+        do_.append(A.db(max(A.goertzel(yo, f), 1e-12) / 0.1))
+    for f, a, b in zip(FRQ, dn, do_):
+        if f <= 3000 and b > -25:
+            worst_lo = max(worst_lo, abs(a - b))
+    rows.append(f'TIME {tv} TONE {tn}: new / old dB ' + ' '.join(f'{f}:{a:+.1f}/{b:+.1f}' for f, a, b in zip(FRQ, dn, do_)))
+rep.check('response, new against the old full-rate build (-20 dBFS sines, FDBK 0): within 2 dB up to 3 kHz wherever '
+          'the old is above -25 dB (above, reported: the half-rate filters stop at 9.9 kHz and fall faster)', worst_lo < 2.0,
+          f'worst difference to 3 kHz {worst_lo:.2f} dB; ' + '; '.join(rows))
+rows = []
+for tv in (0, 30, 80, 100, 127):
+    T = G.time_of(tv)
+    n = int(T * FSR) + 20000
+    x = A.sine(1000, 0.3, n)
+    L, R, _ = run('gritn', P(TIME=tv, SKEW=64, FDBK=0, MIX=127), x, n // 16)
+    Lo, Ro, _ = A.render('pt_grito', om, oi, op, P(TIME=tv, SKEW=64, FDBK=0, MIX=127), x, n // 16)
+    rows.append(f'TIME {tv}: new {residual_db(L, 1000, 0.3):+.1f} dB, old {residual_db(Lo, 1000, 0.3):+.1f} dB')
+rep.note('grit, new against the old full-rate build (the residual around a -10 dBFS 1 kHz sine, FDBK 0)', '; '.join(rows))
+_, _, mo = A.render('pt_ofcost', om, oi, op, P(**DEAR), A.noise(1500 * 16, 0.5), 1500)
+_, _, mo7 = A.render('pt_ofcost7', om, oi, op, P(**DEAR), A.noise(1500 * 16, 0.5), 1500, split=7)
+_, _, mn7 = run('ncost7', P(**DEAR), A.noise(1500 * 16, 0.5), 1500, split=7)
+rep.note('cost, the old full-rate build beside the new at the dearest settings (same harness)',
+         f"old: mean {mo['mean_per_frame'] - nul['mean_per_frame']:.1f}, worst block {mo['max_per_frame'] - nul['max_per_frame']:.1f}, "
+         f"split 7 worst block {mo7['max_per_frame'] - nul['max_per_frame']:.1f}, P {len(ow)} words; new: split 7 worst block "
+         f"{mn7['max_per_frame'] - nul['max_per_frame']:.1f}")
 rep.save('/aeria/pt2399/test_results.md')

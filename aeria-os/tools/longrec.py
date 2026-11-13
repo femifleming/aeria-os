@@ -1,6 +1,6 @@
 """long recordings in the multi-effect: all three balloons caught until they are full (15 s each), the unit watched
 meanwhile; then popped again. longrec.py"""
-import sys,time,struct; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, sq, c1dbg
+import sys,time,struct; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, sq, c1dbg
 d=sq.d; was=sq.seqmode(0)
 def rep(tag):
     c1dbg.dspw(d,0x33a04,0); c1dbg.dspw(d,0x33a02,0); c1dbg.dspw(d,0x33a05,0); aos.wr(d,0x100FBEEC,bytes(4)); time.sleep(2); r=c1dbg.reports(d,0.4); g=struct.unpack('>I',aos.rd(d,0x100FBEEC,4))[0]

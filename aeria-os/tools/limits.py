@@ -1,5 +1,5 @@
 """measure what each effect costs on the unit: core 0's frame load (the engine's meter) and core 1's spare passes."""
-import sys,struct,time; sys.path.insert(0,'/Users/femishonugafleming/octa/aeria-os/tools'); import aos, place as P, c1dbg
+import sys,struct,time; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); import aos, place as P, c1dbg
 d=P.d
 names=['-','PITCH','DIST','GRAINS','RING','RESO','SMEAR','ROSE','COMP','VERB','ECHO','VOWL','WIND','FOG','TWISTER','HAIL','AURORA','FILT','WARM','BBD','PT2399','TAPE']
 st=lambda s: 4 if s==0 else 5+(s-1)//2; sf=lambda s: 1 if s==0 else (s-1)&1
