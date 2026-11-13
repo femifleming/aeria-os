@@ -1,0 +1,517 @@
+; CYCLES_FORWARD_BRANCHES
+; AERIA COMP -- stereo-linked compander (Cloudfin Compander.h in fixed point).
+; No buffer: state only in the r7 block. Everything per sample.
+;
+;  pk  = max(|L|, |R|);  env += (pk > env ? atk : rel) (pk - env), 48-bit env
+;  Y   = -log2(env)/32: five forward-branch normalise stages (16 8 4 2 1) on
+;        the 48-bit env, then a degree-5 polynomial in z = 2M - 1
+;        (max error 1.8e-05 log2 units = 0.0001 dB); floor -120 dBFS.
+;  d   = Y - Yt  (Yt = -log2(threshold)/32;  d < 0 above the threshold)
+;  above:  g = -d s,  s = 1 - 1/ratio                     (attenuation, log2/32)
+;  below:  g = clamp(8 d kb, -30 dB, +80 dB) * fade
+;          BELW right: kb = 7 bel / 8, fade = 1        (downward expansion)
+;          BELW left : kb = -(1 - 1/ru)/8, ru = 1 + 9 |bel|, fade =
+;                      clamp((dBFS + 100)/20, 0, 1)    (upward compression)
+;  w   = g + (9 - makeup)/32;  G = 2^-frac(32 w) * T[int(32 w)]
+;        T[n] = 2^-n (n < 9: output = sat(x G << 9))
+;        T[n] = 2^-(n - 9) (n >= 9: output = x G)
+;  The x512 path is asl 8 in 56 bits, limit, x2, limit: no wrap.
+;  MIX 0 = exact dry, MIX 127 = exact wet (dry + m (wet - dry) between).
+;
+; r7: 00/01 env hi/lo  02 atk  03 rel  04 Yt  05 s  06 kb  07 fa  08 fb
+;     09 (9 - makeup)/32  0a/0b mix t/s  0c path (n - 9)
+;     0d-0f THR / RATI / MAKE glided (used by the loop)  10-12 their per-sample steps  13 first-call flag
+;     14 MIX step  15/16 BELW kb glided / step
+;     20..37 T[0..23]
+
+init:
+        move    #>$ffffff,m4
+        move    r7,r4
+        clr     a
+        do      #64,>cpizero
+        move    a,x:(r4)+
+cpizero:
+        nop     
+        lua     (r7+$20),r4
+        move    #>$7fffff,x0
+        move    x0,x:(r4)+  ; T[0] = 1
+        move    #>$400000,a
+        do      #8,>cpitba
+        move    a,x:(r4)+
+        asr     a
+cpitba:
+        move    x0,x:(r4)+  ; T[9] = 1
+        move    #>$400000,a
+        do      #14,>cpitbb
+        move    a,x:(r4)+
+        asr     a
+cpitbb:
+        nop     
+        move    #>$1,a
+        move    a,x:(r7+$13)  ; first call: no glide
+        rts     
+proc:
+        move    #>$ffffff,m4
+        move    #>$ffffff,m5
+        move    #>$1,n0
+        move    x:(r6+$5),a
+        move    #>$7f0000,x0
+        cmp     x0,a
+        bne     cpmset
+        move    #>$7fffff,a
+cpmset:
+        move    a,x:(r7+$0a)
+; THR: Yt = 60 dB * v/127 in log2/32
+        move    x:(r6),x0
+        move    #>$282d51,y0
+        mpy     y0,x0,a
+        move    a,x:(r7+$04)
+; RATI: s = 1 - 20^-(v/127); 0 -> exactly 1:1
+        move    x:(r6+$1),a
+        tst     a
+        beq     cprset
+        move    a,x0
+        move    #>$116c81,y0
+        mpy     y0,x0,a
+        bsr     cpexp
+        move    #>$7fffff,a
+        sub     b,a
+        move    #>$0,x0
+        tst     a
+        tmi     x0,a
+cprset:
+        move    a,x:(r7+$05)
+; BELW: 64 off, right expansion, left upward
+        move    #>$100000,a
+        move    a,x:(r7+$07)
+        clr     a
+        move    a,x:(r7+$08)
+        move    x:(r6+$2),a
+        sub     #>$400000,a  ; (v - 64)/128
+        beq     cpbset
+        blt     cpbup
+        move    a,x0
+        move    #>$71c71c,y0
+        mpy     y0,x0,a
+        asl     a  ; kb = 7 bel / 8, bel = (v - 64)/63
+        bra     cpbset
+cpbup:
+        neg     a
+        move    a,x0
+        move    #>$480000,y0
+        mpy     y0,x0,a
+        asl     a  ; 9 b / 16, b = (64 - v)/64
+        move    a,b
+        add     #>$080000,b
+        move    b,x0  ; (1 + 9 b)/16
+        move    a1,a  ; clean 48-bit dividend
+        andi    #$fe,ccr
+        do      #24,>cpbdiv
+        div     x0,a
+cpbdiv:
+        nop     
+        move    a0,b  ; 1 - 1/ru
+        asr     #$3,b,b
+        move    b1,b
+        neg     b
+        move    b,a  ; kb = -(1 - 1/ru)/8
+        move    #>$280000,b
+        move    b,x:(r7+$07)
+        move    #>$b2efb3,b
+        move    b,x:(r7+$08)  ; fade = 16 (5/16 - (32 DB/20/16) Y)
+cpbset:
+        move    a,x:(r7+$06)
+; MAKE (page 2, knob 6): (OFF - 24 dB * v/127)/32
+        move    x:(r6+$c),a
+        and     #>$ff0000,a
+        move    a,x0
+        move    #>$101220,y0
+        mpy     y0,x0,a
+        move    #>$240000,b
+        sub     a,b
+        move    b,x:(r7+$09)
+; ATK: u = 1/(T fs), T = 0.05 ms * 4000^(v/127); coef = 1 - e^-u
+        move    x:(r6+$3),x0
+        move    #>$303d71,y0
+        mpy     y0,x0,a
+        add     #>$049028,a
+        bsr     cpexp
+        bsr     cpser
+        move    b,x:(r7+$02)
+; REL: T = 5 ms * 400^(v/127)
+        move    x:(r6+$4),x0
+        move    #>$22d901,y0
+        mpy     y0,x0,a
+        add     #>$1f2377,a
+        bsr     cpexp
+        bsr     cpser
+        move    b,x:(r7+$03)
+; THR / RATI / MAKE / MIX / BELW glide: a piecewise-linear one-pole, 1/128 of the distance a sample (tau 2.9 ms),
+; the step set once a call (no zipper, no click on a jump); the first call lands on the targets
+        move    x:(r7+$13),a
+        tst     a
+        beq     cpgfirst
+        move    x:(r7+$04),a
+        move    a,x:(r7+$0d)
+        move    x:(r7+$05),a
+        move    a,x:(r7+$0e)
+        move    x:(r7+$09),a
+        move    a,x:(r7+$0f)
+        move    x:(r7+$0a),a
+        move    a,x:(r7+$0b)
+        move    x:(r7+$06),a
+        move    a,x:(r7+$15)
+        clr     a
+        move    a,x:(r7+$13)
+cpgfirst:
+        move    x:(r7+$04),a
+        move    x:(r7+$0d),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     cpgsnap0
+        move    x:(r7+$04),a
+        move    a,x:(r7+$0d)
+cpgsnap0:
+        move    x:(r7+$04),a
+        move    x:(r7+$0d),b
+        sub     b,a
+        asr     #$7,a,a
+        move    a1,x:(r7+$10)
+        move    x:(r7+$05),a
+        move    x:(r7+$0e),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     cpgsnap1
+        move    x:(r7+$05),a
+        move    a,x:(r7+$0e)
+cpgsnap1:
+        move    x:(r7+$05),a
+        move    x:(r7+$0e),b
+        sub     b,a
+        asr     #$7,a,a
+        move    a1,x:(r7+$11)
+        move    x:(r7+$09),a
+        move    x:(r7+$0f),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     cpgsnap2
+        move    x:(r7+$09),a
+        move    a,x:(r7+$0f)
+cpgsnap2:
+        move    x:(r7+$09),a
+        move    x:(r7+$0f),b
+        sub     b,a
+        asr     #$7,a,a
+        move    a1,x:(r7+$12)
+        move    x:(r7+$0a),a
+        move    x:(r7+$0b),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     cpgsnap3
+        move    x:(r7+$0a),a
+        move    a,x:(r7+$0b)
+cpgsnap3:
+        move    x:(r7+$0a),a
+        move    x:(r7+$0b),b
+        sub     b,a
+        asr     #$7,a,a
+        move    a1,x:(r7+$14)
+        move    x:(r7+$06),a
+        move    x:(r7+$15),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     cpgsnap4
+        move    x:(r7+$06),a
+        move    a,x:(r7+$15)
+cpgsnap4:
+        move    x:(r7+$06),a
+        move    x:(r7+$15),b
+        sub     b,a
+        asr     #$7,a,a
+        move    a1,x:(r7+$16)
+        lua     (r7+$20),r4
+        do      n7,>cpend
+        move    x:(r7+$0d),a
+        move    x:(r7+$10),x0
+        add     x0,a
+        move    a,x:(r7+$0d)
+        move    x:(r7+$0e),a
+        move    x:(r7+$11),x0
+        add     x0,a
+        move    a,x:(r7+$0e)
+        move    x:(r7+$0f),a
+        move    x:(r7+$12),x0
+        add     x0,a
+        move    a,x:(r7+$0f)
+        move    x:(r7+$0b),a
+        move    x:(r7+$14),x0
+        add     x0,a
+        move    a,x:(r7+$0b)
+        move    x:(r7+$15),a
+        move    x:(r7+$16),x0
+        add     x0,a
+        move    a,x:(r7+$15)
+; ---- peak of the pair, envelope (48 bits) ----
+        move    x:(r0),a
+        abs     a
+        move    x:(r0+n0),b
+        abs     b
+        cmp     b,a
+        tlt     b,a  ; pk
+        move    x:(r7+$00),b
+        move    x:(r7+$01),b0
+        sub     b,a
+        move    a,x1  ; pk - env
+        move    x:(r7+$03),y1
+        move    x:(r7+$02),y0
+        tst     a
+        move    y1,a
+        tgt     y0,a
+        move    a,y0
+        mpy     x1,y0,a
+        add     a,b
+        move    #>$0,x0
+        tst     b
+        tmi     x0,b
+        move    b1,x:(r7+$00)
+        move    b0,x:(r7+$01)
+; ---- Y = -log2(env)/32: normalise b to [0.5, 1), count in a ----
+        clr     a
+        cmp     #>$000080,b
+        bge     cpn16
+        asl     #$10,b,b
+        add     #>$400000,a
+cpn16:
+        cmp     #>$008000,b
+        bge     cpn08
+        asl     #$8,b,b
+        add     #>$200000,a
+cpn08:
+        cmp     #>$080000,b
+        bge     cpn04
+        asl     #$4,b,b
+        add     #>$100000,a
+cpn04:
+        cmp     #>$200000,b
+        bge     cpn02
+        asl     #$2,b,b
+        add     #>$080000,a
+cpn02:
+        cmp     #>$400000,b
+        bge     cpn01
+        asl     #$1,b,b
+        add     #>$040000,a
+cpn01:
+        asl     b
+        move    #>$800000,x0
+        add     x0,b
+        move    b,x0  ; z = 2M - 1
+        move    #>$ffd2b2,y0
+        mpy     y0,x0,b
+        add     #>$00c3da,b
+        move    b,y0
+        mpy     y0,x0,b
+        sub     #>$01a77b,b
+        move    b,y0
+        mpy     y0,x0,b
+        add     #>$02d560,b
+        move    b,y0
+        mpy     y0,x0,b
+        sub     #>$05c471,b
+        move    b,y0
+        mpy     y0,x0,b
+        add     #>$040000,b
+        add     b,a
+        move    #>$4fb9ed,x1
+        cmp     x1,a
+        tgt     x1,a  ; floor -120 dBFS
+; ---- gain computer ----
+        move    a,x1  ; Y
+        move    x:(r7+$0d),x0
+        sub     x0,a
+        move    a,x0  ; d
+        move    x:(r7+$08),y0
+        move    x:(r7+$07),b
+        mac     x1,y0,b
+        asl     #$4,b,b
+        move    b,y1
+        move    y1,b
+        move    #>$0,y0
+        tst     b
+        tmi     y0,b
+        move    b,y1  ; fade
+        move    x:(r7+$15),y0
+        mpy     y0,x0,b
+        asl     #$3,b,b
+        move    #>$35269e,x1
+        cmp     x1,b
+        tgt     x1,b
+        move    #>$ec1185,x1
+        cmp     x1,b
+        tlt     x1,b
+        move    b,x1
+        mpy     y1,x1,b  ; below: g
+        move    x:(r7+$0e),y1
+        mpy     x0,y1,a
+        neg     a
+        move    a,y0  ; above: g = -d s
+        move    x0,a
+        tst     a
+        tlt     y0,b
+        move    x:(r7+$0f),x0
+        add     x0,b  ; w
+        move    #>$0,x0
+        tst     b
+        tmi     x0,b
+        move    #>$5ffefa,x0
+        cmp     x0,b
+        tgt     x0,b
+; ---- G = 2^-frac * T[int] ----
+        move    b,a
+        move    a1,b
+        asr     #$12,a,a
+        move    a1,n4  ; n
+        move    a1,x1
+        and     #>$03ffff,b
+        asl     #$5,b,b
+        move    b1,x0
+        move    #>$2c5c86,y0
+        mpy     y0,x0,b
+        move    b,y0
+        move    #>$02aaab,x0
+        mpy     y0,x0,b
+        sub     #>$0aaaab,b
+        move    b,x0
+        mpy     y0,x0,b
+        add     #>$200000,b
+        move    b,x0
+        mpy     y0,x0,b
+        sub     #>$400000,b
+        move    b,x0
+        mpy     y0,x0,b
+        add     #>$400000,b
+        move    b,x0
+        mpy     x0,x0,b
+        asl     #$2,b,b
+        move    b,x0  ; 2^-frac in (0.5, 1]
+        lua     (r4+n4),r5
+        move    x1,a
+        sub     #>$9,a
+        move    a,x:(r7+$0c)  ; n - OFF: >= 0 is the no-shift path
+        move    x:(r5),y0
+        mpy     y0,x0,b
+        move    b,y1  ; G
+; ---- L ----
+        move    x:(r0),x0
+        mpy     x0,y1,a
+        move    a,x1  ; x G
+        asl     #$8,a,a
+        move    a,y0  ; limit
+        move    y0,a
+        asl     a
+        move    a,y0  ; sat(x G << 9)
+        move    x:(r7+$0c),b
+        tst     b
+        move    y0,a
+        tge     x1,a
+        move    a,x1  ; wet
+        move    x:(r7+$0b),y0
+        move    x:(r0),b
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     y0,x0,a
+        asl     a
+        add     b,a
+        move    y0,b
+        cmp     #>$7fffff,b
+        teq     x1,a  ; MIX 127: wet exactly
+        move    a,x:(r0)+
+; ---- R ----
+        move    x:(r0),x0
+        mpy     x0,y1,a
+        move    a,x1  ; x G
+        asl     #$8,a,a
+        move    a,y0  ; limit
+        move    y0,a
+        asl     a
+        move    a,y0  ; sat(x G << 9)
+        move    x:(r7+$0c),b
+        tst     b
+        move    y0,a
+        tge     x1,a
+        move    a,x1  ; wet
+        move    x:(r7+$0b),y0
+        move    x:(r0),b
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     y0,x0,a
+        asl     a
+        add     b,a
+        move    y0,b
+        cmp     #>$7fffff,b
+        teq     x1,a  ; MIX 127: wet exactly
+        move    a,x:(r0)+
+cpend:
+        nop     
+        rts     
+; ---- subroutines (after their callers) ----
+; b = 1 - e^-u for b = u: u (1 - u/2 (1 - u/3 (1 - u/4)))
+cpser:
+        move    b,x0
+        move    #>$200000,y0
+        mpy     y0,x0,a
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,y0
+        mpy     y0,x0,a
+        move    a,x1
+        move    #>$2aaaab,y0
+        mpy     x1,y0,a
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,y0
+        mpy     y0,x0,a
+        asr     a
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,y0
+        mpy     y0,x0,b
+        rts     
+cpexp:
+        move    a1,b
+        asr     #$12,a,a  ; a1 = n = floor(y)
+        add     #>$1,a
+        move    a1,x1  ; n + 1 (never 0: a do count of 0 is not a skip)
+        and     #>$03ffff,b
+        asl     #$5,b,b  ; f in Q23, b2 stays 0
+        move    b1,x0
+        move    #>$2c5c86,y0
+        mpy     y0,x0,b
+        move    b,y0  ; g = f ln2 / 2
+        move    #>$02aaab,x0
+        mpy     y0,x0,b
+        sub     #>$0aaaab,b
+        move    b,x0
+        mpy     y0,x0,b
+        add     #>$200000,b
+        move    b,x0
+        mpy     y0,x0,b
+        sub     #>$400000,b
+        move    b,x0
+        mpy     y0,x0,b
+        add     #>$400000,b  ; e^-g / 2
+        move    b,x0
+        mpy     x0,x0,b
+        asl     #$2,b,b  ; 2^-f in (0.5, 1]
+        do      x1,>cpxend
+        asr     b
+cpxend:
+        asl     b
+        rts     

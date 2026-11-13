@@ -1,0 +1,618 @@
+; CYCLES_FORWARD_BRANCHES
+; AERIA DIST -- StoreFX disto, clipper and degrade as one effect, MODE on
+; page-2 slot 6. No buffer: state only in the r7 block.
+;
+;  DIST  s = sign(x) * G|x| / (G|x| + 1), G = 1/d, d = 0.4 - 0.3999 DRIV
+;        (StoreFX: atan2(x, d) * 2/pi -- same value at G|x| = 1, same
+;        limits). Computed as U/(U + 2^-14) with U = |x| G/2^14 kept in
+;        48 bits, one 24-step fractional divide (unrolled, no rep), then
+;        the one-pole "slope" lowpass (TONE: 0 dark .. 127 open).
+;  CLIP  y = clamp(x, +-t) * 0.33/t, t = 0.25 .. 0.001 (log, DRIV), then
+;        two one-pole lowpasses at 100 Hz .. 15 kHz (TONE, log; open at 127).
+;  DGRD  bits 24 .. 2 (DRIV, rounded quantiser: add half, mask), sample-and-
+;        hold at RATE 1 .. 0.01 of 44.1 kHz (log), TONE post lowpass.
+;  LEVL  0 .. 2x output (64 = 1x).  MIX 0 = exact dry.
+;
+; r7: 03 mode+1  04/05 drive t/s  06/07 tone t/s  08/09 level t/s
+;     0a/0b mix t/s  0c/0d rate t/s  0e mask 0f half  10 S&H phase (-1..0)
+;     11/12 held L/R  13/14 lp1 L/R  15/16 lp2 L/R  17 temp  18 snap flag
+
+init:
+        move    #>$ffffff,m4
+        move    r7,r4
+        clr     a
+        do      #64,>dsizero
+        move    a,x:(r4)+
+dsizero:
+        nop     
+        rts     
+proc:
+        move    #>$ffffff,m4
+        move    #>$1,n0
+        move    x:(r6+$c),a
+        asr     #$10,a,a
+        move    #>$2,x0
+        cmp     x0,a
+        tgt     x0,a
+        add     #>$1,a
+        move    x:(r7+$03),x0
+        cmp     x0,a
+        beq     dssame
+        move    a,x:(r7+$03)
+        lua     (r7+$10),r4
+        clr     a
+        do      #8,>dsmzero
+        move    a,x:(r4)+
+dsmzero:
+        nop     
+        move    #>$800000,a
+        move    a,x:(r7+$10)  ; phase -1: latch at once
+        move    #>$1,a
+        move    a,x:(r7+$18)  ; snap smoothers this call
+dssame:
+        move    x:(r6+$4),a
+        move    a,x:(r7+$08)
+        move    x:(r6+$5),a
+        move    #>$7f0000,x0
+        cmp     x0,a
+        bne     dsmset
+        move    #>$7fffff,a
+dsmset:
+        move    a,x:(r7+$0a)
+        move    x:(r7+$0a),a
+        move    x:(r7+$0b),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     dsmsnap
+        move    x:(r7+$0a),a
+        move    a,x:(r7+$0b)
+dsmsnap:
+        move    x:(r7+$03),a
+        move    #>$2,x0
+        cmp     x0,a
+        blt     dsbdist
+        beq     dsbclip
+        bra     dsbdgrd
+dsbdist:
+        move    x:(r6),x0
+        move    #>$332fec,y0
+        mpy     -y0,x0,a
+        add     #>$333333,a
+        move    a,x0
+        move    #>$000200,a
+        andi    #$fe,ccr
+        do      #24,>dsddiv
+        div     x0,a
+dsddiv:
+        nop     
+        move    a0,x:(r7+$04)
+        move    x:(r6+$1),a
+        move    #>$7f0000,x0
+        cmp     x0,a
+        beq     dsdto
+        move    a,x0
+        move    #>$7eb852,y0
+        mpy     y0,x0,a
+        add     #>$0147ae,a
+        bra     dsdtp
+dsdto:
+        move    #>$7fffff,a
+dsdtp:
+        move    a,x:(r7+$06)
+        move    x:(r7+$18),a
+        tst     a
+        beq     dsdrun
+        move    x:(r7+$04),b
+        move    b,x:(r7+$05)
+        move    x:(r7+$06),b
+        move    b,x:(r7+$07)
+        move    x:(r7+$08),b
+        move    b,x:(r7+$09)
+        clr     a
+        move    a,x:(r7+$18)
+dsdrun:
+        do      n7,>dsdend
+        move    x:(r7+$04),a
+        move    x:(r7+$05),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$05)
+        move    x:(r7+$06),a
+        move    x:(r7+$07),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$07)
+        move    x:(r7+$08),a
+        move    x:(r7+$09),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$09)
+        move    x:(r7+$0a),a
+        move    x:(r7+$0b),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$0b)
+; ---- DIST L ----
+        move    x:(r0),x0
+        move    x:(r7+$05),y0
+        mpy     y0,x0,a  ; U = x G / 2^14, 48 bits
+        abs     a
+        move    a,b
+        add     #>$000200,b
+        move    b,x1  ; U + 2^-14
+        andi    #$fe,ccr
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        move    a0,y0
+        move    y0,b
+        neg     b
+        move    b,x1
+        move    x0,a
+        tst     a
+        tpl     y0,b
+        tmi     x1,b
+        move    b,a
+        move    x:(r7+$13),x0
+        sub     x0,a
+        move    a,x1
+        move    x:(r7+$07),y1
+        mpy     y1,x1,a
+        add     x0,a
+        move    a,x:(r7+$13)
+        move    a,x0
+        move    x:(r7+$09),y1
+        mpy     x0,y1,a
+        asl     a
+        move    x:(r7+$0b),y1
+        move    x:(r0),b
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     a
+        add     b,a
+        move    a,x:(r0)+
+; ---- DIST R ----
+        move    x:(r0),x0
+        move    x:(r7+$05),y0
+        mpy     y0,x0,a  ; U = x G / 2^14, 48 bits
+        abs     a
+        move    a,b
+        add     #>$000200,b
+        move    b,x1  ; U + 2^-14
+        andi    #$fe,ccr
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        div     x1,a
+        move    a0,y0
+        move    y0,b
+        neg     b
+        move    b,x1
+        move    x0,a
+        tst     a
+        tpl     y0,b
+        tmi     x1,b
+        move    b,a
+        move    x:(r7+$14),x0
+        sub     x0,a
+        move    a,x1
+        move    x:(r7+$07),y1
+        mpy     y1,x1,a
+        add     x0,a
+        move    a,x:(r7+$14)
+        move    a,x0
+        move    x:(r7+$09),y1
+        mpy     x0,y1,a
+        asl     a
+        move    x:(r7+$0b),y1
+        move    x:(r0),b
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     a
+        add     b,a
+        move    a,x:(r0)+
+dsdend:
+        nop     
+        rts     
+dsbclip:
+        move    x:(r6),x0
+        move    #>$1fdcf7,y0
+        mpy     -y0,x0,a
+        add     #>$200000,a
+        bsr     dsexp
+        move    b,x:(r7+$04)
+        move    x:(r6+$1),a
+        move    #>$7f0000,x0
+        cmp     x0,a
+        beq     dscto
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,x0
+        move    #>$1cea4f,y0
+        mpy     y0,x0,a
+        bsr     dsexp
+        move    b,x0
+        move    #>$44636f,y0
+        mpy     y0,x0,a  ; w/4
+        move    a,x0
+        move    #>$171547,y0
+        mpy     y0,x0,a
+        bsr     dsexp
+        move    #>$7fffff,a
+        sub     b,a
+        bra     dsctp
+dscto:
+        move    #>$7fffff,a
+dsctp:
+        move    a,x:(r7+$06)
+        move    x:(r7+$18),a
+        tst     a
+        beq     dscrun
+        move    x:(r7+$04),b
+        move    b,x:(r7+$05)
+        move    x:(r7+$06),b
+        move    b,x:(r7+$07)
+        move    x:(r7+$08),b
+        move    b,x:(r7+$09)
+        clr     a
+        move    a,x:(r7+$18)
+dscrun:
+        do      n7,>dscend
+        move    x:(r7+$04),a
+        move    x:(r7+$05),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$05)
+        move    x:(r7+$06),a
+        move    x:(r7+$07),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$07)
+        move    x:(r7+$08),a
+        move    x:(r7+$09),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$09)
+        move    x:(r7+$0a),a
+        move    x:(r7+$0b),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$0b)
+; ---- CLIP L ----
+        move    x:(r0),x0
+        move    x:(r7+$05),y0
+        mpy     y0,x0,a
+        asl     #$8,a,a  ; x / (4t), up to 250x, in 56 bits
+        move    #>$200000,x1
+        cmp     x1,a
+        tgt     x1,a
+        move    #>$e00000,x1
+        cmp     x1,a
+        tlt     x1,a
+        move    a,x0
+        move    #>$547ae1,y1
+        mpy     x0,y1,a
+        asl     a  ; clamp * 1.32 = clamp(x, t) * 0.33 / t
+        move    x:(r7+$13),x0
+        sub     x0,a
+        move    a,x1
+        move    x:(r7+$07),y1
+        mpy     y1,x1,a
+        add     x0,a
+        move    a,x:(r7+$13)
+        move    x:(r7+$15),x0
+        sub     x0,a
+        move    a,x1
+        move    x:(r7+$07),y1
+        mpy     y1,x1,a
+        add     x0,a
+        move    a,x:(r7+$15)
+        move    a,x0
+        move    x:(r7+$09),y1
+        mpy     x0,y1,a
+        asl     a
+        move    x:(r7+$0b),y1
+        move    x:(r0),b
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     a
+        add     b,a
+        move    a,x:(r0)+
+; ---- CLIP R ----
+        move    x:(r0),x0
+        move    x:(r7+$05),y0
+        mpy     y0,x0,a
+        asl     #$8,a,a  ; x / (4t), up to 250x, in 56 bits
+        move    #>$200000,x1
+        cmp     x1,a
+        tgt     x1,a
+        move    #>$e00000,x1
+        cmp     x1,a
+        tlt     x1,a
+        move    a,x0
+        move    #>$547ae1,y1
+        mpy     x0,y1,a
+        asl     a  ; clamp * 1.32 = clamp(x, t) * 0.33 / t
+        move    x:(r7+$14),x0
+        sub     x0,a
+        move    a,x1
+        move    x:(r7+$07),y1
+        mpy     y1,x1,a
+        add     x0,a
+        move    a,x:(r7+$14)
+        move    x:(r7+$16),x0
+        sub     x0,a
+        move    a,x1
+        move    x:(r7+$07),y1
+        mpy     y1,x1,a
+        add     x0,a
+        move    a,x:(r7+$16)
+        move    a,x0
+        move    x:(r7+$09),y1
+        mpy     x0,y1,a
+        asl     a
+        move    x:(r7+$0b),y1
+        move    x:(r0),b
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     a
+        add     b,a
+        move    a,x:(r0)+
+dscend:
+        nop     
+        rts     
+dsbdgrd:
+        move    x:(r6),x0
+        move    #>$5c0000,y0
+        mpy     y0,x0,a
+        asr     #$12,a,a
+        move    a1,a
+        asl     #$12,a,a
+        move    a,x0
+        move    #>$5c0000,a
+        sub     x0,a
+        bsr     dsexp
+        move    b,a
+        asr     a
+        move    a1,x:(r7+$0f)  ; half
+        neg     b
+        move    b1,x:(r7+$0e)  ; mask
+        move    x:(r6+$2),a
+        move    #>$7f0000,x0
+        cmp     x0,a
+        beq     dsgro
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,x0
+        move    #>$1a934f,y0
+        mpy     y0,x0,a
+        bsr     dsexp
+        move    b,a
+        bra     dsgrp
+dsgro:
+        move    #>$7fffff,a
+dsgrp:
+        move    a,x:(r7+$0c)
+        move    x:(r6+$1),a
+        move    #>$7f0000,x0
+        cmp     x0,a
+        beq     dstog
+        move    a,x0
+        mpy     x0,x0,a
+        move    a,x0
+        move    #>$7c28f6,y0
+        mpy     y0,x0,a
+        add     #>$03d70a,a
+        bra     dstpg
+dstog:
+        move    #>$7fffff,a
+dstpg:
+        move    a,x:(r7+$06)
+        move    x:(r7+$18),a
+        tst     a
+        beq     dsgrun
+        move    x:(r7+$06),b
+        move    b,x:(r7+$07)
+        move    x:(r7+$08),b
+        move    b,x:(r7+$09)
+        move    x:(r7+$0c),b
+        move    b,x:(r7+$0d)
+        clr     a
+        move    a,x:(r7+$18)
+dsgrun:
+        do      n7,>dsgend
+        move    x:(r7+$06),a
+        move    x:(r7+$07),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$07)
+        move    x:(r7+$08),a
+        move    x:(r7+$09),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$09)
+        move    x:(r7+$0a),a
+        move    x:(r7+$0b),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$0b)
+        move    x:(r7+$0c),a
+        move    x:(r7+$0d),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$0d)
+; phase in [-1, 0): wraps (and latches) when it reaches 0
+        move    x:(r7+$10),a
+        move    x:(r7+$0d),x0
+        add     x0,a
+        move    a,x:(r7+$17)
+        move    a,b
+        move    #>$800000,x0
+        add     x0,b
+        move    b,x1
+        tst     a
+        tge     x1,a
+        move    a,x:(r7+$10)
+; ---- DGRD L ----
+        move    x:(r0),a
+        move    x:(r7+$0f),x0
+        add     x0,a
+        move    x:(r7+$0e),x0
+        and     x0,a
+        move    a,y1  ; quantised (limited if +FS rounding overflowed)
+        move    x:(r7+$11),b
+        move    x:(r7+$17),a
+        tst     a
+        tge     y1,b
+        move    b,x:(r7+$11)
+        move    b,a
+        move    x:(r7+$13),x0
+        sub     x0,a
+        move    a,x1
+        move    x:(r7+$07),y1
+        mpy     y1,x1,a
+        add     x0,a
+        move    a,x:(r7+$13)
+        move    a,x0
+        move    x:(r7+$09),y1
+        mpy     x0,y1,a
+        asl     a
+        move    x:(r7+$0b),y1
+        move    x:(r0),b
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     a
+        add     b,a
+        move    a,x:(r0)+
+; ---- DGRD R ----
+        move    x:(r0),a
+        move    x:(r7+$0f),x0
+        add     x0,a
+        move    x:(r7+$0e),x0
+        and     x0,a
+        move    a,y1  ; quantised (limited if +FS rounding overflowed)
+        move    x:(r7+$12),b
+        move    x:(r7+$17),a
+        tst     a
+        tge     y1,b
+        move    b,x:(r7+$12)
+        move    b,a
+        move    x:(r7+$14),x0
+        sub     x0,a
+        move    a,x1
+        move    x:(r7+$07),y1
+        mpy     y1,x1,a
+        add     x0,a
+        move    a,x:(r7+$14)
+        move    a,x0
+        move    x:(r7+$09),y1
+        mpy     x0,y1,a
+        asl     a
+        move    x:(r7+$0b),y1
+        move    x:(r0),b
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     a
+        add     b,a
+        move    a,x:(r0)+
+dsgend:
+        nop     
+        rts     
+; ---- subroutines (after their callers) ----
+dsexp:
+        move    a1,b
+        asr     #$12,a,a  ; a1 = n = floor(y)
+        add     #>$1,a
+        move    a1,x1  ; n + 1 (never 0: a do count of 0 is not a skip)
+        and     #>$03ffff,b
+        asl     #$5,b,b  ; f in Q23, b2 stays 0
+        move    b1,x0
+        move    #>$2c5c86,y0
+        mpy     y0,x0,b
+        move    b,y0  ; g = f ln2 / 2
+        move    #>$02aaab,x0
+        mpy     y0,x0,b
+        sub     #>$0aaaab,b
+        move    b,x0
+        mpy     y0,x0,b
+        add     #>$200000,b
+        move    b,x0
+        mpy     y0,x0,b
+        sub     #>$400000,b
+        move    b,x0
+        mpy     y0,x0,b
+        add     #>$400000,b  ; e^-g / 2
+        move    b,x0
+        mpy     x0,x0,b
+        asl     #$2,b,b  ; 2^-f in (0.5, 1]
+        do      x1,>dsxpend
+        asr     b
+dsxpend:
+        asl     b
+        rts     

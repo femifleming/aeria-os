@@ -1,0 +1,14 @@
+build/
+releases/
+backups/
+.build/
+.sdk/
+__pycache__/
+*.pyc
+.DS_Store
+*.bin
+*.raw
+*.lst
+*.wav
+*.dSYM/
+cloudfin/aeria12.c

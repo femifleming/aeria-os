@@ -1,0 +1,47 @@
+| result | check | detail |
+|---|---|---|
+| PASS | manifest loads (schema: names<=4, defaults in count) | VOWL SHFT RES LEVL WIDE MIX |
+| PASS | no label is a prefix of another, no duplicates |  |
+| PASS | no rep instruction |  |
+| PASS | assembles; disassembler round-trip + mpysu audit clean | 1608 words |
+| PASS | static cycle count (cycle_count.py, worst mode loop) | 556 cycles/sample |
+| FAIL | measured cost at dearest settings, 0.5 FS noise (dsp_host meter minus a null effect: steady mean / worst block) | mean 652.4, peak block 656.9 instr/sample |
+| PASS | dearest settings on 0.5 FS noise: bounded, guard clean (no stray writes) | peak 0.472 FS, dc -0.00028, stray 0 |
+| PASS | MIX 0 is exact dry (full-range ramp, dearest other knobs) | max |err| 0 LSB |
+| PASS | dirty state (garbage r7 block + Y) on silence -> silent tail | worst tail 0 LSB |
+| PASS | random knob automation every 3 blocks, splits 0 and 7, guard: bounded | peak 0.919 FS |
+| PASS | vowel 'a' (VOWL 0): noise in, wet peaks within 6 % of F1 650 / F2 1080 Hz; F1 is the strongest peak of the spectrum, L == R | 647 / 1083 Hz (-0.4 % / +0.3 %); F2 peak -6.3 dB under F1 (table -6 dB); the knob itself sits at 650 / 1080 Hz |
+| PASS | vowel 'e' (VOWL 32): noise in, wet peaks within 6 % of F1 400 / F2 1700 Hz; F1 is the strongest peak of the spectrum, L == R | 399 / 1701 Hz (-0.2 % / +0.1 %); F2 peak -14.9 dB under F1 (table -14 dB); the knob itself sits at 399 / 1701 Hz |
+| PASS | vowel 'i' (VOWL 64): noise in, wet peaks within 6 % of F1 290 / F2 1870 Hz; F1 is the strongest peak of the spectrum, L == R | 291 / 1847 Hz (+0.3 % / -1.2 %); F2 peak -13.7 dB under F1 (table -15 dB); the knob itself sits at 291 / 1845 Hz |
+| PASS | vowel 'o' (VOWL 95): noise in, wet peaks within 6 % of F1 400 / F2 800 Hz; F1 is the strongest peak of the spectrum, L == R | 399 / 807 Hz (-0.3 % / +0.9 %); F2 peak -10.2 dB under F1 (table -10 dB); the knob itself sits at 399 / 805 Hz |
+| PASS | vowel 'u' (VOWL 127): noise in, wet peaks within 6 % of F1 350 / F2 600 Hz; F1 is the strongest peak of the spectrum, L == R | 350 / 604 Hz (-0.1 % / +0.7 %); F2 peak -17.9 dB under F1 (table -20 dB); the knob itself sits at 350 / 600 Hz |
+| PASS | wet against a float model of FormantFilter.h (0.2 FS noise, second half of 1.8 s): error under -30 dB of the wet, VOWL/SHFT/RES | 0/64/67: -66.6; 32/64/67: -70.1; 64/64/67: -72.1; 95/64/67: -68.4; 127/64/67: -68.1; 48/96/100: -69.1; 80/20/127: -46.1; 16/127/0: -87.1; 110/0/40: -71.2 dB |
+| PASS | SHFT 96 (+12 semitones): first formant of a moves x2 within 6 % | 647 Hz -> 1302 Hz (x2.012) |
+| PASS | SHFT 32 (-12 semitones): first formant of a moves x0.5 within 6 % | 647 Hz -> 325 Hz (x0.501) |
+| PASS | SHFT 127 (+24 semitones): first formant of a moves x4 within 6 % | 647 Hz -> 2600 Hz (x4.017) |
+| PASS | SHFT 0 (-24 semitones): first formant of a moves x0.25 within 6 % | 647 Hz -> 162 Hz (x0.250) |
+| PASS | RES 110 (q 4.5) gives a narrower first-formant peak than RES 30 (q 0.28): -3 dB width and peak-to-mean ratio of the wet spectrum | -3 dB width 237 Hz -> 27 Hz (plugin bandwidth 80/q: 284 -> 18 Hz); peak/mean 25 -> 371 |
+| PASS | level match: wet RMS within 3 dB of dry RMS, white noise 0.25 FS | 0.5 FS, each vowel, RES default | a -0.02 e +0.03 i -0.11 o +0.03 u -0.03 | a -0.03 e +0.02 i -0.12 o +0.03 u -0.03 | dB |
+| info | level match at RES 0 | RES 127 (0.25 FS noise, wet - dry RMS) | a +0.02 e +0.02 i +0.02 o +0.02 u +0.02 | a +0.18 e -0.15 i -3.33 o -1.00 u -3.12 | dB; the float plugin model gives i -3.33 dB at RES 127 |
+| PASS | LEVL OFF: the wet is the unmatched filter sum (well under the dry on noise), bounded | wet - dry -19.6 dB |
+| PASS | RES 127, every vowel: 0.5 FS noise and a full-scale 40 Hz..16 kHz sine sweep stay <= 1.0 FS (also SHFT 0 and 127 on the sweep) | a/noise 1.000 (0.03 % at the rail); a/sweep 1.000 (3.42 % at the rail); e/noise 1.000 (0.01 % at the rail); e/sweep 1.000 (3.68 % at the rail); i/noise 0.849 (0.00 % at the rail); i/sweep 1.000 (3.54 % at the rail); o/noise 0.959 (0.00 % at the rail); o/sweep 1.000 (3.51 % at the rail); u/noise 0.912 (0.00 % at the rail); u/sweep 1.000 (3.36 % at the rail) |
+| PASS | VOWL swept 0..127 over 4 s on a 100 Hz 0.25 FS sine: largest sample-to-sample jump of the wet < 0.01 FS (LEVL ON), < 0.002 FS (LEVL OFF) | LEVL 1 RES 67: 0.0045; LEVL 1 RES 127: 0.0008; LEVL 0 RES 67: 0.0002; LEVL 0 RES 127: 0.0000 FS (the dry sine itself steps 0.0036) |
+| PASS | all three knobs jumped end to end in one block (100 Hz sine): no step > 0.01 FS in the wet | largest step 0.0073 FS |
+| PASS | noise on the left only: the right channel stays exactly silent (independent filters, shared gain) | L rms 0.137, R max 0 |
+| PASS | 1 kHz 0.5 FS sine, RES 127: no DC in the wet (rounded state updates) | dc -5.91e-07 FS, rms 0.222 (dry 0.354) |
+| PASS | 0.5 FS noise burst then silence, RES 127: 2.6 s later the wet is under -90 dBFS (no limit cycle lifted by the 32x gain cap) | peak of the last second -240.0 dBFS (0 LSB) |
+| info | cost, dsp_host instructions/sample minus null (the plain-name rows are at WIDE 0) | defaults split 0: mean 650.9 / worst block 655.4; defaults split 7: mean 746.9 / worst block 751.2; dear split 0: mean 652.4 / worst block 656.9; dear split 7: mean 749.8 / worst block 754.2; SHFT 127 RES 0 VOWL 127 split 0: mean 650.1 / worst block 654.5; SHFT 127 RES 0 VOWL 127 split 7: mean 745.3 / worst block 749.6 |
+| PASS | WIDE 0 / 64 / 127: the first formant of "a" (650 Hz) moves down on the left and up on the right by WIDE x min(a semitone, 2 half-bandwidths): RES 80 (the semitone cap, +-25 c: a broad peak) and RES 115 (the bandwidth cap, +-8 c) | RES 80 WIDE 0: left 645 Hz (-13 c, want +0), right 645 Hz (-13 c, want +0); RES 80 WIDE 64: left 630 Hz (-55 c, want -52), right 678 Hz (+73 c, want +51); RES 80 WIDE 127: left 617 Hz (-89 c, want -105), right 685 Hz (+90 c, want +99); RES 115 WIDE 0: left 647 Hz (-7 c, want +0), right 647 Hz (-7 c, want +0); RES 115 WIDE 64: left 641 Hz (-24 c, want -20), right 657 Hz (+17 c, want +20); RES 115 WIDE 127: left 635 Hz (-42 c, want -40), right 667 Hz (+44 c, want +40) |
+| PASS | width, defaults (WIDE 80, RES 67), MIX 127, mono noise burst in: wide (corr <= 0.92), mono sum within 3 dB of either side, bounded | corr +0.660, L+R +5.38 dB re L / +5.05 dB re R, peak 0.609, rms L -28.0 R -27.7 dBFS |
+| PASS | width, defaults (WIDE 80, RES 67), MIX 127, mono 650 Hz sine in: wide (corr <= 0.92), mono sum within 3 dB of either side, bounded | corr +0.469, L+R +4.98 dB re L / +4.39 dB re R, peak 0.553, rms L -9.3 R -8.7 dBFS, largest step 0.0482 FS (a 780 Hz partial at this peak: 0.0608) |
+| PASS | width, WIDE 127, RES 67, mono noise burst in: wide (corr <= 0.92), mono sum within 3 dB of either side, bounded | corr +0.527, L+R +5.11 dB re L / +4.60 dB re R, peak 0.561, rms L -28.3 R -27.8 dBFS |
+| PASS | width, WIDE 127, RES 67, mono 650 Hz sine in: wide (corr <= 0.92), mono sum within 3 dB of either side, bounded | corr +0.052, L+R +3.79 dB re L / +2.73 dB re R, peak 0.530, rms L -9.6 R -8.5 dBFS, largest step 0.0491 FS (a 780 Hz partial at this peak: 0.0618) |
+| PASS | width, WIDE 127, RES 100 (narrow bands), mono noise burst in: wide (corr <= 0.92), mono sum within 3 dB of either side, bounded | corr +0.137, L+R +3.77 dB re L / +3.37 dB re R, peak 0.594, rms L -27.4 R -27.0 dBFS |
+| PASS | width, WIDE 127, RES 100 (narrow bands), mono 650 Hz sine in: wide (corr <= 0.92), mono sum within 3 dB of either side, bounded | corr -0.593, L+R -0.44 dB re L / -1.25 dB re R, peak 0.529, rms L -9.5 R -8.6 dBFS, largest step 0.0484 FS (a 780 Hz partial at this peak: 0.0610) |
+| PASS | width, WIDE 127, RES 127 (the narrowest bands: the worst case for a tone between the two sides' peaks), mono noise burst in: wide (corr <= 0.92), mono sum within 3 dB of either side, bounded | corr +0.207, L+R +4.62 dB re L / +3.14 dB re R, peak 0.769, rms L -27.3 R -25.8 dBFS |
+| PASS | width, WIDE 127, RES 127 (the narrowest bands: the worst case for a tone between the two sides' peaks), mono 650 Hz sine in: wide (corr <= 0.92), mono sum within 3 dB of either side, bounded | corr -0.596, L+R -0.74 dB re L / -1.08 dB re R, peak 0.803, rms L -9.2 R -8.9 dBFS, largest step 0.0473 FS (a 780 Hz partial at this peak: 0.0596) |
+| PASS | width, WIDE 0, mono noise burst in: mono (L = R exactly), bounded | corr +1.000, L+R +6.02 dB re L / +6.02 dB re R, peak 0.564, rms L -27.7 R -27.7 dBFS, max |L - R| 0 LSB |
+| PASS | width, WIDE 0, mono 650 Hz sine in: mono (L = R exactly), bounded | corr +1.000, L+R +6.02 dB re L / +6.02 dB re R, peak 0.614, rms L -9.0 R -9.0 dBFS, max |L - R| 0 LSB, largest step 0.0471 FS (a 780 Hz partial at this peak: 0.0593) |
+| info | width, defaults, 440 Hz sine (between formants) | corr +1.000, L+R +5.27 dB re L / +6.84 dB re R |
+| info | width, defaults, 110 Hz saw (a pitched source: harmonics fall nearer one side's peaks, so the sides differ in level) | a: corr +0.65, L -13.2 R -12.3 dBFS, L+R +5.7 dB re L; e: corr +0.90, L -13.1 R -12.4 dBFS, L+R +6.2 dB re L; i: corr +0.93, L -13.6 R -12.0 dBFS, L+R +6.7 dB re L; o: corr +0.85, L -13.5 R -12.1 dBFS, L+R +6.4 dB re L; u: corr +0.78, L -11.1 R -15.4 dBFS, L+R +3.7 dB re L |
+| info | cost | static 556 cycles/sample (sample loop only; the per-call coefficient work is outside it); dsp_host mean 652.4, worst block 656.9 at the dearest settings |

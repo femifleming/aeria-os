@@ -1,0 +1,544 @@
+<div class="cover">
+  <img src="img/aeria_logo.png" alt="AERIA" style="width:120mm; margin-bottom:26px">
+  <h1>AERIA OS</h1>
+  <div class="sub">FOR OCTATRACK MKII</div>
+  <div class="big">クイックガイド</div>
+  <div class="by">BY SADNOISE</div>
+  <div class="ed">対応ビルド：{{BUILD}}</div>
+</div>
+
+<h2 id="welcome">ようこそ</h2>
+<p class="lead">AERIA OSは、sadnoiseによるOctatrack MKII用のOSです。同じパネル、端子、サウンドプロセッサーを、<b>2つのフェイス</b>を持つ別の楽器に変えます。スカイを中心としたライブ用マルチエフェクトと、8トラックのシーケンサーです。</p>
+<figure class="draw narrow">{{DIAGRAM faces}}</figure>
+<div class="big3">
+<div><b>スカイ</b>入力A〜Dの音が、最大7つのエフェクトの<b>チェーン</b>を通ります。<b>天気</b>がノブを動かし、エフェクトを貸し出します。ループ、スター（ワンショットの輪）、録音したバルーンもチェーンに入ります。</div>
+<div><b>シーケンサー</b>16個のトリガーキーで<b>8トラック</b>を扱うグルーヴボックス。各トラックにボイス（サンプル、小さなシンセ4種、MIDIのみ）、フィルター2つ、エフェクト1つ。ステップごとに値を持てます（パラメーターロック）。</div>
+<div><b>共通</b>マスターセクション（フリーズディレイ、4バンドEQ、ベースモノ、リミッター）、テンポ、16の<b>プロジェクト</b>、カード、USBオーディオ、スクリーンセーバー。</div>
+</div>
+<p>[FUNC] + [MIDI]でフェイスを切り替えます。ポップアップは``SEQUENCER``または``AERIA``。</p>
+<div class="two w64">
+<div>
+<h3>このガイドの表記</h3>
+<table class="tight">
+<tr><td>[FUNC]</td><td><b>キー</b>（印刷された名前）</td></tr>
+<tr><td>[FUNC] + [MIDI]</td><td>1つ目を<b>押したまま</b>2つ目を<b>押す</b></td></tr>
+<tr><td>[T1]～[T8]</td><td>画面の横にある8つの<b>トラックキー</b></td></tr>
+<tr><td>[TRIG 1]～[TRIG 16]</td><td>下段に並ぶ16個の<b>トリガーキー</b></td></tr>
+<tr><td>((LEVEL))、((A))～((F))</td><td><b>ノブ</b>。((A)) ((B)) ((C))が上段、((D)) ((E)) ((F))が下段</td></tr>
+<tr><td>``FREEZE ON``</td><td>画面の<b>メッセージ</b>。多くは<b>ポップアップ</b>（値を約1秒表示する枠）</td></tr>
+<tr><td>&lt;&lt;TEMPO&gt;&gt;</td><td><b>ランプ</b>：キーの中の明かり</td></tr>
+</table>
+</div>
+<div>
+<h3>このガイドの内容</h3>
+{{QTOC}}
+</div>
+</div>
+<p><small>手短な入門です。各節の最後に、詳しいマニュアルの章を示します。画面図はAERIAの描画コード、パネル図は独自に作成。AERIA OSはElektron製品ではなく、Elektronのサポート対象外です。</small></p>
+
+<h2 id="qpanel">パネルのレイアウト</h2>
+<figure class="draw">{{FRONT}}<figcaption>フロントパネル。印刷された名前はそのままで、多くのキーの役割はフェイスごとに異なります。</figcaption></figure>
+<table class="long tight plist">
+<thead><tr><th></th><th>コントロール</th><th>スカイでは</th><th>シーケンサーでは</th></tr></thead>
+<tr><td>1</td><td>[REC1] [REC2]</td><td>入力A B／C Dからバルーンを捕まえる。再度：浮かぶ。[FUNC]と：割る</td><td>使用せず</td></tr>
+<tr><td>2</td><td>[REC3]</td><td>スカイ（チェーン出力）をバルーン3へ</td><td>使用せず</td></tr>
+<tr><td>3</td><td>[T1]～[T8]</td><td>[T1]～[T7]：スロット1〜7を選択。[FUNC]と：バイパス。[T1] + [T2]同時：入力A Bのステレオ／モノ。[T3] + [T4]：C D</td><td>トラックを選択。[FUNC]と：ミュート。[CUE]と：ソロ</td></tr>
+<tr><td>4</td><td>画面</td><td colspan="2">128×64ピクセル。スカイでは約10秒でページが消え、風景が残る。キーかノブで戻る</td></tr>
+<tr><td>5</td><td>&lt;&lt;CARD STATUS&gt;&gt;</td><td colspan="2">カードの読み書き中に点灯</td></tr>
+<tr><td>6</td><td>((LEVEL))</td><td>回す：次／前の天気。押す：AUTO天気。リスト内の移動</td><td>選択中のトラックの音量。[TEMPO]と：テンポ</td></tr>
+<tr><td>7</td><td>((A))～((F))</td><td>ページの6つのノブ。[FUNC]と：セカンドセット。CHAINで押し込む：天気に返す</td><td>ノブページの6つのノブ。ステップを押さえ中：そのステップの値</td></tr>
+<tr><td>8</td><td>[TEMPO]</td><td>使用せず</td><td>タップテンポ。押したまま((LEVEL))：1 BPMずつ</td></tr>
+<tr><td>9</td><td>[SCENE A] [SCENE B]</td><td>押したままノブ：値をシーンへ。押したままトリガーキー：シーン1〜16。押したまま[NO]：消去</td><td>MASTERページのノブのみ</td></tr>
+<tr><td>10</td><td>[PAGE]</td><td>セカンドセットのラッチ</td><td>PTNページ：長さ、スウィング、テンポ、ダッキング</td></tr>
+<tr><td>11</td><td>クロスフェーダー</td><td colspan="2">シーンAのノブをシーンBの位置へ動かす。Bいっぱい近くでマスターのディレイがフリーズ</td></tr>
+<tr><td>12</td><td>[STOP]</td><td>使用せず</td><td>停止。再度：即無音。[FUNC] + [STOP]：ペースト</td></tr>
+<tr><td>13</td><td>[PLAY]</td><td>使用せず</td><td>先頭から再生。[FUNC] + [PLAY]：トラックを消去</td></tr>
+<tr><td>14</td><td>[REC]</td><td>グレインクラウドのエディター</td><td>GRID（ステップ）／LIVE（パッド）。[FUNC] + [REC]：トラックをコピー</td></tr>
+<tr><td>15</td><td>[SRC] [AMP] [LFO] [FX1] [FX2]</td><td>CHAIN、SKY、SOURCE、MIX（再度：GAIN）、SYSTEM</td><td>ノブページSRC、AMP、MOD、FLT、FX。再度：セカンドセット</td></tr>
+<tr><td>16</td><td>[UP] [DOWN] [LEFT] [RIGHT]</td><td>[LEFT] [RIGHT]：CHAINではスロット、ほかではページ。[UP] [DOWN]：天気、リスト内の移動</td><td>[LEFT] [RIGHT]：16ステップ単位のページ。[UP] [DOWN]：上／下のトラック</td></tr>
+<tr><td>17</td><td>[NO]</td><td>開いているものを閉じる。ほかでは：新しいスカイ</td><td>ステップを押さえ中：ロックを消去</td></tr>
+<tr><td>18</td><td>[YES]</td><td>確定（読み込む、選ぶ、開く）。ほかでは：昼と夜</td><td>押したまま：FILL。ステップを押さえ中：逆再生。FXで：エフェクトのリスト</td></tr>
+<tr><td>19</td><td>[BANK]</td><td>CHAINで：シェルフ。ほかでは：STARSの次のバンク</td><td>ミキサー</td></tr>
+<tr><td>20</td><td>[CUE]</td><td>OUT：ルーティングとクアッドパンナー</td><td>[CUE] + トラックキー：ソロ</td></tr>
+<tr><td>21</td><td>[TRIG 1]～[TRIG 16]</td><td>ページで変わる：スロット、天気、ディレイタイム、ソース、プロジェクト、文字</td><td>GRID：16ステップ。LIVE：1〜8パッド、9〜16ミュート。[PTN]と：パターンA〜D</td></tr>
+<tr><td>22</td><td>[PTN]</td><td>STARSのモード：RINGまたはBIRDS</td><td>押したまま[TRIG 1]～[TRIG 4]：パターン</td></tr>
+<tr><td>23</td><td>[FUNC]</td><td colspan="2">ほかのキーやノブと併用で第2の機能。押したまま電源オン：Elektronのスタートアップメニュー</td></tr>
+<tr><td>24</td><td>[PROJ]</td><td colspan="2">PROJECTS：名前を付けて保存、読み込み</td></tr>
+<tr><td>25</td><td>[PART]</td><td>BALLOONページ</td><td>使用せず</td></tr>
+<tr><td>26</td><td>[AED]</td><td>LOOPページ</td><td>使用せず</td></tr>
+<tr><td>27</td><td>[MIX]</td><td colspan="2">MASTERページ：フリーズディレイとテンポ</td></tr>
+<tr><td>28</td><td>[ARR]</td><td>STARSページ</td><td>GENページ</td></tr>
+<tr><td>29</td><td>[MIDI]</td><td>MIDIモジュール。[FUNC] + [MIDI]：シーケンサーへ</td><td>MIDIページ。[FUNC] + [MIDI]：スカイへ</td></tr>
+<tr><td>30</td><td>((HEADPHONES VOL))</td><td colspan="2">ヘッドフォン端子の音量</td></tr>
+</table>
+{{man:panel,controls,seqkeys}}
+
+<h2 id="qconn">接続</h2>
+<figure class="draw">{{REAR}}</figure>
+<table class="tight plist">
+<tr><th></th><th>端子</th><th>AERIA OSでの使い方</th></tr>
+<tr><td>1</td><td>Power</td><td>電源スイッチ。[FUNC]を押したまま電源オンでスタートアップメニュー</td></tr>
+<tr><td>2</td><td>12VDC 2A</td><td>付属の電源アダプター</td></tr>
+<tr><td>3</td><td>USB</td><td>コンピューターへ：6／18チャンネルの<b>オーディオインターフェース</b>、<b>USB DISK MODE</b>、アップデートツール。USB-MIDIなし</td></tr>
+<tr><td>4</td><td>Compact Flash</td><td>サンプル用カード（ループ、スターのフォルダー、キット）。FAT16／FAT32。読み取り専用</td></tr>
+<tr><td>5</td><td>MIDI Thru</td><td>MIDI Inの入力をハードウェアでコピー</td></tr>
+<tr><td>6</td><td>MIDI Out</td><td>ノートとコード、プログラムチェンジ。SYNCがSENDならクロック、スタート、ストップ</td></tr>
+<tr><td>7</td><td>MIDI In</td><td>クアッドパンナーのCC。SYNCがRECVならクロック、スタート、コンティニュー、ストップ。プログラムチェンジでパターン選択</td></tr>
+<tr><td>8</td><td>Inputs A B C D</td><td>A BとC Dの2ペア。スカイではチェーンへ（ステレオ／モノ）。シーケンサーではドライで出力へ</td></tr>
+<tr><td>9</td><td>Cue Out L R</td><td><b>2つ目の出力ペア</b>：CUEに送ったスロットやトラック。マスターセクションは通らない</td></tr>
+<tr><td>10</td><td>Main Out L R</td><td>マスターセクション（フリーズディレイ、EQ、ベースモノ、リミッター）後のメインミックス</td></tr>
+<tr><td>11</td><td>Headphones</td><td>メイン＋キュー。音量はフロントの((HEADPHONES VOL))</td></tr>
+</table>
+<figure class="draw">{{DIAGRAM hookup}}</figure>
+{{man:rearpanel,usb,midi}}
+
+<h2 id="qstart">電源を入れて、操作に慣れる</h2>
+<div class="two">
+<div>
+<ol class="steps">
+<li><b>Main Out L R</b>をミキサーかスピーカーへ。またはヘッドフォンを挿します。</li>
+<li>シンセ、ドラムマシン、マイクプリなどを<b>入力A B</b>へ。</li>
+<li>サンプル用のCFカードがあれば挿します（なくても動作します）。</li>
+<li><b>電源を入れます。</b>イントロ（無音）が流れ、スカイが開きます。どのキーでもスキップできます。</li>
+</ol>
+</div>
+<div>
+[[G2]]
+intro1 | 筆がロゴを描きます
+intro3 | 海がせり上がり、スカイが開きます
+[[/G]]
+</div>
+</div>
+<p>AERIA OSは<b>前回の状態のまま</b>起動します。音は変更の約2秒後、シーケンスは操作のたびにバッテリーバックアップメモリーへ保存されます。シーケンサーで電源を切ると、シーケンサーで起動します。初回はスロット1、3、4、5にPITCH、GRAINS、RING、SMEARが入り、すべて<b>ドライ</b>です。</p>
+[[PANEL FUNC TRIG2=never | 戻る道：スタートアップメニュー
+[FUNC] held while switching on :: Elektronのスタートアップメニュー。AERIA OSはブートローダーに書き込まないので、いつでも使えます。どのOSもここから送ります
+[TRIG 2] in that menu :: EMPTY RESET。<b>絶対に押さないでください</b>
+]]
+<div class="warn"><b>スタートアップメニューでTRIG 2（EMPTY RESET）は絶対に押さないでください。</b>本体が消去されます。AERIA OSが起動しないときは、[FUNC]を押したまま電源を入れ、<b>MIDI UPGRADE</b>を選び、<b>MIDI In</b>へ<small>AERIA_OS.syx</small>を送ります。</div>
+
+<div class="big3">
+<div><b>ページ</b>6つのノブを持つ1画面。ページキーで開きます。名前はパネルのノブの順に並びます。</div>
+<div><b>セカンドセット</b>多くのページにさらに6つのノブ。スカイ：[FUNC]を押したまま、または[PAGE]でラッチ。シーケンサー：[FUNC]を押したまま、またはページのキーをもう一度。</div>
+<div><b>ランプ</b>すべて白で、明るさが合図です。スカイではキーの働き、シーケンサーではステップ、ノート、再生位置を示します。[REC1] [REC2]の上は入力A B C Dのレベル、[ARR]の上はメインのレベル。</div>
+</div>
+<h3>画面</h3>
+[[ANNO chain | 初めて起動したときのスカイのCHAINページ
+1,1,56,8 | L | ページ名、または/選択中のエフェクト名
+8,10,112,12 | L | 糸に並んだ/チェーンの7つのスロット
+10,24,10,2 | L | バーが選択中の/スロットを示します
+1,57,26,7 | L | 入力ルーティング：/A BとC D
+100,1,27,8 | R | 現在の天気
+8,27,116,16 | R | ボウルで表した6つのノブ：/満ちているほど高い値
+8,43,116,8 | R | ノブの名前。左端が((A))、/右端が((F))
+0,51,128,7 | R | 海と船
+]]
+
+<h3>ページを開くキー</h3>
+<table class="tight">
+<tr><th>キー</th><th>スカイでは</th><th>シーケンサーでは</th></tr>
+<tr><td>[SRC]</td><td>CHAIN：7つのスロットと、選択中のエフェクトのノブ</td><td>SRC：マシンとその音</td></tr>
+<tr><td>[AMP]</td><td>SKY：風、雲、波、天気</td><td>AMP：エンベロープ、音量、パン、ドライブ、ビット</td></tr>
+<tr><td>[LFO]</td><td>SOURCE：LOOP、STARS、BALLOONSのオン／オフ</td><td>MOD：トラックごとに1つのモジュレーション</td></tr>
+<tr><td>[FX1]</td><td>MIX。もう一度：GAINとマスターEQ</td><td>FLT：フィルター、ディレイセンド、出力</td></tr>
+<tr><td>[FX2]</td><td>SYSTEM</td><td>FX：トラックのエフェクト</td></tr>
+<tr><td>[MIX]</td><td colspan="2">MASTER：フリーズディレイとテンポ</td></tr>
+<tr><td>[PART] / [AED] / [ARR]</td><td>BALLOON / LOOP / STARS</td><td>[ARR]：GEN：密度、方向、回転、ワープ、レート</td></tr>
+<tr><td>[MIDI]</td><td>MIDIモジュール：GUMBALLS、PITCH、MARBLES、PONG</td><td>MIDI：チャンネル、ノート、コード、ゲート、プログラム、同期</td></tr>
+<tr><td>[PAGE]</td><td>（ノブのセカンドセットをラッチ）</td><td>PTN：長さ、スウィング、テンポ、ダッキング</td></tr>
+<tr><td>[CUE]</td><td>OUT：ルーティングとクアッドパンナー</td><td>（トラックキーと組み合わせてソロ）</td></tr>
+<tr><td>[REC]</td><td>グレインクラウドのエディター</td><td>（GRIDまたはLIVE）</td></tr>
+<tr><td>[BANK]</td><td>エフェクトのシェルフ（CHAINで）</td><td>ミキサー</td></tr>
+<tr><td>[PROJ]</td><td colspan="2">PROJECTS</td></tr>
+</table>
+{{man:quick,overview,update}}
+
+<h2 id="qsky">スカイで最初の音を出す</h2>
+<p>入力A Bに音を入れ、メイン出力かヘッドフォンで聴きます。</p>
+[[STEP 1 | SRC TRIG1-7=slots | qs_sky_chain]]
+<p><b>チェーンを開く。</b>[SRC]を押します。スロット1のPITCHが選択されています。すべてドライなので、音はそのままです。</p>
+[[/STEP]]
+[[STEP 2 | TRIG3 F=MIX | qs_sky_mix]]
+<p><b>エフェクトを効かせる。</b>[TRIG 3]でGRAINSを選び、((F))（MIX）を半分ほど上げます。</p>
+[[/STEP]]
+[[STEP 3 | A=SIZE B=DENS C=POS D=SPRY E=PTCH | chain_popup_ms]]
+<p><b>ノブを演奏する。</b>((A))～((E))がほかのノブ。値は実際の単位で表示されます。[FUNC]でセカンドセット。</p>
+[[/STEP]]
+[[STEP 4 | TRIG6 BANK=shelf YES UP DOWN LEVEL | shelf]]
+<p><b>別のエフェクトを選ぶ。</b>空きスロットの[TRIG 6]、続けて[BANK]（または[YES]）で<b>シェルフ</b>が開きます。((LEVEL))か[UP] [DOWN]で選び、[YES]。[NO]で戻ります。</p>
+[[/STEP]]
+[[STEP 5 | AMP=SKY TRIG3=RAIN TRIG1=CLEAR | qs_sky_rain]]
+<p><b>天気を変える。</b>[AMP]でSKYページを開き、[TRIG 3]：RAIN（雨）。ノブが雨らしく動き、ローパスがかかります。[TRIG 1]で晴れに戻ります。</p>
+[[/STEP]]
+[[STEP 6 | MIX=MASTER F=WET TRIGS=time | qs_sky_delay]]
+<p><b>マスターのディレイ。</b>[MIX]でMASTERページを開き、((F))（WET）を上げます。トリガーキーでディレイタイム（16分音符単位）。</p>
+[[/STEP]]
+[[STEP 7 | XFADER=freeze | master_freeze]]
+<p><b>フリーズ。</b>クロスフェーダーをBへ。``FREEZE ON``：ディレイの音が回り続けます。戻すと解放されます。</p>
+[[/STEP]]
+[[STEP 8 | SCENEA SCENEB XFADER KNOBS SRC | scene_knob]]
+<p><b>2つのシーン。</b>[SRC]を押し、[SCENE A]を押したままノブを回し、[SCENE B]を押したまま同じノブを別の位置へ。クロスフェーダーがその間を動かします。</p>
+[[/STEP]]
+<div class="two">
+<div class="note"><b>エフェクトはドライで始まります。</b>聞こえる量はMIX（((F))）で決まり、天気はMIXを動かしません。シェルフから入れると初期値のMIXで入ります。</div>
+<div class="tip"><b>CHAINのコツ。</b>[FUNC] + トリガーキー（トラックキー）でバイパス。ノブを押し込むと天気に返します。シェルフ先頭のダッシュでスロットを空に。</div>
+</div>
+{{man:chain,fx,mix,scenes,out}}
+
+<h2 id="qweather" class="run">天気</h2>
+<p>天気はスカイの中心です。各天気は<b>個別にオン／オフ</b>でき、同時に複数オンにできます。<b>SKY</b>、<b>MIX</b>、<b>GAIN</b>ページのトリガーキーが天気です。</p>
+[[TRIGS 1121111111110001 | SKY、MIX、GAINのトリガーキー（RAINがオン）。1：すべてオフ、12：ツイスター、16：落雷 | 1=CLEAR 2=CLOUDY 3=RAIN 4=STORM 5=SNOW 6=HEAT 7=FOG 8=AUTO 9=WIND 10=HAIL 11=AUR. 12=TWIST. 16=落雷]]
+[[G3]]
+sky_rain | RAIN
+sky_storm | STORM、落雷の瞬間
+sky_snow | SNOW：海が平らに凍ります
+sky_fog | FOG
+sky_aurora | 夜のAURORA
+sky_twister | 半分まで横切ったTWISTER
+[[/G]]
+<div class="two">
+<div>
+<h3>天気はノブを動かす</h3>
+<p>CLOUDY（曇り）、RAIN（雨）、STORM（嵐）、SNOW（雪）、HEAT（熱波）、FOG（霧）は、それぞれの性格でチェーンのノブを設定します。RAINはウェットで長く、STORMは荒く（数秒ごとに空いたノブを投げ、稲妻がエフェクトを出し入れ）、SNOWは長く暗く（SMEARを凍らせる）、HEATはドライで明るく。従うのは次の名前のノブです：SIZE、TIME、DECY、FDBK、TONE、RATE、RES、WDTH、DPTH、SMR、FRZ、GRN、DENS、WIDE、TILT、BRIT、GATE、DTUN、MOD、FOLW。</p>
+<ul>
+<li>ノブは<b>回すまで</b>天気に従います。CHAINで押し込むと天気に戻ります。</li>
+<li><b>MIXは決して天気に従いません。</b></li>
+<li>SNOWとHEATは同時にオンにできません。</li>
+<li>マスターセクションには触れません。</li>
+</ul>
+</div>
+<div>
+<h3>天気はエフェクトを貸し出す</h3>
+<p>天気は音にも直接作用します。RAINとSTORMはローパスをかけ、雷鳴がそれを下げます。STORMの落雷は、ランダムなエフェクトを45〜90秒、最後の空きスロットに貸し出します。</p>
+<p><b>FOG、WIND、HAIL、AURORA</b>と<b>TWISTER</b>は専用のエフェクトを連れてきます。天気が続く間、<b>最後の空きスロット</b>に入ってフェードインし（例：``AERIA WIND IN``）、天気が去るとフェードアウトして外れます。</p>
+<ul>
+<li>空きスロットやDSPの余地（``NO ROOM`` ``DSP FULL``）がないと、天気は表示されても音は出ません。</li>
+<li>WINDとFOG、HAILとAURORAは同時にオンになりません。</li>
+</ul>
+</div>
+</div>
+<div class="warn"><b>WSNDがすべてのスイッチです。</b>MIXページ（[FX1]）のノブ((F))。ONで天気の音（フィルター、雷鳴、貸し出し）が聞こえ、OFFでは表示とノブの動きだけになります。天気が効かないときは、WSNDと空きスロットを確認してください。</div>
+[[PANEL AMP=SKY FX1=MIX LEVEL UP DOWN YES NO TRIG16=bolt | どのページからでも使える天気の操作
+((LEVEL)) turned, or [UP] [DOWN] :: 次／前の天気（単独）
+((LEVEL)) pushed :: AUTO天気のオン／オフ
+[YES] :: 昼と夜（確定するものがない場所で）
+[NO] :: 新しいスカイ（閉じるものがない場所で）
+[TRIG 16] :: 稲妻（SKY、MIX、GAIN、CHAINで）
+]]
+{{man:sky,moreweather,wxfx,fxweather}}
+
+<h2 id="qrec">録音：バルーンとサンプル</h2>
+<p>スカイでは<b>バルーン</b>に録音します。最大15秒の録音が空に浮かび、長いグレインの雲としてチェーンを通して歌います。3つあります。</p>
+[[STEP 1 | REC1=A_B REC2=C_D REC3=sky | balloon_filling]]
+<p><b>捕まえて離す。</b>[REC1]で入力A B、[REC2]でC D、[REC3]でスカイ（チェーン出力）を録音。``CATCHING``と表示され、同じキーをもう一度押すと浮かびます。</p>
+[[/STEP]]
+[[STEP 2 | LFO=SOURCE TRIG1=LOOP TRIG2=STARS TRIG3=BALLN | source]]
+<p><b>歌わせる。</b>[LFO]でSOURCEを開き、[TRIG 3]でBALLOONSをオン。バルーンがチェーンの先頭で歌います。</p>
+[[/STEP]]
+[[STEP 3 | PART=BALLOON KNOBS FUNC RECS | balloon_popup]]
+<p><b>整える、割る。</b>[PART]でBALLOONページ（SIZE、SPRY、PTCH、DENS、POS、SEND）。[FUNC] + レコーダーキーで割ります（録音は消えます）。</p>
+[[/STEP]]
+<div class="note">バルーンの録音は電源を切ると消え、プロジェクトにも残りません。</div>
+<h3>カードのサンプル</h3>
+<p>ほかの2つのソースとシーケンサーのキットは、<b>CFカード上のWAVファイル</b>を再生します。カードは読み取り専用で、ファイルはUSB DISK MODEで入れます（第10節）。ブラウザーでは[UP] [DOWN]か((LEVEL))で移動、[YES]で開く／読み込む、[NO]で戻ります。</p>
+<table class="tight">
+<tr><th>キー</th><th>読み込むもの</th></tr>
+<tr><td>SOURCE：[FUNC] + [TRIG 1]</td><td><b>LOOP</b>：ループするサンプル。ページは[AED]</td></tr>
+<tr><td>SOURCE：[FUNC] + [TRIG 2]</td><td><b>STARS</b>のフォルダー：16ファイルをワンショットに。ページは[ARR]</td></tr>
+<tr><td>シーケンサー、SRC：[FUNC] + [YES]</td><td><b>キット</b>：最初の16ファイルがサンプル7.1〜7.16に</td></tr>
+</table>
+<p>読み込んだファイルは起動時とプロジェクト読み込み時に読み直されます。演奏の録音はUSBでコンピューターへ（第10節）。</p>
+{{man:sources,card,cloud}}
+
+<h2 id="qbeat">シーケンサーで最初のビートを作る</h2>
+<p>準備：カード上のフォルダーに短いWAVファイルを8つ以上入れ、01 kick、02 clap、03 hatのように番号を付けます。</p>
+[[STEP 1 | FUNC MIDI | qs_seq_empty]]
+<p><b>シーケンサーへ。</b>[FUNC] + [MIDI]。``SEQUENCER``と表示され、8つの空のトラックが並びます。背の高い列が選択中のトラック1です。</p>
+[[/STEP]]
+[[STEP 2 | SRC FUNC YES UP DOWN | seq_kit]]
+<p><b>キットを読み込む。</b>[SRC]、続けて[FUNC] + [YES]。[UP] [DOWN]でフォルダーへ移り、[FUNC] + [YES]。トラック1〜8が最初の8ファイルを鳴らします。</p>
+[[/STEP]]
+[[STEP 3 | T1 TRIG1 TRIG5 TRIG9 TRIG13 | qs_seq_kick]]
+<p><b>キックを置く。</b>[T1]を押し、[TRIG 1]、[TRIG 5]、[TRIG 9]、[TRIG 13]を押します。</p>
+[[/STEP]]
+[[STEP 4 | PLAY STOP TEMPO LEVEL | qs_seq_play]]
+<p><b>再生。</b>[PLAY]。再生位置が点灯し、&lt;&lt;TEMPO&gt;&gt;が拍で点滅します。[TEMPO]をタップするか、押したまま((LEVEL))でテンポ。</p>
+[[/STEP]]
+[[STEP 5 | T2 T3 TRIG5 TRIG13 TRIG3 TRIG7 TRIG11 TRIG15 | qs_seq_hats]]
+<p><b>クラップとハット。</b>[T2]で[TRIG 5]と[TRIG 13]、[T3]で[TRIG 3]、[TRIG 7]、[TRIG 11]、[TRIG 15]。</p>
+[[/STEP]]
+[[STEP 6 | TRIG15=hold E=RTCH | qs_seq_ratchet]]
+<p><b>ハットを連打。</b>[TRIG 15]を押したまま((E))（RTCH）を3に。そのステップが3回鳴ります。</p>
+[[/STEP]]
+[[STEP 7 | TRIG7=hold FX1=FLT B=LP | qs_seq_lock]]
+<p><b>ステップをロック。</b>[TRIG 7]を押したまま[FX1]、((B))（LP）を下げます。そのハットだけ暗くなります：<b>パラメーターロック</b>。</p>
+[[/STEP]]
+[[STEP 8 | FX2=FX YES UP DOWN | qs_seq_fxlist]]
+<p><b>エフェクトをかける。</b>[FX2]、[YES]。[UP] [DOWN]でECHOを選び[YES]。ノブ((A))～((F))がエコーになります。</p>
+[[/STEP]]
+[[STEP 9 | BANK=mixer LEVEL T1-8 TRIG1-8=mute TRIG9-16=solo | qs_seq_mixer]]
+<p><b>バランス。</b>[BANK]でミキサー。トラックキーと((LEVEL))で音量。トリガーキー1〜8でミュート、9〜16でソロ。</p>
+[[/STEP]]
+<h2 id="qseq" class="run">シーケンサーのあらまし</h2>
+[[ANNO seq_anno | 再生中のシーケンサー。トラック3を選択、SRCページ
+1,1,9,6 | L | 選択中のトラック
+12,1,5,6 | L | 再生中のパターン
+0,10,128,5 | L | トラック1と2：細い列。/ブロックはトリグ、点は空のステップ
+0,15,128,8 | L | 背の高い列：選択中のトラック
+1,40,14,6 | L | ノブページ
+37,1,12,6 | R | 16ステップ単位のページ /トラックのページ数
+52,1,13,6 | R | テンポ
+67,1,17,6 | R | PLAYまたはLIVE
+32,10,8,28 | R | 再生中のステップ
+104,40,24,6 | R | LEN：トラックのステップ数
+0,49,128,15 | B | 6つのノブ((A))～((F))：上に名前、下に値
+]]
+<h3>選択中のトラックの8つのノブページ</h3>
+<figure class="draw">{{DIAGRAM seq_map}}</figure>
+<p>SRCのMACHで<b>マシン</b>を選びます：SMPL（サンプル）、SUB（下降するサイン波）、FM、NOIS（ノイズ）、PLUK（弦）、MIDI（音なし）。((LEVEL))は常に選択中のトラックの音量。長さは1〜64ステップ（PTNのLEN）。シーケンスは自動保存されます。表示中はスカイの音は止まり、入力A〜Dはドライで出力へ。</p>
+<div class="cards">
+<div class="card"><div class="ct">ステップ（GRID）</div>
+<div class="cr"><span>トリガーキーを押す</span><span>ステップをセット、または消去</span></div>
+<div class="cr"><span>トリガーキーを押したまま</span><span>ノブがステップ専用に</span></div>
+<div class="cr"><span>押したまま + [YES]</span><span>ステップを逆再生</span></div>
+<div class="cr"><span>押したまま + [LEFT] [RIGHT]</span><span>前後にずらす</span></div>
+<div class="cr"><span>[YES]を押したまま</span><span>FILL</span></div>
+</div>
+<div class="card"><div class="ct">パラメーターロック</div>
+<div class="cr"><span>押したまま + [SRC] [AMP] [FX1] [MIDI]</span><span>``LOCK``：そのページのノブがステップ用に</span></div>
+<div class="cr"><span>ノブを回す</span><span>ステップ専用の値（下線）。最大3つ</span></div>
+<div class="cr"><span>押したまま + [NO]</span><span>``LOCKS CLEARED``</span></div>
+</div>
+<div class="card"><div class="ct">ライブ演奏</div>
+<div class="cr"><span>[REC]</span><span>LIVEへ、またGRIDへ</span></div>
+<div class="cr"><span>[TRIG 1]～[TRIG 8]</span><span>パッド。再生中は記録</span></div>
+<div class="cr"><span>[TRIG 9]～[TRIG 16]</span><span>トラック1〜8をミュート</span></div>
+<div class="cr"><span>再生中にノブ</span><span>通過中のステップにロック</span></div>
+</div>
+<div class="card"><div class="ct">ミュート、ソロ、ミキサー</div>
+<div class="cr"><span>[FUNC] + [T1]～[T8]</span><span>ミュート／解除</span></div>
+<div class="cr"><span>[CUE] + [T1]～[T8]</span><span>ソロ、またはソロを解除</span></div>
+<div class="cr"><span>[BANK]</span><span>ミキサー：1〜8ミュート、9〜16ソロ</span></div>
+<div class="cr"><span>[SCENE A] + [FUNC] + トリガーキー</span><span>ミュートシーンに保存</span></div>
+<div class="cr"><span>[SCENE A] + トリガーキー</span><span>ミュートシーンを呼ぶ</span></div>
+<div class="cr"><span>[FUNC] + [BANK]</span><span>1パターン分を6.1にリサンプル</span></div>
+</div>
+<div class="card"><div class="ct">パターンとチェーン</div>
+<div class="cr"><span>[PTN] + [TRIG 1]～[TRIG 4]</span><span>パターンA〜D（再生中は終わりで切替）</span></div>
+<div class="cr"><span>[PTN] + 複数のトリガーキー</span><span>チェーン（最大8）。1つ選ぶと終了</span></div>
+</div>
+<div class="card"><div class="ct">コピー、ペースト、消去</div>
+<div class="cr"><span>[FUNC] + [REC]</span><span>トラックをコピー</span></div>
+<div class="cr"><span>[PTN] + [FUNC] + [REC]</span><span>パターン全体をコピー</span></div>
+<div class="cr"><span>[FUNC] + [STOP]</span><span>ペースト</span></div>
+<div class="cr"><span>[FUNC] + [PLAY]</span><span>トラックを消去（取り消し不可）</span></div>
+</div>
+<div class="card"><div class="ct">テンポとスウィング</div>
+<div class="cr"><span>[TEMPO]をタップ</span><span>2〜4回。60〜187 BPM、両フェイス共通</span></div>
+<div class="cr"><span>[TEMPO] + ((LEVEL))</span><span>1 BPMずつ</span></div>
+<div class="cr"><span>[PAGE]、((D)) TMPO</span><span>同じテンポ</span></div>
+<div class="cr"><span>[PAGE]、((C)) SWNG</span><span>スウィング（50%でイーブン）</span></div>
+</div>
+<div class="card"><div class="ct">ディレイをセンドに</div>
+<div class="cr"><span>[FX1]、((C)) DLY</span><span>フリーズディレイへの送り</span></div>
+<div class="cr"><span>[MIX]、((F)) WET</span><span>ディレイの音量。Bでフリーズ</span></div>
+</div>
+</div>
+{{man:seq,seqsteps,seqpages,seqsong}}
+
+<h2 id="qusb">USB：コンピューターへの録音とカード</h2>
+<p>USB端子をコンピューターにつなぐと、<b>AERIA</b>という1つのデバイスになります（ドライバー不要）。音は<b>本体からコンピューターへ</b>44.1 kHz、24ビット、2つのフォーマットのどちらかで送られます。選ぶのはコンピューターです。</p>
+<figure class="draw">{{DIAGRAM usb_formats}}</figure>
+<div class="two">
+<div>
+<h3>6チャンネル</h3>
+<p>自動で選ばれるフォーマット。1〜4が入力A〜D、5と6がメイン出力（Main Outと同じ）。ドライの演奏と結果を同時に録音できます。</p>
+<h3>18チャンネル：ステム</h3>
+<p>1と2がメイン出力、3〜18がトラックごとの8つのステレオステム。ジャムを後でミックスできます。</p>
+<ul>
+<li>エフェクトのないトラックのステムはモノです。</li>
+<li>ディレイのエコーはメインのみ。ミュート中のトラックは無音。</li>
+</ul>
+</div>
+<div>
+<h3>Macで18チャンネルを選ぶ</h3>
+<ol class="steps">
+<li><b>Audio MIDI設定</b>（ユーティリティ）を開きます。</li>
+<li>左のリストで<b>AERIA</b>をクリックします。</li>
+<li>入力の<b>フォーマット</b>で<b>18 ch</b>を選びます。</li>
+<li>録音ソフトでAERIAを入力に選び、9つのステレオトラックを作ります。</li>
+</ol>
+<ul>
+<li>戻すには6 chを選びます。</li>
+<li>スカイでは、ステムは無音です。</li>
+<li>ストリーミング中は画面の描画が遅くなります（音は変わりません）。</li>
+</ul>
+</div>
+</div>
+<h3>USB DISK MODE：カードにファイルを入れる</h3>
+<div class="two w64">
+<div>
+<ol class="steps">
+<li>スカイで[FX2]（SYSTEM）、[TRIG 1]。カードがドライブとして現れます。</li>
+<li>WAVファイルをコピーします。</li>
+<li><b>コンピューターでドライブを取り出してから</b>[NO]。その間は[NO]だけが働きます。</li>
+</ol>
+</div>
+<div>
+[[S usb_disk | USB DISK MODE]]
+</div>
+</div>
+{{man:usb,stems,card}}
+
+<h2 id="qmidi">5ピン端子でのMIDI</h2>
+<table class="tight">
+<tr><th>端子</th><th>スカイでは</th><th>シーケンサーでは</th></tr>
+<tr><td class="n"><b>MIDI Out</b></td><td>MIDIモジュール（GUMBALLS、PITCH、MARBLES、PONG）のノート</td><td>トラックのノート、コード、プログラムチェンジ。SYNCがSEND：クロック、スタート、ストップ。PCCH設定時：パターンのプログラムチェンジ</td></tr>
+<tr><td class="n"><b>MIDI In</b></td><td>クアッドパンナーのCC。MARBLESのクロックとスタート</td><td>SYNCがRECV：クロック、スタート、コンティニュー、ストップ。PCCH設定時：プログラムチェンジでパターン選択</td></tr>
+<tr><td class="n"><b>MIDI Thru</b></td><td colspan="2">MIDI Inの入力をそのまま通す（ハードウェア）</td></tr>
+</table>
+<div class="two">
+<div>
+<h3>トラックからノートを送る</h3>
+<ol class="steps">
+<li>トラックを選び、[MIDI]を押します。</li>
+<li>((A)) MCHを楽器のチャンネルに。</li>
+<li>((B)) NOTE、((C)) CHRD（コード）、((D)) GATE（長さ）、((E)) PROG（プログラム）。</li>
+<li>ステップをセットすると、ステップのベロシティでノートが出ます。</li>
+</ol>
+<p>ステップを押さえて[MIDI]、NOTEかCHRDを回すとロックになり、メロディーを作れます。MIDI専用のトラックはSRCのMACHをMIDIに。</p>
+[[S seq_midi | トラックのMIDIページ]]
+</div>
+<div>
+<h3>同期とパターン切り替え</h3>
+<p>[MIDI]をもう一度押すとセカンドセット。シーケンサー全体の設定です。</p>
+<table class="tight">
+<tr><th>SYNC、ノブ((A))</th><th>動作</th></tr>
+<tr><td class="k">OFF</td><td>送信せず、受信も無視</td></tr>
+<tr><td class="k">SEND</td><td>クロックを常に送信。[PLAY]でスタート、[STOP]でストップ</td></tr>
+<tr><td class="k">RECV</td><td>届いたクロックとトランスポートに従う。テンポの前に3点</td></tr>
+</table>
+<table class="tight">
+<tr><th>PCCH、ノブ((B))</th><th>動作</th></tr>
+<tr><td class="k">OFF</td><td>パターンのプログラムチェンジなし</td></tr>
+<tr><td class="k">1〜16</td><td>プログラム1〜4＝パターンA〜D。送信も受信も</td></tr>
+</table>
+[[S seq_midi_sync | SYNCとPCCH：MIDIページのセカンドセット]]
+</div>
+</div>
+<p><b>キーボードで演奏。</b>チャンネル1〜8のノートがトラック1〜8を鳴らします（ノート60が元のピッチ）。LIVE録音で記録できます。NIN（((C))）でオフ。</p>
+{{man:midi,pmidi,sync,midimod,midiimp}}
+
+<h2 id="qproj">プロジェクトと保存</h2>
+<div class="two">
+<div>
+<p><b>続けるだけなら保存は不要です。</b>状態は自動で保存され、電源を入れ直しても元どおりです。</p>
+<p><b>プロジェクト</b>は曲を後で呼び出すためのもので、最大12文字の名前で16個。両フェイス（チェーンとノブ、天気、シーン、マスター、サンプルの場所、4パターン）を保持します。サンプルは<b>場所</b>だけなので、カードに同じファイルが必要です。</p>
+<ol class="steps">
+<li>どちらのフェイスからでも[PROJ]を押します。</li>
+<li>トリガーキーで16個のうち1つを選びます。</li>
+<li><b>保存：</b>[FUNC] + [YES]。トリガーキーで名前を入力（1キー2文字、14数字、15スペース、16消去）し、[YES]。``SAVED``。</li>
+<li><b>読み込み：</b>[YES]。``LOADED``と名前。</li>
+<li>[NO]か[PROJ]でページを閉じます。</li>
+</ol>
+</div>
+<div>
+[[S project_name | 名前の入力：文字の段がトリガーキー1〜8と9〜16です]]
+</div>
+</div>
+{{man:projects,kept}}
+
+<h2 id="qsavers" class="run">スクリーンセーバーとゲーム</h2>
+<p>しばらく操作がないとスクリーンセーバーが現れます。{{SAVER_COUNT}}種類で、<b>ゲームが4つ</b>（PADDLE、BRICKS、ROCKS、BLOCKS）、残りは眺めるもの。音は続きます。</p>
+[[G4]]
+ss_paddle | PADDLE
+ss_bricks | BRICKS
+ss_rocks | ROCKS
+ss_blocks | BLOCKS
+[[/G]]
+<p><b>設定</b>はスカイのSYSTEM（[FX2]）：((E)) SAVERでOFF、名前、RANDOM。((F)) WAITで開始までの時間（1〜60分）。[YES]ですぐ開始。<b>ゲーム</b>は[LEFT] [RIGHT] [UP] [DOWN]、[YES]、((A))、((LEVEL))で操作し、3秒放すと自動プレイ。[NO]かほかの操作で終了。</p>
+{{man:savers,system}}
+
+<h2 id="qkeys">キーの組み合わせ</h2>
+<div class="cards sheet">
+<div class="card"><div class="ct">両方のフェイス</div>
+<div class="cr"><span>[FUNC] + [MIDI]</span><span>スカイ⇔シーケンサー</span></div>
+<div class="cr"><span>[PROJ]</span><span>トリガーキーで選択、[YES]読込、[FUNC] + [YES]保存</span></div>
+<div class="cr"><span>[MIX]</span><span>MASTER：トリガーでディレイタイム、[NO]タップ</span></div>
+<div class="cr"><span>フェーダーをBへ</span><span>ディレイをフリーズ</span></div>
+<div class="cr"><span>[NO]</span><span>セーバー終了</span></div>
+<div class="cr"><span>[FUNC]＋電源</span><span>スタートアップメニュー。TRIG 2禁止</span></div>
+</div>
+<div class="card"><div class="ct">スカイ：ページ</div>
+<div class="cr"><span>[SRC] / [AMP] / [LFO]</span><span>CHAIN / SKY / SOURCE</span></div>
+<div class="cr"><span>[FX1] / [FX2]</span><span>MIX（再度：GAIN）/ SYSTEM</span></div>
+<div class="cr"><span>[PART] / [AED] / [ARR]</span><span>BALLOON / LOOP / STARS</span></div>
+<div class="cr"><span>[MIDI]</span><span>MIDIモジュール。再度：次へ</span></div>
+<div class="cr"><span>[CUE]</span><span>OUT：ルーティング</span></div>
+<div class="cr"><span>[REC]</span><span>グレインクラウド</span></div>
+<div class="cr"><span>[FUNC] / [PAGE]</span><span>セカンドセット / ラッチ</span></div>
+</div>
+<div class="card"><div class="ct">スカイ：チェーン</div>
+<div class="cr"><span>[T1]～[T7]</span><span>スロット選択</span></div>
+<div class="cr"><span>[FUNC] + [T1]～[T7]</span><span>バイパス／復帰</span></div>
+<div class="cr"><span>CHAINで[BANK]</span><span>シェルフ</span></div>
+<div class="cr"><span>((A))～((F))押し込み</span><span>天気に返す</span></div>
+<div class="cr"><span>[T1] + [T2] / [T3] + [T4]</span><span>A B / C D：ステレオ／モノ</span></div>
+</div>
+<div class="card"><div class="ct">スカイ：天気</div>
+<div class="cr"><span>[TRIG 1]</span><span>CLEAR：全オフ</span></div>
+<div class="cr"><span>[TRIG 2]～[TRIG 7]</span><span>CLOUDY RAIN STORM SNOW HEAT FOG</span></div>
+<div class="cr"><span>[TRIG 8]、((LEVEL))押し込み</span><span>AUTO天気</span></div>
+<div class="cr"><span>[TRIG 16]</span><span>稲妻</span></div>
+<div class="cr"><span>[TRIG 9] [TRIG 10] [TRIG 11]</span><span>WIND、HAIL、AURORA</span></div>
+<div class="cr"><span>[TRIG 12]</span><span>TWISTER</span></div>
+<div class="cr"><span>((LEVEL))、[UP] [DOWN]</span><span>次／前の天気</span></div>
+<div class="cr"><span>[YES] / [NO]</span><span>昼と夜 / 新しいスカイ</span></div>
+<div class="cr"><span>MIX：((F)) WSND</span><span>天気の音オン／オフ</span></div>
+</div>
+<div class="card"><div class="ct">スカイ：ソース、バルーン</div>
+<div class="cr"><span>SOURCE：[TRIG 1]～[TRIG 3]</span><span>LOOP、STARS、BALLOONS</span></div>
+<div class="cr"><span>SOURCE：[FUNC] + [TRIG 1] / [TRIG 2]</span><span>ループ / スターを選ぶ</span></div>
+<div class="cr"><span>[REC1] / [REC2] / [REC3]</span><span>捕まえる。再度：浮かぶ</span></div>
+<div class="cr"><span>[FUNC] + [REC1] / [REC2] / [REC3]</span><span>割る</span></div>
+<div class="cr"><span>[PTN] / [BANK]</span><span>RING／BIRDS / 次のバンク</span></div>
+</div>
+<div class="card"><div class="ct">スカイ：シーン、システム</div>
+<div class="cr"><span>[SCENE A]/[SCENE B] + ノブ</span><span>値をシーンへ</span></div>
+<div class="cr"><span>[SCENE A]/[SCENE B] + トリガー</span><span>シーン1〜16</span></div>
+<div class="cr"><span>[SCENE A]/[SCENE B] + [NO]</span><span>シーンを消去</span></div>
+<div class="cr"><span>SYSTEM：[TRIG 1] / [YES]</span><span>USB DISK MODE / セーバー</span></div>
+</div>
+<div class="card"><div class="ct">シーケンサー：トラック、再生</div>
+<div class="cr"><span>[T1]～[T8]</span><span>トラックを選択</span></div>
+<div class="cr"><span>[UP] [DOWN]</span><span>上／下のトラック</span></div>
+<div class="cr"><span>[FUNC] + [T1]～[T8]</span><span>ミュート／解除</span></div>
+<div class="cr"><span>[CUE] + [T1]～[T8]</span><span>ソロ／解除</span></div>
+<div class="cr"><span>[PLAY]</span><span>ステップ1から再生</span></div>
+<div class="cr"><span>[STOP]。再度</span><span>停止。無音</span></div>
+<div class="cr"><span>[TEMPO]</span><span>タップ。+ ((LEVEL))：1 BPMずつ</span></div>
+<div class="cr"><span>((LEVEL))</span><span>トラックの音量</span></div>
+<div class="cr"><span>[BANK]</span><span>ミキサー</span></div>
+</div>
+<div class="card"><div class="ct">シーケンサー：ステップ</div>
+<div class="cr"><span>[REC]</span><span>GRIDかLIVE</span></div>
+<div class="cr"><span>トリガーを押す</span><span>セット／消去</span></div>
+<div class="cr"><span>トリガーを押したまま</span><span>ステップのノブ</span></div>
+<div class="cr"><span>+ [SRC] [AMP] [FX1] [MIDI]</span><span>ロック</span></div>
+<div class="cr"><span>+ [YES] / [NO]</span><span>逆再生 / ロック消去</span></div>
+<div class="cr"><span>+ [LEFT] [RIGHT]</span><span>前後にずらす</span></div>
+<div class="cr"><span>[LEFT] [RIGHT]</span><span>ページ</span></div>
+<div class="cr"><span>LIVE：トリガー1〜8 / 9〜16</span><span>パッド / ミュート</span></div>
+<div class="cr"><span>[YES]を押したまま</span><span>FILL</span></div>
+</div>
+<div class="card"><div class="ct">シーケンサー：ページ、コピー</div>
+<div class="cr"><span>[SRC] [AMP] [LFO] [FX1] [FX2]</span><span>SRC AMP MOD FLT FX</span></div>
+<div class="cr"><span>[ARR] / [MIDI] / [PAGE]</span><span>GEN / MIDI / PTN</span></div>
+<div class="cr"><span>ページキー再度、[FUNC]</span><span>セカンドセット</span></div>
+<div class="cr"><span>FXで[YES]</span><span>エフェクトのリスト</span></div>
+<div class="cr"><span>SRCで[FUNC] + [YES]</span><span>キットを読込</span></div>
+<div class="cr"><span>[PTN] + [TRIG 1]～[TRIG 4]</span><span>パターンA〜D、チェーン</span></div>
+<div class="cr"><span>[FUNC] + [REC]</span><span>コピー（+[PTN]：パターン）</span></div>
+<div class="cr"><span>[FUNC] + [STOP] / [PLAY]</span><span>ペースト / 消去</span></div>
+</div>
+</div>
+<p class="more"><b>さらに詳しく。</b>このガイドと同じフォルダーの<b>AERIA OSユーザーマニュアル</b>（PDF、ダーク版とライト版）に、各ページのノブ、16種類のエフェクト、クアッドパンナー、MIDIモジュール、測定された限界、トラブルシューティング、アップデートまで載っています。全キーの一覧は付録「{{title:keys}}」。+は1つ目を押したまま2つ目を押す、の意味です。</p>

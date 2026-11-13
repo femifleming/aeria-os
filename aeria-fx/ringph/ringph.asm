@@ -1,0 +1,706 @@
+; CYCLES_FORWARD_BRANCHES
+; AERIA RING -- StoreFX ring modulator (carrier follows the input level)
+; and StoreFX phaser (six first-order allpasses swept by a sine, fed back
+; through a soft clip, added to the dry) as one effect, MODE page-2 slot 6.
+;
+;  RING  carrier sin(pi p), p a wrapping 24-bit phase; frequency 20 Hz ..
+;        5 kHz (FREQ, log); FOLW: the step is multiplied by
+;        1 + 6 FOLW min(1, 3 env) (env: |mono in|, 3 ms attack, 120 ms
+;        release); BIAS mixes the carrier toward 1 (0 = ring, 127 = nearly
+;        dry AM); SPRD offsets the right carrier 0..90 degrees: at 127 the
+;        two carriers are in quadrature (sin / cos), so the sidebands sit
+;        +-90 degrees apart between the sides -- wide, and the mono sum is
+;        the same ring 3 dB up, never a cancellation (it was 0..180: at the
+;        top right = -left, a mono sum of nothing).
+;  PHSR  LFO 0.05 .. 10 Hz (RATE, log); notch sweep log 200 Hz .. 5 kHz:
+;        u = CNTR + DPTH lfo / 2 clamped to [0,1], f = 200 * 25^u; stage
+;        coefficient a = -exp(-2 pi f / fs) (tan-free first-order allpass
+;        approximation, exact to second order), computed per block for the
+;        block's end and glided per sample (2^-3); FDBK 0 .. 0.85 through
+;        x - x^3/3; out = 0.7 (x + v). SPRD offsets the right LFO 0..180
+;        degrees (127: the two sides sweep opposite ways).
+;  Sine: s = 4p(1-|p|), y = 0.775 s + 0.225 s|s| (|err| < 0.1 %).
+;
+; r7: 03 mode+1  04/05 inc t/s (RING carrier, PHSR LFO)  06/07 follow|fb
+;     08/09 bias|depth  0a/0b spread  0c/0d mix  0e env  0f phase
+;     10/11 aL t/s  12/13 aR t/s  14..19 L stage states  1a..1f R states
+;     20 fbL  21 fbR  22 temp  23 cntr  24 snap flag  25/26 fb DC mean L/R  27/28 their low words
+;     29 silent-block count (PHSR)  2a CNTR target (23 = CNTR glided per block)
+; Quality pass (12 Nov 2026): allpass stages round (macr), the feedback DC mean is 48-bit, PHSR clears
+; its states after 0.74 s of digital silence in (tails end in exact 0); FREQ/RATE/CNTR reach the top
+; of their ranges at 127 (v/127, the display law; they were v/128).
+
+init:
+        move    #>$ffffff,m4
+        move    r7,r4
+        clr     a
+        do      #48,>rpizero
+        move    a,x:(r4)+
+rpizero:
+        nop     
+        rts     
+proc:
+        move    #>$ffffff,m4
+        move    #>$1,n0
+        move    x:(r6+$c),a
+        asr     #$10,a,a
+        move    #>$1,x0
+        cmp     x0,a
+        tgt     x0,a
+        add     #>$1,a
+        move    x:(r7+$03),x0
+        cmp     x0,a
+        beq     rpsame
+        move    a,x:(r7+$03)
+        lua     (r7+$e),r4
+        clr     a
+        do      #27,>rpmzero
+        move    a,x:(r4)+
+rpmzero:
+        nop     
+        move    #>$1,a
+        move    a,x:(r7+$24)
+rpsame:
+        move    x:(r6+$1),a
+        move    a,x:(r7+$06)
+        move    x:(r6+$3),a
+        move    a,x:(r7+$08)
+        move    x:(r6+$2),a
+        move    a,x:(r7+$0a)
+        move    x:(r6+$5),a
+        move    #>$7f0000,x0
+        cmp     x0,a
+        bne     rpmset
+        move    #>$7fffff,a
+rpmset:
+        move    a,x:(r7+$0c)
+        move    x:(r7+$0c),a
+        move    x:(r7+$0d),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     rpmsnap
+        move    x:(r7+$0c),a
+        move    a,x:(r7+$0d)
+rpmsnap:
+        move    x:(r7+$03),a
+        move    #>$1,x0
+        cmp     x0,a
+        beq     rpbring
+        bra     rpbphsr
+rpbring:
+        move    x:(r6+$0),a
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,x0
+        move    #>$201d31,y0
+        mpy     y0,x0,a
+        sub     #>$00403a,a
+        move    #>$0,x0
+        tst     a
+        tlt     x0,a
+        bsr     rpexp
+        move    b,x0
+        move    #>$1d0663,y0
+        mpy     y0,x0,a
+        move    a,x:(r7+$04)
+        move    x:(r7+$0a),a
+        asr     a
+        move    a,x:(r7+$0a)  ; RING: SPRD 0..90 degrees
+        move    x:(r7+$24),a
+        tst     a
+        beq     rprrun
+        move    x:(r7+$04),b
+        move    b,x:(r7+$05)
+        move    x:(r7+$06),b
+        move    b,x:(r7+$07)
+        move    x:(r7+$08),b
+        move    b,x:(r7+$09)
+        move    x:(r7+$0a),b
+        move    b,x:(r7+$0b)
+        clr     a
+        move    a,x:(r7+$24)
+rprrun:
+        do      n7,>rprend
+        move    x:(r7+$04),a
+        move    x:(r7+$05),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$05)
+        move    x:(r7+$06),a
+        move    x:(r7+$07),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$07)
+        move    x:(r7+$08),a
+        move    x:(r7+$09),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$09)
+        move    x:(r7+$0a),a
+        move    x:(r7+$0b),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$0b)
+        move    x:(r7+$0c),a
+        move    x:(r7+$0d),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$0d)
+; envelope of |mono|: attack 3 ms, release 120 ms
+        move    x:(r0),a
+        move    x:(r0+n0),x0
+        add     x0,a
+        asr     a
+        abs     a
+        move    x:(r7+$0e),x0
+        sub     x0,a
+        move    a,x1
+        move    #>$000631,y1
+        move    #>$00f6bf,y0
+        move    y1,b
+        tst     a
+        tgt     y0,b
+        move    b,y1
+        mpy     y1,x1,a
+        add     x0,a
+        move    a,x:(r7+$0e)
+; step = inc (1 + 6 FOLW min(1, 3 env)), formed /8 then x8 in 56 bits
+        move    a,x0
+        move    #>$300000,y0
+        mpy     y0,x0,a
+        move    #>$100000,x0
+        cmp     x0,a
+        tgt     x0,a
+        move    a,x0  ; min(1, 3 env) / 8
+        move    x:(r7+$07),y0
+        mpy     y0,x0,a
+        move    a,x0
+        move    #>$600000,y0
+        mpy     y0,x0,a
+        asl     #$3,a,a  ; 6 FOLW e / 8
+        add     #>$100000,a
+        move    a,x0
+        move    x:(r7+$05),y0
+        mpy     y0,x0,a
+        asl     #$3,a,a
+        move    x:(r7+$0f),x0
+        add     x0,a
+        move    a1,x:(r7+$0f)  ; phase wraps mod 2 in a1
+; ---- RING L ----
+        move    x:(r7+$0f),a
+        move    a,x0
+        abs     a
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,y0  ; 1 - |p|
+        mpy     y0,x0,a
+        asl     #$2,a,a
+        move    a,x0  ; s = 4 p (1 - |p|)
+        abs     a
+        move    a,y0
+        mpy     y0,x0,a  ; s |s|
+        move    a,x1
+        move    #>$1ccccd,y0
+        mpy     x1,y0,a
+        move    #>$633333,y0
+        mac     y0,x0,a
+; carrier toward 1 by BIAS: c = s + b (1 - s)
+        move    a,x0
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,x1
+        move    x:(r7+$09),y0
+        mac     x1,y0,a
+        move    a,x0
+        move    x:(r0),y1
+        mpy     x0,y1,a
+        move    x:(r7+$0d),y1
+        move    x:(r0),b
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     a
+        add     b,a
+        move    a,x:(r0)+
+; ---- RING R ----
+        move    x:(r7+$0f),a
+        move    x:(r7+$0b),x0
+        add     x0,a
+        move    a1,a  ; wrap
+        move    a,x0
+        abs     a
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,y0  ; 1 - |p|
+        mpy     y0,x0,a
+        asl     #$2,a,a
+        move    a,x0  ; s = 4 p (1 - |p|)
+        abs     a
+        move    a,y0
+        mpy     y0,x0,a  ; s |s|
+        move    a,x1
+        move    #>$1ccccd,y0
+        mpy     x1,y0,a
+        move    #>$633333,y0
+        mac     y0,x0,a
+; carrier toward 1 by BIAS: c = s + b (1 - s)
+        move    a,x0
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,x1
+        move    x:(r7+$09),y0
+        mac     x1,y0,a
+        move    a,x0
+        move    x:(r0),y1
+        mpy     x0,y1,a
+        move    x:(r7+$0d),y1
+        move    x:(r0),b
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     a
+        add     b,a
+        move    a,x:(r0)+
+rprend:
+        nop     
+        rts     
+rpbphsr:
+        move    x:(r6+$0),a
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,x0
+        move    #>$1ed0f1,y0
+        mpy     y0,x0,a
+        sub     #>$003da2,a
+        move    #>$0,x0
+        tst     a
+        tlt     x0,a
+        bsr     rpexp
+        move    b,x0
+        move    #>$000edc,y0
+        mpy     y0,x0,a
+        move    a,x:(r7+$04)
+        move    x:(r6+$4),a
+        move    a,x0
+        move    #>$010204,y0
+        mac     y0,x0,a
+        move    a,x:(r7+$2a)  ; CNTR v/127 (127 = 5 kHz, the display law; limited to $7fffff)
+        move    x:(r6+$1),x0
+        move    #>$6ccccd,y0
+        mpy     y0,x0,a
+        move    a,x:(r7+$06)  ; fb 0..0.85
+        move    x:(r7+$24),a
+        tst     a
+        beq     rpprun
+        move    x:(r7+$04),b
+        move    b,x:(r7+$05)
+        move    x:(r7+$06),b
+        move    b,x:(r7+$07)
+        move    x:(r7+$08),b
+        move    b,x:(r7+$09)
+        move    x:(r7+$0a),b
+        move    b,x:(r7+$0b)
+        move    x:(r7+$2a),b
+        move    b,x:(r7+$2b)
+        clr     a
+        move    a,x:(r7+$24)
+rpprun:
+; CNTR glides per block (2^-3: ~3 ms), so a jump sweeps the notches instead of ringing them
+        move    x:(r7+$2a),a
+        move    x:(r7+$23),b
+        sub     b,a
+        asr     #$3,a,a
+        add     a,b
+        move    b,x:(r7+$23)
+        move    x:(r7+$05),x0
+        move    #>$100000,y0
+        mpy     y0,x0,a
+        asl     #$7,a,a
+        move    x:(r7+$0f),x0
+        add     x0,a
+        move    a1,x:(r7+$22)  ; phase at block end
+        move    x:(r7+$22),a
+        move    a,x0
+        abs     a
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,y0  ; 1 - |p|
+        mpy     y0,x0,a
+        asl     #$2,a,a
+        move    a,x0  ; s = 4 p (1 - |p|)
+        abs     a
+        move    a,y0
+        mpy     y0,x0,a  ; s |s|
+        move    a,x1
+        move    #>$1ccccd,y0
+        mpy     x1,y0,a
+        move    #>$633333,y0
+        mac     y0,x0,a
+; u = CNTR + DPTH lfo / 2 in [0, 1)
+        move    a,x0
+        move    x:(r7+$09),y0
+        mpy     y0,x0,a
+        asr     a
+        move    x:(r7+$23),x0
+        add     x0,a
+        move    #>$0,x0
+        tst     a
+        tlt     x0,a
+        move    #>$7fffff,x0
+        cmp     x0,a
+        tgt     x0,a
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,x0
+        move    #>$12934f,y0
+        mpy     y0,x0,a
+        bsr     rpexp
+        move    b,x0
+        move    #>$041c69,y0
+        mpy     y0,x0,a  ; E/32, E = 2 pi f / (fs ln 2)
+        bsr     rpexp
+        neg     b
+        move    b,x:(r7+$10)
+        move    x:(r7+$22),a
+        move    x:(r7+$0b),x0
+        add     x0,a
+        move    a1,a
+        move    a,x0
+        abs     a
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,y0  ; 1 - |p|
+        mpy     y0,x0,a
+        asl     #$2,a,a
+        move    a,x0  ; s = 4 p (1 - |p|)
+        abs     a
+        move    a,y0
+        mpy     y0,x0,a  ; s |s|
+        move    a,x1
+        move    #>$1ccccd,y0
+        mpy     x1,y0,a
+        move    #>$633333,y0
+        mac     y0,x0,a
+; u = CNTR + DPTH lfo / 2 in [0, 1)
+        move    a,x0
+        move    x:(r7+$09),y0
+        mpy     y0,x0,a
+        asr     a
+        move    x:(r7+$23),x0
+        add     x0,a
+        move    #>$0,x0
+        tst     a
+        tlt     x0,a
+        move    #>$7fffff,x0
+        cmp     x0,a
+        tgt     x0,a
+        move    #>$7fffff,b
+        sub     a,b
+        move    b,x0
+        move    #>$12934f,y0
+        mpy     y0,x0,a
+        bsr     rpexp
+        move    b,x0
+        move    #>$041c69,y0
+        mpy     y0,x0,a  ; E/32, E = 2 pi f / (fs ln 2)
+        bsr     rpexp
+        neg     b
+        move    b,x:(r7+$12)
+; silence flush (quality pass): after 2048 blocks (0.74 s) of digital silence in, the stage and feedback
+; states are cleared. Rounding leaves first-order allpasses near -1 a dead band of up to ~18 LSB, so
+; without this a few LSB of DC could sit in the output for ever.
+        move    r0,r4
+        clr     a
+        do      n7,>rpqscan
+        move    x:(r4)+,x0
+        or      x0,a
+        move    x:(r4)+,x0
+        or      x0,a
+rpqscan:
+        move    x:(r7+$29),b
+        add     #>$1,b
+        tst     a
+        beq     rpqquiet
+        clr     b
+rpqquiet:
+        move    #>$000800,x0
+        cmp     x0,b
+        tgt     x0,b
+        move    b,x:(r7+$29)
+        blt     rpqkeep
+        clr     a
+        lua     (r7+$14),r4
+        do      #14,>rpqz1
+        move    a,x:(r4)+
+rpqz1:
+        lua     (r7+$25),r4
+        do      #4,>rpqz2
+        move    a,x:(r4)+
+rpqz2:
+rpqkeep:
+        move    x:(r7+$24),a
+        tst     a
+        beq     rpploop
+        move    x:(r7+$10),a
+        move    a,x:(r7+$11)
+        move    x:(r7+$12),a
+        move    a,x:(r7+$13)
+        clr     a
+        move    a,x:(r7+$24)
+rpploop:
+        do      n7,>rppend
+        move    x:(r7+$04),a
+        move    x:(r7+$05),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$05)
+        move    x:(r7+$06),a
+        move    x:(r7+$07),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$07)
+        move    x:(r7+$08),a
+        move    x:(r7+$09),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$09)
+        move    x:(r7+$0a),a
+        move    x:(r7+$0b),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$0b)
+        move    x:(r7+$0c),a
+        move    x:(r7+$0d),b
+        sub     b,a
+        asr     #$7,a,a
+        add     a,b
+        move    b,x:(r7+$0d)
+        move    x:(r7+$10),a
+        move    x:(r7+$11),b
+        sub     b,a
+        asr     #$3,a,a
+        add     a,b
+        move    b,x:(r7+$11)
+        move    x:(r7+$12),a
+        move    x:(r7+$13),b
+        sub     b,a
+        asr     #$3,a,a
+        add     a,b
+        move    b,x:(r7+$13)
+        move    x:(r7+$0f),a
+        move    x:(r7+$05),x0
+        add     x0,a
+        move    a1,x:(r7+$0f)
+; ---- PHSR L ----
+        move    x:(r0),a
+        move    x:(r7+$20),x0
+        move    x:(r7+$07),y0
+        mac     y0,x0,a
+        move    a,x0  ; v
+        move    x:(r7+$11),y0
+        move    x:(r7+$14),b
+        macr    y0,x0,b  ; stage 1: y = a v + z
+        move    b,x1
+        move    x0,a
+        macr    -x1,y0,a
+        move    a,x:(r7+$14)  ; z = v - a y
+        move    x1,x0
+        move    x:(r7+$15),b
+        macr    y0,x0,b  ; stage 2: y = a v + z
+        move    b,x1
+        move    x0,a
+        macr    -x1,y0,a
+        move    a,x:(r7+$15)  ; z = v - a y
+        move    x1,x0
+        move    x:(r7+$16),b
+        macr    y0,x0,b  ; stage 3: y = a v + z
+        move    b,x1
+        move    x0,a
+        macr    -x1,y0,a
+        move    a,x:(r7+$16)  ; z = v - a y
+        move    x1,x0
+        move    x:(r7+$17),b
+        macr    y0,x0,b  ; stage 4: y = a v + z
+        move    b,x1
+        move    x0,a
+        macr    -x1,y0,a
+        move    a,x:(r7+$17)  ; z = v - a y
+        move    x1,x0
+        move    x:(r7+$18),b
+        macr    y0,x0,b  ; stage 5: y = a v + z
+        move    b,x1
+        move    x0,a
+        macr    -x1,y0,a
+        move    a,x:(r7+$18)  ; z = v - a y
+        move    x1,x0
+        move    x:(r7+$19),b
+        macr    y0,x0,b  ; stage 6: y = a v + z
+        move    b,x1
+        move    x0,a
+        macr    -x1,y0,a
+        move    a,x:(r7+$19)  ; z = v - a y
+        move    x1,x0
+        move    x0,a
+        move    x0,x:(r7+$22)
+        move    a,x0
+        mpy     x0,x0,a
+        move    a,x1
+        mpy     x1,x0,a
+        move    a,y1
+        move    x0,a
+        move    #>$2aaaab,y0
+        mac     -y1,y0,a
+; DC-free feedback: subtract a leaky mean (2^-10, ~7 Hz)
+        move    x:(r7+$25),b
+        move    x:(r7+$27),b0
+        sub     b,a
+        move    a,x:(r7+$20)
+        asr     #$a,a,a
+        add     a,b
+        move    b1,x:(r7+$25)
+        move    b0,x:(r7+$27)
+        move    x:(r7+$22),a
+        move    x:(r0),x0
+        add     x0,a
+        move    a,x0
+        move    #>$59999a,y0
+        mpy     y0,x0,a
+        move    x:(r7+$0d),y1
+        move    x:(r0),b
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     a
+        add     b,a
+        move    a,x:(r0)+
+; ---- PHSR R ----
+        move    x:(r0),a
+        move    x:(r7+$21),x0
+        move    x:(r7+$07),y0
+        mac     y0,x0,a
+        move    a,x0  ; v
+        move    x:(r7+$13),y0
+        move    x:(r7+$1a),b
+        macr    y0,x0,b  ; stage 1: y = a v + z
+        move    b,x1
+        move    x0,a
+        macr    -x1,y0,a
+        move    a,x:(r7+$1a)  ; z = v - a y
+        move    x1,x0
+        move    x:(r7+$1b),b
+        macr    y0,x0,b  ; stage 2: y = a v + z
+        move    b,x1
+        move    x0,a
+        macr    -x1,y0,a
+        move    a,x:(r7+$1b)  ; z = v - a y
+        move    x1,x0
+        move    x:(r7+$1c),b
+        macr    y0,x0,b  ; stage 3: y = a v + z
+        move    b,x1
+        move    x0,a
+        macr    -x1,y0,a
+        move    a,x:(r7+$1c)  ; z = v - a y
+        move    x1,x0
+        move    x:(r7+$1d),b
+        macr    y0,x0,b  ; stage 4: y = a v + z
+        move    b,x1
+        move    x0,a
+        macr    -x1,y0,a
+        move    a,x:(r7+$1d)  ; z = v - a y
+        move    x1,x0
+        move    x:(r7+$1e),b
+        macr    y0,x0,b  ; stage 5: y = a v + z
+        move    b,x1
+        move    x0,a
+        macr    -x1,y0,a
+        move    a,x:(r7+$1e)  ; z = v - a y
+        move    x1,x0
+        move    x:(r7+$1f),b
+        macr    y0,x0,b  ; stage 6: y = a v + z
+        move    b,x1
+        move    x0,a
+        macr    -x1,y0,a
+        move    a,x:(r7+$1f)  ; z = v - a y
+        move    x1,x0
+        move    x0,a
+        move    x0,x:(r7+$22)
+        move    a,x0
+        mpy     x0,x0,a
+        move    a,x1
+        mpy     x1,x0,a
+        move    a,y1
+        move    x0,a
+        move    #>$2aaaab,y0
+        mac     -y1,y0,a
+; DC-free feedback: subtract a leaky mean (2^-10, ~7 Hz)
+        move    x:(r7+$26),b
+        move    x:(r7+$28),b0
+        sub     b,a
+        move    a,x:(r7+$21)
+        asr     #$a,a,a
+        add     a,b
+        move    b1,x:(r7+$26)
+        move    b0,x:(r7+$28)
+        move    x:(r7+$22),a
+        move    x:(r0),x0
+        add     x0,a
+        move    a,x0
+        move    #>$59999a,y0
+        mpy     y0,x0,a
+        move    x:(r7+$0d),y1
+        move    x:(r0),b
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     a
+        add     b,a
+        move    a,x:(r0)+
+rppend:
+        nop     
+        rts     
+; ---- subroutines (after their callers) ----
+rpexp:
+        move    a1,b
+        asr     #$12,a,a  ; a1 = n = floor(y)
+        add     #>$1,a
+        move    a1,x1  ; n + 1 (never 0: a do count of 0 is not a skip)
+        and     #>$03ffff,b
+        asl     #$5,b,b  ; f in Q23, b2 stays 0
+        move    b1,x0
+        move    #>$2c5c86,y0
+        mpy     y0,x0,b
+        move    b,y0  ; g = f ln2 / 2
+        move    #>$02aaab,x0
+        mpy     y0,x0,b
+        sub     #>$0aaaab,b
+        move    b,x0
+        mpy     y0,x0,b
+        add     #>$200000,b
+        move    b,x0
+        mpy     y0,x0,b
+        sub     #>$400000,b
+        move    b,x0
+        mpy     y0,x0,b
+        add     #>$400000,b  ; e^-g / 2
+        move    b,x0
+        mpy     x0,x0,b
+        asl     #$2,b,b  ; 2^-f in (0.5, 1]
+        do      x1,>rpxpend
+        asr     b
+rpxpend:
+        asl     b
+        rts     

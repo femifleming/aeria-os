@@ -1,0 +1,566 @@
+; CYCLES_FORWARD_BRANCHES
+; AERIA PITCH -- two-head delay-line pitch shifter (port of Cloudfin /
+; Balloon Shop fp::PitchShifter), 44.1 kHz, stereo.
+;
+; Two read heads half a window apart sweep the window at (1 - ratio)
+; samples per sample. Each head's gain is smoothstep(tri(phase)), so the
+; two gains sum to exactly 1 (the sin^2 law's cheap twin). Reads are
+; linearly interpolated; the head gain is folded into the interpolation
+; weights, so a head costs two multiply-accumulates per channel.
+; WIDE (page 2, slot 6): stereo micro-detune. The two channels keep their own
+; pair of heads: the left pair runs at phase p - phi, the right at p + phi,
+; phi a 48-bit offset that creeps by dphi a sample, so left plays WIDE/2 sharp
+; and right WIDE/2 flat (0..50 cents apart; the mean is the set pitch). L and
+; R drift apart in time and never share a splice; the mono sum is the usual
+; slow beating of a detuned pair, never a cancellation. WIDE 0 walks phi back
+; to 0 (the nearest way round, ~0.1 s time constant) and holds it there: then
+; right = left bit for bit on equal inputs.
+; Feedback: wet -> TONE lowpass -> DC block (10 Hz, 48-bit, rounded out) -> soft clip
+; x - x^3/3 (bounded at 2/3, unity slope at 0) -> FDBK (max 0.95) -> line.
+;
+; Memory: the FX2 allocator buffer (base from x:>$213 at init) used as ONE
+; interleaved [L,R] ring of 15,870 words (m = $3dfd): never touches the
+; slot's last $202 words (Sidechain key window). Longest read: 2*(4 + 7056
+; + 1) + 2 = 14,124 words back.
+;
+; r7 slots (all zeroed by init):
+;  00 base  01 write ptr  02 clear countdown  03 phase (Q23, [0,1))
+;  04 inc target  05/06 inc smoothed hi/lo (20 ms, per block)
+;  07 W target (W/8192)  08/09 W smoothed hi/lo (~1.5 s)
+;  0a/0b fb target/smoothed  0c/0d tone coef target/smoothed
+;  0e/0f mix target/smoothed  10/11 DC L x1,y1  12/13 DC R x1,y1
+;  14/15 tone LP L/R (= wet)  16/17 feedback state L/R
+;  18/19 head 1 weights w0,w1  1a/1b head 2 weights  1c q4 = (1-ratio)/4
+;  1d/1e phi hi/lo  1f/20 dphi hi/lo  21/22 right head 1 weights
+;  23/24 right head 2 weights  25 ratio/8  26 right phase
+;  27/28 tone LP L/R low words  29/2a DC block L/R y low words  2b feedback ramp a sample
+;  (12 Nov quality pass: tone LP and DC block keep 48-bit states so tails reach exact 0;
+;   feedback ramps per sample instead of stepping per block)
+;  (inc and tone glide once per block; feedback ramps per sample; W and mix per sample)
+;
+; Knobs: 0 SHFT (49-way, -24..+24 st)  1 FINE (+-1 st, 64 = 0)
+;        2 GRN (window 10..160 ms, squared taper)  3 FDBK (0..0.95)
+;        4 TONE (one-pole LP 210 Hz .. open at 127)  5 MIX (0 exact dry)
+;        6 WIDE (page 2: x:(r6+$c) bits 22..16; L/R detune 0..50 cents)
+
+init:
+        move    #>$ffffff,m4
+        move    r7,r4
+        clr     a
+        do      #64,>ptzero
+        move    a,x:(r4)+
+ptzero:
+        nop
+        move    x:>$213,r4
+        move    x:(r4),a
+        move    a,x:(r7+$00)
+        move    a,x:(r7+$01)
+        move    #>$80,a
+        move    a,x:(r7+$02)
+        rts
+
+proc:
+; ---- per-block knob decode -------------------------------------------------
+; s32 = (semitones + fine)/32 = 4*SHFT + FINE/16 - 0.78125
+        move    x:(r6),a
+        asl     #$2,a,a
+        move    x:(r6+$1),x0
+        move    #>$080000,y0
+        mac     y0,x0,a
+        move    #>$640000,x0
+        sub     x0,a
+        move    a,x0
+; v = ln2 * oct / 8 = s32 * ln2/3 ; y/8 = 2^(oct/8)/8 by Horner (Taylor, 4th)
+        move    #>$1d9304,y0
+        mpy     y0,x0,a
+        move    a,y0
+        move    #>$00aaab,x0
+        mpy     y0,x0,a
+        add     #>$02aaab,a
+        move    a,x0
+        mpy     y0,x0,a
+        add     #>$080000,a
+        move    a,x0
+        mpy     y0,x0,a
+        add     #>$100000,a
+        move    a,x0
+        mpy     y0,x0,a
+        add     #>$100000,a
+; three squarings: z <- 8 z^2, ending at ratio/8
+        move    a,x0
+        mpy     x0,x0,a
+        asl     #$3,a,a
+        move    a,x0
+        mpy     x0,x0,a
+        asl     #$3,a,a
+        move    a,x0
+        mpy     x0,x0,a
+        asl     #$3,a,a
+; q4 = (1 - ratio)/4 = 0.25 - 2*(ratio/8)
+        move    a,x:(r7+$25)
+        asl     a
+        move    #>$200000,b
+        sub     a,b
+        move    b,x:(r7+$1c)
+; W/8192 = 0.053833 + 0.807495 * GRN^2
+        move    x:(r6+$2),x0
+        mpy     x0,x0,a
+        move    a,x0
+        move    #>$675c00,y0
+        mpy     y0,x0,a
+        add     #>$06e400,a
+        move    a,x:(r7+$07)
+; feedback 0.95 * FDBK
+        move    x:(r6+$3),x0
+        move    #>$79999a,y0
+        mpy     y0,x0,a
+        move    a,x:(r7+$0a)
+; tone coefficient 0.03 + 0.97 TONE^2, open (1.0) at 127
+        move    x:(r6+$4),a
+        move    #>$7f0000,x0
+        cmp     x0,a
+        beq     pttopen
+        move    a,x0
+        mpy     x0,x0,a
+        move    a,x0
+        move    #>$7c28f6,y0
+        mpy     y0,x0,a
+        add     #>$03d70a,a
+        bra     pttset
+pttopen:
+        move    #>$7fffff,a
+pttset:
+        move    a,x:(r7+$0c)
+; mix: knob/128, full wet at 127
+        move    x:(r6+$5),a
+        move    #>$7f0000,x0
+        cmp     x0,a
+        bne     ptmset
+        move    #>$7fffff,a
+ptmset:
+        move    a,x:(r7+$0e)
+; land the mix glide on its target once within 256 LSB (asr floors upward glides)
+        move    x:(r7+$0f),b
+        sub     b,a
+        abs     a
+        cmp     #>$000100,a
+        bge     ptmglide
+        move    x:(r7+$0e),a
+        move    a,x:(r7+$0f)
+ptmglide:
+; while clearing, the slow smoothers start AT their targets
+        move    x:(r7+$02),a
+        tst     a
+        beq     ptwlive
+        move    x:(r7+$07),a
+        move    a,x:(r7+$08)
+        clr     a
+        move    a,x:(r7+$09)
+ptwlive:
+; iw = (1/32) / (W/8192) = 256/W, from the CURRENT window, per block
+        move    x:(r7+$08),x0
+        move    #>$040000,a
+        andi    #$fe,ccr
+        do      #24,>ptdivx
+        div     x0,a
+ptdivx:
+        nop
+        move    a0,y0
+        move    x:(r7+$1c),x0
+        mpy     y0,x0,a
+        asr     #$6,a,a
+        move    a,x:(r7+$04)
+; WIDE: dphi = (ratio/8) eps iw / 64 = ratio eps / (2 W), eps = 0.0293 WIDE (50 cents at 127), 48 bits
+        move    x:(r6+$c),a
+        and     #>$7f0000,a
+        move    a1,x0
+        move    #>$03c7bd,y1
+        mpy     x0,y1,a
+        move    a,x0
+        move    x:(r7+$25),y1
+        mpy     x0,y1,a
+        move    a,x0
+        mpy     y0,x0,a
+        asr     #$6,a,a
+        move    a1,x:(r7+$1f)
+        move    a0,x:(r7+$20)
+        move    x:(r6+$c),a
+        and     #>$7f0000,a
+        tst     a
+        bne     ptwdon
+; WIDE 0: phi -= phi/256 a block, taken as -0.5..0.5 so it goes home the short way
+        move    x:(r7+$1d),a
+        move    x:(r7+$1e),a0
+        cmp     #>$400000,a
+        blt     ptwnear
+        move    #>$800000,x0
+        add     x0,a
+ptwnear:
+        move    a,b
+        asr     #$8,b,b
+        sub     b,a
+        and     #>$7fffff,a
+        move    a1,x:(r7+$1d)
+        move    a0,x:(r7+$1e)
+ptwdon:
+; ---- bounded clearing: 128 dry calls, 124 x 128 words (miniverb's scheme) -
+        move    x:(r7+$02),a
+        tst     a
+        beq     ptready
+        sub     #>$1,a
+        move    a,x:(r7+$02)
+        move    x:(r7+$04),b
+        move    b,x:(r7+$05)
+        move    x:(r7+$0a),b
+        move    b,x:(r7+$0b)
+        move    x:(r7+$0c),b
+        move    b,x:(r7+$0d)
+        cmp     #>$00007c,a
+        bge     ptnoclr
+        asl     #$7,a,a
+        move    x:(r7+$00),x0
+        add     x0,a
+        move    a,r4
+        move    #>$3dfd,m4
+        clr     a
+        do      #128,>ptclrlp
+        move    a,y:(r4)+
+ptclrlp:
+        nop
+        move    #>$ffffff,m4
+ptnoclr:
+        rts
+ptready:
+; ---- block-rate smoothers: inc (48 bit), feedback, tone coefficient ---------
+        move    x:(r7+$04),a
+        move    x:(r7+$05),b
+        move    x:(r7+$06),b0
+        sub     b,a
+        asr     #$6,a,a
+        add     a,b
+        move    b1,x:(r7+$05)
+        move    b0,x:(r7+$06)
+; feedback: a per-sample ramp (2b) that covers 1/16 of the way a block; lands exactly within 256 LSB
+        move    x:(r7+$0a),a
+        move    x:(r7+$0b),b
+        sub     b,a
+        move    a,b
+        abs     b
+        cmp     #>$000100,b
+        bge     ptfbramp
+        clr     a
+        move    x:(r7+$0a),b
+        move    b,x:(r7+$0b)
+ptfbramp:
+        asr     #$8,a,a
+        move    a,x:(r7+$2b)
+        move    x:(r7+$0c),a
+        move    x:(r7+$0d),b
+        sub     b,a
+        asr     #$4,a,a
+        add     b,a
+        move    a,x:(r7+$0d)
+        move    #>$3dfd,m1
+        move    #>$3dfd,m2
+        move    #>$3dfd,m3
+        move    #>$3dfd,m4
+        move    #>$3dfd,m5
+        move    #>$fffffe,n1
+        move    #>$fffffe,n2
+        move    #>$fffffe,n3
+        move    #>$fffffe,n4
+        move    #>$1,n0
+        move    x:(r7+$01),r5
+        do      n7,>ptend
+; ---- smoothers: W (~1.5 s), mix ---------------------------------------------
+        move    x:(r7+$07),a
+        move    x:(r7+$08),b
+        move    x:(r7+$09),b0
+        sub     b,a
+        asr     #$10,a,a
+        add     a,b
+        move    b1,x:(r7+$08)
+        move    b0,x:(r7+$09)
+        move    x:(r7+$0e),a
+        move    x:(r7+$0f),b
+        sub     b,a
+        asr     #$8,a,a
+        add     b,a
+        move    a,x:(r7+$0f)
+; ---- write input + feedback (both channels) --------------------------------
+        move    x:(r7+$0b),a
+        move    x:(r7+$2b),x0
+        add     x0,a
+        move    a,x:(r7+$0b)
+        move    a,y1
+        move    x:(r7+$16),x0
+        move    x:(r0),a
+        mac     x0,y1,a
+        move    a,y:(r5)+
+        move    x:(r7+$17),x0
+        move    x:(r0+n0),a
+        mac     x0,y1,a
+        move    a,y:(r5)+
+; ---- phases: p += inc; phi += dphi (48 bit); left p - phi, right p + phi -----
+        move    x:(r7+$05),x1
+        move    x:(r7+$03),a
+        add     x1,a
+        and     #>$7fffff,a
+        move    a1,x:(r7+$03)
+        move    a1,y1                   ; p
+        move    x:(r7+$1d),a
+        move    x:(r7+$1e),a0
+        move    x:(r7+$1f),x1
+        move    x:(r7+$20),x0
+        add     x,a
+        and     #>$7fffff,a
+        move    a1,x:(r7+$1d)
+        move    a0,x:(r7+$1e)
+        move    a1,x1                   ; phi
+        move    y1,a
+        add     x1,a
+        and     #>$7fffff,a
+        move    a1,x:(r7+$26)           ; right phase
+        move    y1,a
+        sub     x1,a
+        and     #>$7fffff,a
+        move    a1,x0                   ; p1 (left)
+; ======== left heads ========
+; gains: t = 1 - |2 p1 - 1|, g1 = t^2 (3 - 2t), g2 = 1 - g1
+        move    a1,b
+        sub     #>$400000,b
+        abs     b
+        asl     b
+        move    #>$7fffff,a
+        sub     b,a
+        move    a,y0                    ; t
+        mpy     y0,y0,a
+        move    a,y1                    ; t^2
+        move    #>$600000,a
+        move    #>$400000,x1
+        mac     -x1,y0,a                ; 0.75 - t/2
+        move    a,x1
+        mpy     y1,x1,a
+        asl     #$2,a,a
+        move    a,y1                    ; g1 (saturating at 1)
+; head 1: d = p1 * W, int/frac split at bit 10
+        move    x:(r7+$08),y0
+        mpy     y0,x0,a
+        move    a1,b
+        asr     #$a,a,a
+        move    a1,a                    ; drop the fraction asr left in a0
+        and     #>$0003ff,b
+        asl     #$d,b,b
+        move    b1,x1                   ; frac
+        asl     a
+        neg     a
+        sub     #>$00000a,a
+        move    a1,n5
+        lua     (r5+n5),r4
+        mpy     y1,x1,a                 ; w1 = g1 * frac
+        move    a,x:(r7+$19)
+        move    y1,b
+        sub     a,b                     ; w0 = g1 - w1
+        move    b,x:(r7+$18)
+; head 2: p2 = p1 + 0.5 wrapped, g2 = 1 - g1
+        move    x0,a
+        add     #>$400000,a
+        and     #>$7fffff,a
+        move    a1,x0                   ; p2
+        move    #>$7fffff,a
+        sub     y1,a
+        move    a,y1                    ; g2
+        mpy     y0,x0,a
+        move    a1,b
+        asr     #$a,a,a
+        move    a1,a                    ; drop the fraction asr left in a0
+        and     #>$0003ff,b
+        asl     #$d,b,b
+        move    b1,x1
+        asl     a
+        neg     a
+        sub     #>$00000a,a
+        move    a1,n5
+        lua     (r5+n5),r3
+        mpy     y1,x1,a
+        move    a,x:(r7+$1b)
+        move    y1,b
+        sub     a,b
+        move    b,x:(r7+$1a)
+; ======== right heads (the same, on its own phase; the ring's odd words) ========
+        move    x:(r7+$26),x0
+; gains: t = 1 - |2 p1 - 1|, g1 = t^2 (3 - 2t), g2 = 1 - g1
+        move    x0,b
+        sub     #>$400000,b
+        abs     b
+        asl     b
+        move    #>$7fffff,a
+        sub     b,a
+        move    a,y0                    ; t
+        mpy     y0,y0,a
+        move    a,y1                    ; t^2
+        move    #>$600000,a
+        move    #>$400000,x1
+        mac     -x1,y0,a                ; 0.75 - t/2
+        move    a,x1
+        mpy     y1,x1,a
+        asl     #$2,a,a
+        move    a,y1                    ; g1 (saturating at 1)
+; head 1: d = p1 * W, int/frac split at bit 10
+        move    x:(r7+$08),y0
+        mpy     y0,x0,a
+        move    a1,b
+        asr     #$a,a,a
+        move    a1,a                    ; drop the fraction asr left in a0
+        and     #>$0003ff,b
+        asl     #$d,b,b
+        move    b1,x1                   ; frac
+        asl     a
+        neg     a
+        sub     #>$000009,a
+        move    a1,n5
+        lua     (r5+n5),r2
+        mpy     y1,x1,a                 ; w1 = g1 * frac
+        move    a,x:(r7+$22)
+        move    y1,b
+        sub     a,b                     ; w0 = g1 - w1
+        move    b,x:(r7+$21)
+; head 2: p2 = p1 + 0.5 wrapped, g2 = 1 - g1
+        move    x0,a
+        add     #>$400000,a
+        and     #>$7fffff,a
+        move    a1,x0                   ; p2
+        move    #>$7fffff,a
+        sub     y1,a
+        move    a,y1                    ; g2
+        mpy     y0,x0,a
+        move    a1,b
+        asr     #$a,a,a
+        move    a1,a                    ; drop the fraction asr left in a0
+        and     #>$0003ff,b
+        asl     #$d,b,b
+        move    b1,x1
+        asl     a
+        neg     a
+        sub     #>$000009,a
+        move    a1,n5
+        lua     (r5+n5),r1
+        mpy     y1,x1,a
+        move    a,x:(r7+$24)
+        move    y1,b
+        sub     a,b
+        move    b,x:(r7+$23)
+; ---- reads: a = left (r4, r3), b = right (r2, r1) --------------------------
+        move    x:(r7+$18),y0
+        move    x:(r7+$19),y1
+        move    y:(r4)+n4,x0
+        mpy     y0,x0,a         y:(r4),x0
+        mac     x0,y1,a
+        move    x:(r7+$1a),y0
+        move    x:(r7+$1b),y1
+        move    y:(r3)+n3,x0
+        mac     y0,x0,a         y:(r3),x0
+        mac     x0,y1,a
+        move    x:(r7+$21),y0
+        move    x:(r7+$22),y1
+        move    y:(r2)+n2,x0
+        mpy     y0,x0,b         y:(r2),x0
+        mac     x0,y1,b
+        move    x:(r7+$23),y0
+        move    x:(r7+$24),y1
+        move    y:(r1)+n1,x0
+        mac     y0,x0,b         y:(r1),x0
+        mac     x0,y1,b
+; ---- tone lowpass on the wet, per channel ----------------------------------
+        move    x:(r7+$0d),y1
+        move    x:(r7+$14),x0
+        sub     x0,a
+        move    a,x1
+        mpy     y1,x1,a
+        move    x:(r7+$14),x1
+        move    x:(r7+$27),x0
+        add     x,a                     ; 48-bit state: decays to exact 0 (no dead band)
+        move    a1,x:(r7+$14)
+        move    a0,x:(r7+$27)
+        move    x:(r7+$15),x0
+        sub     x0,b
+        move    b,x1
+        mpy     y1,x1,b
+        move    x:(r7+$15),x1
+        move    x:(r7+$28),x0
+        add     x,b
+        move    b1,x:(r7+$15)
+        move    b0,x:(r7+$28)
+; ---- left: DC block, soft clip -> feedback state; mix ----------------------
+        move    #>$002eb0,y0            ; 1 - R (R = $7fd150): y = x - x1 + y1 - (1-R) y1, y 48-bit
+        move    x:(r7+$14),a
+        move    x:(r7+$10),x0
+        move    a,x:(r7+$10)
+        sub     x0,a
+        move    x:(r7+$11),x1
+        move    x:(r7+$29),x0
+        add     x,a
+        mac     -x1,y0,a
+        move    a,x:(r7+$11)                ; limited, as before (a1 alone could wrap)
+        move    a0,x:(r7+$29)
+        rnd     a                       ; rounded into the clip: kills the 1-LSB limit cycle of the loop
+        move    a,x0
+        mpy     x0,x0,a
+        move    a,x1
+        mpy     x1,x0,a
+        move    a,y1
+        move    x0,a
+        move    #>$2aaaab,y0
+        mac     -y1,y0,a
+        move    a,x:(r7+$16)
+        move    x:(r7+$0f),y1
+        move    x:(r0),b
+        move    x:(r7+$14),a
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     a
+        add     b,a
+        move    a,x:(r0)+
+; ---- right ------------------------------------------------------------------
+        move    #>$002eb0,y0            ; 1 - R (R = $7fd150): y = x - x1 + y1 - (1-R) y1, y 48-bit
+        move    x:(r7+$15),a
+        move    x:(r7+$12),x0
+        move    a,x:(r7+$12)
+        sub     x0,a
+        move    x:(r7+$13),x1
+        move    x:(r7+$2a),x0
+        add     x,a
+        mac     -x1,y0,a
+        move    a,x:(r7+$13)
+        move    a0,x:(r7+$2a)
+        rnd     a
+        move    a,x0
+        mpy     x0,x0,a
+        move    a,x1
+        mpy     x1,x0,a
+        move    a,y1
+        move    x0,a
+        move    #>$2aaaab,y0
+        mac     -y1,y0,a
+        move    a,x:(r7+$17)
+        move    x:(r7+$0f),y1
+        move    x:(r0),b
+        move    x:(r7+$15),a
+        sub     b,a
+        asr     a
+        move    a,x0
+        mpy     x0,y1,a
+        asl     a
+        add     b,a
+        move    a,x:(r0)+
+ptend:
+        nop
+        move    r5,x:(r7+$01)
+        move    #>$ffffff,m1
+        move    #>$ffffff,m2
+        move    #>$ffffff,m3
+        move    #>$ffffff,m4
+        move    #>$ffffff,m5
+        rts

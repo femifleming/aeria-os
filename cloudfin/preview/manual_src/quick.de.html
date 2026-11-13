@@ -1,0 +1,544 @@
+<div class="cover">
+  <img src="img/aeria_logo.png" alt="AERIA" style="width:120mm; margin-bottom:26px">
+  <h1>AERIA OS</h1>
+  <div class="sub">FÜR OCTATRACK MKII</div>
+  <div class="big">KURZANLEITUNG</div>
+  <div class="by">VON SADNOISE</div>
+  <div class="ed">Für den Build {{BUILD}}</div>
+</div>
+
+<h2 id="welcome">Willkommen</h2>
+<p class="lead">AERIA OS ist ein Betriebssystem für das Octatrack MKII, geschrieben von sadnoise. Es tritt an die Stelle des eigenen Betriebssystems und macht aus demselben Panel, denselben Buchsen und demselben Soundprozessor ein anderes Instrument mit <b>zwei Gesichtern</b>: einen Live-Multieffekt rund um einen Himmel und einen Sequencer mit acht Tracks.</p>
+<figure class="draw narrow">{{DIAGRAM faces}}</figure>
+<div class="big3">
+<div><b>Der Himmel</b>Was Sie in die Eingänge A bis D spielen, läuft durch eine <b>Kette</b> aus bis zu sieben Effekten. Das <b>Wetter</b> bewegt ihre Regler und leiht eigene Effekte aus. Ein Loop, ein Ring aus One-Shots namens Sterne und selbst aufgenommene Ballons speisen die Kette ebenfalls.</div>
+<div><b>Der Sequencer</b>Eine Groovebox: <b>acht Tracks</b> auf den sechzehn Trigs. Jeder Track hat eine Stimme (ein Sample, einen von vier kleinen Synthesizern oder nur MIDI), zwei Filter und Platz für einen Effekt. Jeder Step kann eigene Werte haben: Parameter-Locks.</div>
+<div><b>Gemeinsam</b>Die Master-Sektion (ein Freeze-Delay, ein Vierband-EQ, Bass-Mono und ein Limiter am Hauptausgang), das Tempo, sechzehn <b>Projekte</b>, die Karte, USB-Audio und die Bildschirmschoner.</div>
+</div>
+<p>[FUNC] + [MIDI] wechselt von einem Gesicht zum anderen. Das Popup zeigt ``SEQUENCER`` oder ``AERIA``.</p>
+<div class="two w64">
+<div>
+<h3>Schreibweisen in dieser Anleitung</h3>
+<table class="tight">
+<tr><td>[FUNC]</td><td>Eine <b>Taste</b>, mit dem aufgedruckten Namen</td></tr>
+<tr><td>[FUNC] + [MIDI]</td><td>Die erste Taste <b>halten</b> und die zweite <b>drücken</b></td></tr>
+<tr><td>[T1] bis [T8]</td><td>Die acht <b>Track-Tasten</b> neben dem Display</td></tr>
+<tr><td>[TRIG 1] bis [TRIG 16]</td><td>Die sechzehn <b>Trig-Tasten</b> unten</td></tr>
+<tr><td>((LEVEL)), ((A)) bis ((F))</td><td>Ein <b>Regler</b>. ((A)) ((B)) ((C)) sind die obere Reihe der Datenregler, ((D)) ((E)) ((F)) die untere</td></tr>
+<tr><td>``FREEZE ON``</td><td>Eine <b>Meldung</b> im Display, meist im <b>Popup</b>: dem Kasten, der einen Wert gut eine Sekunde lang zeigt</td></tr>
+<tr><td>&lt;&lt;TEMPO&gt;&gt;</td><td>Eine <b>LED</b>: das Licht in einer Taste</td></tr>
+</table>
+</div>
+<div>
+<h3>In dieser Anleitung</h3>
+{{QTOC}}
+</div>
+</div>
+<p><small>Diese Anleitung ist der kurze Einstieg; jeder Abschnitt endet mit den Kapiteln des AERIA OS Benutzerhandbuchs, die tiefer gehen. Die Displaybilder zeichnet AERIAs eigener Displaycode, die Panelzeichnungen sind unsere eigenen. AERIA OS ist kein Elektron-Produkt, und Elektron leistet dafür keinen Support.</small></p>
+
+<h2 id="qpanel">Aufbau des Panels</h2>
+<figure class="draw">{{FRONT}}<figcaption>Das Frontpanel. Die aufgedruckten Namen bleiben; die meisten Tasten haben eine neue Aufgabe, und in jedem Gesicht eine andere.</figcaption></figure>
+<table class="long tight plist">
+<thead><tr><th></th><th>Element</th><th>Im Himmel</th><th>Im Sequencer</th></tr></thead>
+<tr><td>1</td><td>[REC1] [REC2]</td><td>Einen Ballon aus den Eingängen A B / C D einfangen. Erneut: er schwebt. Mit [FUNC]: platzen lassen</td><td>Nicht belegt</td></tr>
+<tr><td>2</td><td>[REC3]</td><td>Den Himmel (den Ausgang der Kette) in Ballon 3 einfangen</td><td>Nicht belegt</td></tr>
+<tr><td>3</td><td>[T1] bis [T8]</td><td>[T1] bis [T7] wählen Slot 1 bis 7 der Kette. Mit [FUNC]: Slot umgehen. [T1] + [T2] zusammen: Eingänge A B stereo oder mono; [T3] + [T4]: C D</td><td>Einen Track wählen. Mit [FUNC]: stummschalten. Mit [CUE]: solo</td></tr>
+<tr><td>4</td><td>Display</td><td colspan="2">128 mal 64 Pixel. Im Himmel blendet eine Seite nach etwa zehn Sekunden aus und lässt die Landschaft stehen; jede Taste und jeder Regler holt sie zurück</td></tr>
+<tr><td>5</td><td>&lt;&lt;CARD STATUS&gt;&gt;</td><td colspan="2">Leuchtet, während die Karte gelesen oder beschrieben wird</td></tr>
+<tr><td>6</td><td>((LEVEL))</td><td>Drehen: nächstes oder vorheriges Wetter. Drücken: AUTO-Wetter. In einer Liste: blättert darin</td><td>Lautstärke des gewählten Tracks. Mit gehaltenem [TEMPO]: das Tempo</td></tr>
+<tr><td>7</td><td>((A)) bis ((F))</td><td>Die sechs Regler der angezeigten Seite. Mit gehaltenem [FUNC]: der zweite Satz. Auf CHAIN: Regler drücken gibt ihn ans Wetter zurück</td><td>Die sechs Regler der Reglerseite. Bei gehaltenem Step: dessen eigene Werte</td></tr>
+<tr><td>8</td><td>[TEMPO]</td><td>Nicht belegt</td><td>Tempo tippen. Gehalten, mit ((LEVEL)): ein BPM pro Raste</td></tr>
+<tr><td>9</td><td>[SCENE A] [SCENE B]</td><td>Eine halten und einen Regler drehen: der Wert kommt in diese Szene. Eine halten und einen Trig drücken: Szene 1 bis 16. Eine halten und [NO] drücken: Szene löschen</td><td>Wirken nur auf die Regler der MASTER-Seite</td></tr>
+<tr><td>10</td><td>[PAGE]</td><td>Rastet den zweiten Reglersatz ein oder aus</td><td>Die PTN-Seite: Längen, Swing, Tempo, Ducking</td></tr>
+<tr><td>11</td><td>Crossfader</td><td colspan="2">Bewegt jeden in Szene A gehaltenen Regler zu seinem Platz in Szene B. Fast ganz auf B friert er das Delay des Masters ein</td></tr>
+<tr><td>12</td><td>[STOP]</td><td>Nicht belegt</td><td>Stoppt. Erneut: sofort Stille. [FUNC] + [STOP] fügt ein</td></tr>
+<tr><td>13</td><td>[PLAY]</td><td>Nicht belegt</td><td>Spielt ab dem ersten Step. [FUNC] + [PLAY] löscht den gewählten Track</td></tr>
+<tr><td>14</td><td>[REC]</td><td>Der Editor der Grain-Wolke</td><td>GRID (Steps) oder LIVE (Pads). [FUNC] + [REC] kopiert den Track</td></tr>
+<tr><td>15</td><td>[SRC] [AMP] [LFO] [FX1] [FX2]</td><td>Seiten CHAIN, SKY, SOURCE, MIX (erneut: GAIN), SYSTEM</td><td>Reglerseiten SRC, AMP, MOD, FLT, FX. Dieselbe Taste erneut: der zweite Satz</td></tr>
+<tr><td>16</td><td>[UP] [DOWN] [LEFT] [RIGHT]</td><td>[LEFT] [RIGHT]: der Slot auf CHAIN, sonst die Seite. [UP] [DOWN]: das Wetter; in einer Liste: blättern</td><td>[LEFT] [RIGHT]: die Seite mit sechzehn Steps. [UP] [DOWN]: der Track darüber oder darunter</td></tr>
+<tr><td>17</td><td>[NO]</td><td>Schließt, was offen ist. Sonst: ein neuer Himmel</td><td>Bei gehaltenem Step: löscht dessen Locks</td></tr>
+<tr><td>18</td><td>[YES]</td><td>Bestätigt: lädt, wählt, öffnet. Wo nichts zu bestätigen ist: Tag oder Nacht</td><td>Gehalten: FILL. Bei gehaltenem Step: der Step spielt rückwärts. Auf FX: die Effektliste</td></tr>
+<tr><td>19</td><td>[BANK]</td><td>Auf CHAIN: das Regal der Effekte. Sonst: die nächste Bank der STARS</td><td>Der Mixer</td></tr>
+<tr><td>20</td><td>[CUE]</td><td>OUT: Routing und der Quad-Panner</td><td>[CUE] + eine Track-Taste: solo</td></tr>
+<tr><td>21</td><td>[TRIG 1] bis [TRIG 16]</td><td>Je nach Seite: Slots, Wetterlagen, die Zeit des Delays, Quellen, Projekte, Buchstaben</td><td>GRID: die sechzehn Steps. LIVE: Pads 1 bis 8, Mutes 9 bis 16. Mit gehaltenem [PTN]: Patterns A bis D</td></tr>
+<tr><td>22</td><td>[PTN]</td><td>STARS-Modus: RING oder BIRDS</td><td>Halten und [TRIG 1] bis [TRIG 4] drücken: das Pattern</td></tr>
+<tr><td>23</td><td>[FUNC]</td><td colspan="2">Zusammen mit einer anderen Taste oder einem Regler halten, für dessen zweite Funktion. Beim Einschalten gehalten: das Elektron Startup Menu</td></tr>
+<tr><td>24</td><td>[PROJ]</td><td colspan="2">PROJECTS: alles unter einem Namen speichern und laden</td></tr>
+<tr><td>25</td><td>[PART]</td><td>Die BALLOON-Seite</td><td>Nicht belegt</td></tr>
+<tr><td>26</td><td>[AED]</td><td>Die LOOP-Seite</td><td>Nicht belegt</td></tr>
+<tr><td>27</td><td>[MIX]</td><td colspan="2">Die MASTER-Seite: das Freeze-Delay und das Tempo</td></tr>
+<tr><td>28</td><td>[ARR]</td><td>Die STARS-Seite</td><td>Die GEN-Seite</td></tr>
+<tr><td>29</td><td>[MIDI]</td><td>Die MIDI-Module. [FUNC] + [MIDI]: zum Sequencer</td><td>Die MIDI-Seite. [FUNC] + [MIDI]: zurück zum Himmel</td></tr>
+<tr><td>30</td><td>((HEADPHONES VOL))</td><td colspan="2">Die Lautstärke der Kopfhörerbuchse</td></tr>
+</table>
+{{man:panel,controls,seqkeys}}
+
+<h2 id="qconn">Anschlüsse</h2>
+<figure class="draw">{{REAR}}</figure>
+<table class="tight plist">
+<tr><th></th><th>Anschluss</th><th>Was AERIA OS damit macht</th></tr>
+<tr><td>1</td><td>Power</td><td>Der Netzschalter. [FUNC] beim Einschalten halten für das Elektron Startup Menu</td></tr>
+<tr><td>2</td><td>12VDC 2A</td><td>Das mitgelieferte Netzteil</td></tr>
+<tr><td>3</td><td>USB</td><td>Zum Computer: ein <b>Audio-Interface</b> mit 6 oder 18 Kanälen, <b>USB DISK MODE</b> und die Update-Werkzeuge. Kein MIDI über USB</td></tr>
+<tr><td>4</td><td>Compact Flash</td><td>Die Karte mit Ihren Samples: Loops, Ordner mit Sternen, Kits. FAT16 oder FAT32. AERIA OS liest sie nur</td></tr>
+<tr><td>5</td><td>MIDI Thru</td><td>Eine Kopie dessen, was an MIDI In ankommt, von der Hardware selbst erzeugt</td></tr>
+<tr><td>6</td><td>MIDI Out</td><td>Noten und Akkorde, Program Changes und, mit SYNC auf SEND, Clock, Start und Stop</td></tr>
+<tr><td>7</td><td>MIDI In</td><td>Control Changes für die Quad-Panner; mit SYNC auf RECV Clock, Start, Continue und Stop; ein Program Change wählt das Pattern</td></tr>
+<tr><td>8</td><td>Inputs A B C D</td><td>Zwei Paare, A B und C D. Im Himmel speisen sie die Kette, jedes Paar stereo oder mono. Im Sequencer gehen sie dry zum Ausgang</td></tr>
+<tr><td>9</td><td>Cue Out L R</td><td>Das <b>zweite Ausgangspaar</b>: Effekt-Slots oder Tracks, die auf CUE geroutet sind. Die Master-Sektion liegt nicht auf diesem Paar</td></tr>
+<tr><td>10</td><td>Main Out L R</td><td>Die Hauptsumme, nach der Master-Sektion: Freeze-Delay, EQ, Bass-Mono, Limiter</td></tr>
+<tr><td>11</td><td>Headphones</td><td>Main und Cue zusammen. ((HEADPHONES VOL)) vorn regelt den Pegel</td></tr>
+</table>
+<figure class="draw">{{DIAGRAM hookup}}</figure>
+{{man:rearpanel,usb,midi}}
+
+<h2 id="qstart">Einschalten und zurechtfinden</h2>
+<div class="two">
+<div>
+<ol class="steps">
+<li>Verbinden Sie <b>Main Out L R</b> mit Ihrem Mischpult oder Ihren Lautsprechern, oder stecken Sie Kopfhörer ein.</li>
+<li>Schließen Sie etwas zum Spielen an die <b>Eingänge A B</b> an: einen Synthesizer, eine Drum-Machine, einen Mikrofonvorverstärker.</li>
+<li>Stecken Sie die CompactFlash-Karte ein, falls Sie Samples darauf haben. AERIA OS spielt auch ohne sie.</li>
+<li><b>Einschalten.</b> Das Intro malt das Logo und schreibt BY SADNOISE; das Meer steigt, und der Himmel öffnet sich. Das Intro ist stumm. Jede Taste überspringt es.</li>
+</ol>
+</div>
+<div>
+[[G2]]
+intro1 | Der Pinsel malt das Logo
+intro3 | Das Meer steigt, und der Himmel öffnet sich
+[[/G]]
+</div>
+</div>
+<p>AERIA OS startet <b>so, wie Sie es verlassen haben</b>: Es hält Ihren Stand im batteriegepufferten Speicher des Geräts fest, den Klang etwa zwei Sekunden nach einer Änderung, die Sequenz bei jeder Berührung. Haben Sie im Sequencer ausgeschaltet, startet es im Sequencer, gestoppt. Beim allerersten Start enthält die Kette PITCH, GRAINS, RING und SMEAR in den Slots 1, 3, 4 und 5, alle <b>dry</b>: Sie hören Ihren Klang so, wie er hereinkommt.</p>
+[[PANEL FUNC TRIG2=never | Der Weg zurück: das Startup Menu
+[FUNC] beim Einschalten gehalten :: Das Elektron Startup Menu. Es ist immer da: AERIA OS schreibt nie in den Bootloader. Darüber wird jedes Betriebssystem ins Gerät gesendet, AERIA OS erneut oder das eigene des Octatrack
+[TRIG 2] in diesem Menü :: EMPTY RESET. <b>Nicht drücken</b>
+]]
+<div class="warn"><b>Drücken Sie im Startup Menu niemals TRIG 2 (EMPTY RESET)</b>, es sei denn, Sie wollen das Gerät löschen. Startet AERIA OS nicht, halten Sie beim Einschalten [FUNC], wählen Sie <b>MIDI UPGRADE</b> und senden Sie <small>AERIA_OS.syx</small> über ein MIDI-Interface Ihres Computers an die Buchse <b>MIDI In</b>.</div>
+
+<div class="big3">
+<div><b>Seiten</b>Ein Bildschirm mit eigenen sechs Reglern. Eine Seitentaste öffnet ihn. Die sechs Namen im Display stehen in der Reihenfolge der Regler auf dem Panel.</div>
+<div><b>Der zweite Satz</b>Die meisten Seiten haben sechs weitere Regler. Im Himmel [FUNC] halten oder [PAGE] drücken, um dort zu bleiben. Im Sequencer [FUNC] halten oder die Seitentaste erneut drücken.</div>
+<div><b>LEDs</b>Alle LEDs sind weiß; nur die Helligkeit zählt. Im Himmel zeigen sie, was eine Taste auf dieser Seite tun würde. Im Sequencer zeigen sie Steps, Noten und die Abspielposition. Die LEDs über [REC1] und [REC2] zeigen die Pegel der Eingänge A B C D; die Karten-LED flackert, während die Karte arbeitet; über [ARR] der Hauptpegel im Himmel.</div>
+</div>
+<h3>Das Display</h3>
+[[ANNO chain | Die CHAIN-Seite des Himmels beim allerersten Start
+1,1,56,8 | L | Die Seite oder der Name/des gewählten Effekts
+8,10,112,12 | L | Die sieben Slots der Kette/an einer Schnur
+10,24,10,2 | L | Der Balken markiert den gewählten Slot
+1,57,26,7 | L | Eingangsrouting: A B und C D
+100,1,27,8 | R | Das aktive Wetter
+8,27,116,16 | R | Die sechs Regler als Schalen:/je voller, desto höher
+8,43,116,8 | R | Ihre Namen, ((A)) links/bis ((F)) rechts
+0,51,128,7 | R | Das Meer, mit dem Boot
+]]
+
+<h3>Die Tasten, die die Seiten öffnen</h3>
+<table class="tight">
+<tr><th>Taste</th><th>Im Himmel</th><th>Im Sequencer</th></tr>
+<tr><td>[SRC]</td><td>CHAIN: die sieben Slots und die Regler des gewählten Effekts</td><td>SRC: die Maschine und ihr Klang</td></tr>
+<tr><td>[AMP]</td><td>SKY: Wind, Wolken, Wellen, Wetter</td><td>AMP: Hüllkurve, Lautstärke, Panorama, Drive, Bits</td></tr>
+<tr><td>[LFO]</td><td>SOURCE: LOOP, STARS, BALLOONS ein oder aus</td><td>MOD: eine Modulation pro Track</td></tr>
+<tr><td>[FX1]</td><td>MIX; erneut: GAIN und der Master-EQ</td><td>FLT: Filter, Delay-Send, Ausgang</td></tr>
+<tr><td>[FX2]</td><td>SYSTEM</td><td>FX: der Effekt des Tracks</td></tr>
+<tr><td>[MIX]</td><td colspan="2">MASTER: das Freeze-Delay und das Tempo</td></tr>
+<tr><td>[PART] / [AED] / [ARR]</td><td>BALLOON / LOOP / STARS</td><td>[ARR]: GEN: Dichte, Richtung, Rotation, Warp, Rate</td></tr>
+<tr><td>[MIDI]</td><td>Die MIDI-Module: GUMBALLS, PITCH, MARBLES, PONG</td><td>MIDI: Kanal, Note, Akkord, Gate, Program; Sync</td></tr>
+<tr><td>[PAGE]</td><td>(rastet den zweiten Reglersatz ein)</td><td>PTN: Längen, Swing, Tempo, Ducking</td></tr>
+<tr><td>[CUE]</td><td>OUT: Routing und der Quad-Panner</td><td>(solo, mit einer Track-Taste)</td></tr>
+<tr><td>[REC]</td><td>Der Editor der Grain-Wolke</td><td>(GRID oder LIVE)</td></tr>
+<tr><td>[BANK]</td><td>Das Regal der Effekte (auf CHAIN)</td><td>Der Mixer</td></tr>
+<tr><td>[PROJ]</td><td colspan="2">PROJECTS</td></tr>
+</table>
+{{man:quick,overview,update}}
+
+<h2 id="qsky">Der erste Klang im Himmel</h2>
+<p>Spielen Sie etwas in die Eingänge A B, hören Sie über Main oder Kopfhörer. Jeder Schritt zeigt die Tasten und das Display danach.</p>
+[[STEP 1 | SRC TRIG1-7=slots | qs_sky_chain]]
+<p><b>Die Kette öffnen.</b> Drücken Sie [SRC]. Die sieben Slots hängen an einer Schnur; Slot 1, PITCH, ist gewählt. Ihr Klang bleibt unverändert: Jeder Effekt ist dry.</p>
+[[/STEP]]
+[[STEP 2 | TRIG3 F=MIX | qs_sky_mix]]
+<p><b>Einen Effekt einblenden.</b> [TRIG 3] wählt GRAINS. Drehen Sie ((F)), MIX, etwa halb auf. Der Klang zerfällt in Grains.</p>
+[[/STEP]]
+[[STEP 3 | A=SIZE B=DENS C=POS D=SPRY E=PTCH | chain_popup_ms]]
+<p><b>Seine Regler spielen.</b> ((A)) bis ((E)) sind die übrigen Regler des Effekts; das Popup zeigt echte Einheiten. [FUNC] halten: zweiter Satz.</p>
+[[/STEP]]
+[[STEP 4 | TRIG6 BANK=shelf YES UP DOWN LEVEL | shelf]]
+<p><b>Anderen Effekt wählen.</b> [TRIG 6] (ein leerer Slot), dann [BANK] (oder [YES]) für das <b>Regal</b>, die Effektliste. Wählen mit ((LEVEL)) oder [UP] [DOWN], dann [YES]. [NO] geht zurück.</p>
+[[/STEP]]
+[[STEP 5 | AMP=SKY TRIG3=RAIN TRIG1=CLEAR | qs_sky_rain]]
+<p><b>Wetter ändern.</b> [AMP] für die SKY-Seite, dann [TRIG 3]: RAIN (Regen). Die Effektregler gleiten an regnerische Stellen, ein Tiefpass blendet ein. [TRIG 1] klart wieder auf.</p>
+[[/STEP]]
+[[STEP 6 | MIX=MASTER F=WET TRIGS=time | qs_sky_delay]]
+<p><b>Master-Delay dazu.</b> [MIX] für die MASTER-Seite. Drehen Sie ((F)), WET, auf. Die sechzehn Trigs setzen die Delayzeit in Sechzehnteln.</p>
+[[/STEP]]
+[[STEP 7 | XFADER=freeze | master_freeze]]
+<p><b>Einfrieren.</b> Crossfader auf B. Das Popup zeigt ``FREEZE ON``: Was im Delay ist, kreist, solange Sie wollen. Crossfader zurück, und es lässt los.</p>
+[[/STEP]]
+[[STEP 8 | SCENEA SCENEB XFADER KNOBS SRC | scene_knob]]
+<p><b>Zwei Szenen bauen.</b> Drücken Sie [SRC]. [SCENE A] halten und einen Regler drehen; [SCENE B] halten und denselben Regler woandershin drehen. Der Crossfader fährt den Regler nun zwischen beiden Stellen.</p>
+[[/STEP]]
+<div class="two">
+<div class="note"><b>Effekte starten dry.</b> MIX (Regler ((F))) bestimmt, wie viel Sie hören. Das Wetter bewegt nie MIX. Ein Effekt aus dem Regal kommt mit eigenem Standard-MIX.</div>
+<div class="tip"><b>Auf CHAIN.</b> [FUNC] + Trig oder Track-Taste umgeht einen Slot. Regler drücken gibt ihn ans Wetter zurück. Die erste Regalzeile, ein Strich, leert den Slot.</div>
+</div>
+{{man:chain,fx,mix,scenes,out}}
+
+<h2 id="qweather" class="run">Das Wetter</h2>
+<p>Das Wetter ist das Herz des Himmels. Jede Wetterlage ist <b>einzeln ein oder aus</b>, mehrere können zugleich aktiv sein. Auf <b>SKY</b>, <b>MIX</b> und <b>GAIN</b> sind die Trigs die Wetterlagen:</p>
+[[TRIGS 1121111111110001 | Trigs auf SKY, MIX und GAIN, hier mit RAIN. 1 schaltet alles Wetter aus; 12 schickt eine Windhose; 16 ist ein Blitz | 1=CLEAR 2=CLOUDY 3=RAIN 4=STORM 5=SNOW 6=HEAT 7=FOG 8=AUTO 9=WIND 10=HAIL 11=AUR. 12=TWIST. 16=bolt]]
+[[G3]]
+sky_rain | RAIN
+sky_storm | STORM, beim Blitz
+sky_snow | SNOW: das Meer friert
+sky_fog | FOG
+sky_aurora | AURORA, bei Nacht
+sky_twister | Ein TWISTER unterwegs
+[[/G]]
+<div class="two">
+<div>
+<h3>Es bewegt die Regler</h3>
+<p>CLOUDY (bewölkt), RAIN (Regen), STORM (Gewitter), SNOW (Schnee), HEAT (Hitze) und FOG (Nebel) haben je einen Charakter und stellen die Regler jedes Effekts passend ein: RAIN nasser und länger; STORM wild, es wirft alle paar Sekunden jeden freien Regler woandershin, und seine Blitze setzen Effekte ein und wieder heraus; SNOW sehr lang und dunkel (friert SMEAR ein); HEAT trocken und hell. Es zählt der Reglername: SIZE, TIME, DECY, FDBK, TONE, RATE, RES, WDTH, DPTH, SMR, FRZ, GRN, DENS, WIDE, TILT, BRIT, GATE, DTUN, MOD und FOLW folgen dem Wetter.</p>
+<ul>
+<li>Ein Regler folgt dem Wetter, <b>bis Sie ihn drehen</b>. Dann gehört er Ihnen. Auf CHAIN drücken gibt ihn zurück.</li>
+<li><b>MIX folgt nie dem Wetter.</b></li>
+<li>SNOW und HEAT nie zugleich.</li>
+<li>Die Master-Sektion bleibt unberührt.</li>
+</ul>
+</div>
+<div>
+<h3>Es leiht Effekte aus</h3>
+<p>Das Wetter wirkt auch direkt: RAIN und STORM blenden einen Tiefpass ein, Donner zieht ihn herunter; bei STORM leiht ein Blitz dem letzten leeren Slot für 45 bis 90 Sekunden einen Zufallseffekt.</p>
+<p><b>FOG, WIND, HAIL, AURORA</b> und <b>TWISTER</b> bringen je einen eigenen Effekt. Solange das Wetter dauert, setzt der Himmel ihn in den <b>letzten leeren Slot</b> und blendet ihn ein (Popup z. B. ``AERIA WIND IN``). Danach blendet er aus, der Slot wird geleert.</p>
+<ul>
+<li>Kein leerer Slot oder DSP voll (``NO ROOM`` ``DSP FULL``): Das Wetter erscheint, sein Klang fehlt.</li>
+<li>Nie zugleich: WIND und FOG, HAIL und AURORA.</li>
+</ul>
+</div>
+</div>
+<div class="warn"><b>WSND schaltet all das.</b> WSND ist Regler ((F)) auf MIX ([FX1]). ON: Das Wetter ist zu hören, mit Filtern, Donner und geliehenen Effekten. OFF: Der Himmel zeigt das Wetter und bewegt die Regler, doch nichts ist zu hören, nichts wird geliehen. Tut ein Wetter nichts, prüfen Sie WSND, dann ob ein Slot frei ist.</div>
+[[PANEL AMP=SKY FX1=MIX LEVEL UP DOWN YES NO TRIG16=bolt | Das Wetter von jeder Seite aus
+((LEVEL)) drehen, oder [UP] [DOWN] :: Nächstes/voriges Wetter: CLEAR, CLOUDY, RAIN, STORM, SNOW, HEAT, FOG
+((LEVEL)) drücken :: AUTO-Wetter ein/aus
+[YES] :: Tag oder Nacht (wo nichts zu bestätigen ist)
+[NO] :: Neuer Himmel (wo nichts zu schließen ist)
+[TRIG 16] :: Blitz, auf SKY, MIX, GAIN, CHAIN
+]]
+{{man:sky,moreweather,wxfx,fxweather}}
+
+<h2 id="qrec">Aufnehmen: Ballons und Samples</h2>
+<p>Im Himmel nehmen Sie in <b>Ballons</b> auf: bis zu 15 Sekunden, die am Himmel schweben und als Wolke langer Grains durch die Kette singen. Es gibt drei.</p>
+[[STEP 1 | REC1=A_B REC2=C_D REC3=sky | balloon_filling]]
+<p><b>Einfangen, loslassen.</b> [REC1] nimmt die Eingänge A B in Ballon 1 auf, [REC2] C D in Ballon 2, [REC3] den Himmel selbst (Ausgang der Kette) in Ballon 3. Das Popup zeigt ``CATCHING``, der Ballon schwillt auf dem Wasser. Dieselbe Taste erneut: Er steigt auf.</p>
+[[/STEP]]
+[[STEP 2 | LFO=SOURCE TRIG1=LOOP TRIG2=STARS TRIG3=BALLN | source]]
+<p><b>Singen lassen.</b> [LFO] für SOURCE, dann [TRIG 3]: BALLOONS ein. Jeder schwebende Ballon singt nun in den Anfang der Kette, die Effekte wirken mit.</p>
+[[/STEP]]
+[[STEP 3 | PART=BALLOON KNOBS FUNC RECS | balloon_popup]]
+<p><b>Formen oder platzen lassen.</b> [PART] öffnet BALLOON: SIZE, SPRY, PTCH, DENS, POS, SEND. [FUNC] + Aufnahmetaste lässt den Ballon platzen; die Aufnahme ist weg.</p>
+[[/STEP]]
+<div class="note">Ballon-Aufnahmen überstehen das Ausschalten nicht, und Projekte speichern sie nicht.</div>
+<h3>Samples von der Karte</h3>
+<p>Die anderen zwei Quellen des Himmels und das Kit des Sequencers spielen <b>WAV-Dateien von der CF-Karte</b>. AERIA OS liest die Karte nur; Dateien kommen per USB DISK MODE darauf (Abschnitt 10). Im Kartenbrowser: [UP] [DOWN] oder ((LEVEL)) bewegen, [YES] öffnet/lädt, [NO] zurück.</p>
+<table class="tight">
+<tr><th>Tasten</th><th>Was geladen wird</th></tr>
+<tr><td>SOURCE: [FUNC] + [TRIG 1]</td><td>Der <b>LOOP</b>: ein Sample in Schleife. Seite: [AED]</td></tr>
+<tr><td>SOURCE: [FUNC] + [TRIG 2]</td><td>Ordner für <b>STARS</b>: sechzehn Dateien als One-Shots. Seite: [ARR]</td></tr>
+<tr><td>Sequencer, SRC: [FUNC] + [YES]</td><td>Ein <b>Kit</b>: Ordner, dessen erste sechzehn WAVs die Samples 7.1 bis 7.16 werden</td></tr>
+</table>
+<p>Geladene Dateien merkt sich das Gerät und liest sie beim Start und Projektladen neu. Was AERIA OS spielt, nehmen Sie per USB im Computer auf (Abschnitt 10). Aufnahme in einen Sequencer-Track gibt es noch nicht.</p>
+{{man:sources,card,cloud}}
+
+<h2 id="qbeat">Der erste Beat im Sequencer</h2>
+<p>Vorab: Legen Sie am Computer acht oder mehr kurze WAVs in einen Ordner auf der Karte, die Kick zuerst: 01 kick, 02 clap, 03 hat usw.</p>
+[[STEP 1 | FUNC MIDI | qs_seq_empty]]
+<p><b>Zum Sequencer.</b> [FUNC] + [MIDI]. Das Popup zeigt ``SEQUENCER``. Acht Punktreihen: acht leere Tracks. Track 1 ist gewählt (die hohe Reihe).</p>
+[[/STEP]]
+[[STEP 2 | SRC FUNC YES UP DOWN | seq_kit]]
+<p><b>Kit laden.</b> [SRC], dann [FUNC] + [YES]: Die Karte öffnet sich. Mit [UP] [DOWN] zu Ihrem Ordner, dort [FUNC] + [YES]. Tracks 1 bis 8 spielen seine ersten acht Dateien.</p>
+[[/STEP]]
+[[STEP 3 | T1 TRIG1 TRIG5 TRIG9 TRIG13 | qs_seq_kick]]
+<p><b>Kick setzen.</b> [T1] drücken; im Stopp hören Sie den Track beim Wählen. Tippen Sie [TRIG 1], [TRIG 5], [TRIG 9], [TRIG 13]: Kick auf jedem Schlag.</p>
+[[/STEP]]
+[[STEP 4 | PLAY STOP TEMPO LEVEL | qs_seq_play]]
+<p><b>Abspielen.</b> [PLAY]. Der laufende Step leuchtet im Display und auf den Trigs, &lt;&lt;TEMPO&gt;&gt; blinkt im Takt. [TEMPO] tippen setzt das Tempo, oder halten und ((LEVEL)) drehen.</p>
+[[/STEP]]
+[[STEP 5 | T2 T3 TRIG5 TRIG13 TRIG3 TRIG7 TRIG11 TRIG15 | qs_seq_hats]]
+<p><b>Clap und Hats.</b> [T2], dann [TRIG 5] und [TRIG 13]. [T3], dann [TRIG 3], [TRIG 7], [TRIG 11], [TRIG 15].</p>
+[[/STEP]]
+[[STEP 6 | TRIG15=hold E=RTCH | qs_seq_ratchet]]
+<p><b>Hat-Wirbel.</b> [TRIG 15] halten: Die Regler gehören diesem Step. ((E)), RTCH, auf 3, loslassen. Die Hat spielt dreimal in ihrem Step.</p>
+[[/STEP]]
+[[STEP 7 | TRIG7=hold FX1=FLT B=LP | qs_seq_lock]]
+<p><b>Step locken.</b> [TRIG 7] halten, [FX1] drücken, ((B)), LP, herunterdrehen. Loslassen. Diese Hat ist dunkler: ein <b>Parameter-Lock</b>.</p>
+[[/STEP]]
+[[STEP 8 | FX2=FX YES UP DOWN | qs_seq_fxlist]]
+<p><b>Effekt für den Track.</b> [FX2], dann [YES]. ECHO mit [UP] [DOWN] wählen, [YES]. Die sechs Echo-Regler liegen auf ((A)) bis ((F)).</p>
+[[/STEP]]
+[[STEP 9 | BANK=mixer LEVEL T1-8 TRIG1-8=mute TRIG9-16=solo | qs_seq_mixer]]
+<p><b>Abmischen.</b> [BANK] öffnet den Mixer. Track-Taste drücken, ((LEVEL)) drehen. Trigs 1 bis 8: Mute, 9 bis 16: Solo. [BANK] schließt.</p>
+[[/STEP]]
+<h2 id="qseq" class="run">Der Sequencer auf einen Blick</h2>
+[[ANNO seq_anno | Der Sequencer beim Spielen: Track 3 gewählt, SRC-Seite
+1,1,9,6 | L | Der gewählte Track
+12,1,5,6 | L | Das laufende Pattern
+0,10,128,5 | L | Tracks 1 und 2: dünne Reihen./Block = Trig, Punkt = leerer Step
+0,15,128,8 | L | Die hohe Reihe: der gewählte Track
+1,40,14,6 | L | Die Reglerseite
+37,1,12,6 | R | 16-Step-Seite / Seiten des Tracks
+52,1,13,6 | R | Das Tempo
+67,1,17,6 | R | PLAY oder LIVE
+32,10,8,28 | R | Der gespielte Step
+104,40,24,6 | R | LEN: Tracklänge in Steps
+0,49,128,15 | B | Die sechs Regler ((A)) bis ((F)): Name oben, Wert unten
+]]
+<h3>Acht Reglerseiten pro Track</h3>
+<figure class="draw">{{DIAGRAM seq_map}}</figure>
+<p>MACH auf SRC wählt die <b>Maschine</b>: SMPL (Sample), SUB (Sinus mit fallender Tonhöhe), FM (zwei Sinus), NOIS (Rauschen), PLUK (gezupfte Saite) oder MIDI (kein Klang, nur MIDI). ((LEVEL)) ist überall die Lautstärke des gewählten Tracks. Ein Track hat 1 bis 64 Steps (LEN auf PTN); [LEFT] [RIGHT] blättern in Sechzehnerseiten. Jede Änderung wird sofort im Gerät gesichert. Im Sequencer schweigen Kette und Quellen des Himmels; die Eingänge A bis D gehen dry hinaus.</p>
+<div class="cards">
+<div class="card"><div class="ct">Steps (GRID)</div>
+<div class="cr"><span>Trig tippen</span><span>Step setzen/löschen</span></div>
+<div class="cr"><span>Trig halten</span><span>Regler gehören dem Step: VEL MICR PROB COND RTCH CURV</span></div>
+<div class="cr"><span>Gehalten + [YES]</span><span>Step rückwärts</span></div>
+<div class="cr"><span>Gehalten + [LEFT] [RIGHT]</span><span>Früher/später schieben</span></div>
+<div class="cr"><span>[YES] gehalten</span><span>FILL: Steps mit FILL spielen</span></div>
+</div>
+<div class="card"><div class="ct">Parameter-Locks</div>
+<div class="cr"><span>Trig halten + [SRC] [AMP] [FX1] oder [MIDI]</span><span>Popup ``LOCK``: Regler dieser Seite gehören dem Step</span></div>
+<div class="cr"><span>Regler drehen</span><span>Wert gehört dem Step, unterstrichen. Max. drei Locks pro Step</span></div>
+<div class="cr"><span>Gehalten + [NO]</span><span>``LOCKS CLEARED``</span></div>
+</div>
+<div class="card"><div class="ct">Live spielen</div>
+<div class="cr"><span>[REC]</span><span>LIVE, und zurück zu GRID</span></div>
+<div class="cr"><span>[TRIG 1] bis [TRIG 8]</span><span>Pads für Tracks 1–8; beim Abspielen aufgenommen</span></div>
+<div class="cr"><span>[TRIG 9] bis [TRIG 16]</span><span>Tracks 1–8 stumm</span></div>
+<div class="cr"><span>Regler, beim Abspielen</span><span>Als Lock in den laufenden Step</span></div>
+</div>
+<div class="card"><div class="ct">Mute, Solo, Mixer</div>
+<div class="cr"><span>[FUNC] + [T1] bis [T8]</span><span>Stumm ein/aus: ``T3 MUTED``</span></div>
+<div class="cr"><span>[CUE] + [T1] bis [T8]</span><span>Solo ein/aus</span></div>
+<div class="cr"><span>[BANK]</span><span>Mixer: Trigs 1–8 Mute, 9–16 Solo, ((LEVEL)) Lautstärke</span></div>
+<div class="cr"><span>[SCENE A] + [FUNC] + ein Trig</span><span>Mutes als Mute-Szene 1–16 sichern</span></div>
+<div class="cr"><span>[SCENE A] + ein Trig</span><span>Mute-Szene abrufen</span></div>
+<div class="cr"><span>[FUNC] + [BANK]</span><span>Main ein Pattern lang in Sample 6.1 resampeln</span></div>
+</div>
+<div class="card"><div class="ct">Patterns und Chains</div>
+<div class="cr"><span>[PTN] + [TRIG 1] bis [TRIG 4]</span><span>Pattern A–D; beim Abspielen am Ende des laufenden</span></div>
+<div class="cr"><span>[PTN] + mehrere Trigs nacheinander</span><span>Chain aus bis zu acht: ``CHAIN SET``. Ein Pattern allein beendet sie</span></div>
+</div>
+<div class="card"><div class="ct">Kopieren, Einfügen, Löschen</div>
+<div class="cr"><span>[FUNC] + [REC]</span><span>Track kopieren: Steps, Locks, Länge</span></div>
+<div class="cr"><span>[PTN] + [FUNC] + [REC]</span><span>Pattern kopieren</span></div>
+<div class="cr"><span>[FUNC] + [STOP]</span><span>Einfügen</span></div>
+<div class="cr"><span>[FUNC] + [PLAY]</span><span>Track löschen, ohne Rückgängig</span></div>
+</div>
+<div class="card"><div class="ct">Tempo und Swing</div>
+<div class="cr"><span>[TEMPO], getippt</span><span>2–4 Taps im Takt; ein Tempo für beide Gesichter, 60–187 BPM</span></div>
+<div class="cr"><span>[TEMPO] gehalten + ((LEVEL))</span><span>1 BPM pro Raste</span></div>
+<div class="cr"><span>[PAGE], dann ((D)) TMPO</span><span>Dasselbe auf PTN</span></div>
+<div class="cr"><span>[PAGE], dann ((C)) SWNG</span><span>Swing: 50% ist gerade</span></div>
+</div>
+<div class="card"><div class="ct">Das Delay als Send</div>
+<div class="cr"><span>[FX1], dann ((C)) DLY</span><span>Anteil ins Master-Freeze-Delay</span></div>
+<div class="cr"><span>[MIX], dann ((F)) WET</span><span>Delay hören; Crossfader auf B friert ein</span></div>
+</div>
+</div>
+{{man:seq,seqsteps,seqpages,seqsong}}
+
+<h2 id="qusb">USB: Aufnehmen in einen Computer, und die Karte</h2>
+<p>USB-Buchse mit einem Computer verbinden: AERIA OS erscheint als Gerät <b>AERIA</b>, ohne Treiber. Sein Audio-Interface sendet Klang <b>vom Gerät zum Computer</b>, 44,1 kHz, 24 Bit, in einem von zwei Formaten; der Computer wählt.</p>
+<figure class="draw">{{DIAGRAM usb_formats}}</figure>
+<div class="two">
+<div>
+<h3>Sechs Kanäle</h3>
+<p>Das Standardformat. Kanäle 1 bis 4 sind die Eingänge A, B, C, D, unbearbeitet; 5 und 6 der Hauptausgang, genau wie an Main Out. So nehmen Sie Ihr trockenes Spiel und AERIAs Ergebnis zugleich auf.</p>
+<h3>Achtzehn Kanäle: Stems</h3>
+<p>Kanäle 1 und 2: Hauptausgang; 3 bis 18: acht Stereo-Stems, einer pro Sequencer-Track, um einen Jam später zu mischen.</p>
+<ul>
+<li>Track ohne Effekt: mono, Stem auf beiden Kanälen gleich.</li>
+<li>Delay-Echos nur im Hauptpaar. Stumme Tracks senden nichts.</li>
+</ul>
+</div>
+<div>
+<h3>18 Kanäle auf dem Mac wählen</h3>
+<ol class="steps">
+<li><b>Audio-MIDI-Setup</b> öffnen (Programme, Dienstprogramme).</li>
+<li>Links <b>AERIA</b> anklicken.</li>
+<li>Unter Eingang, Menü <b>Format</b>: <b>18 ch</b>.</li>
+<li>Im Aufnahmeprogramm AERIA als Eingang wählen, neun Stereospuren anlegen.</li>
+</ol>
+<ul>
+<li>Zurück: im selben Menü 6 ch.</li>
+<li>Im Himmel führen die Stems Stille.</li>
+<li>Beim Stem-Streaming zeichnet das Display langsamer; der Klang bleibt gleich.</li>
+</ul>
+</div>
+</div>
+<h3>USB DISK MODE: Dateien auf die Karte</h3>
+<div class="two w64">
+<div>
+<ol class="steps">
+<li>Im Himmel [FX2] für SYSTEM, dann [TRIG 1]. Die Karte erscheint am Computer als Laufwerk zum Lesen und Schreiben.</li>
+<li>WAVs kopieren: Loops, One-Shot-Ordner, Kits.</li>
+<li><b>Erst das Laufwerk am Computer auswerfen</b>, dann [NO]. Bis dahin wirkt am Panel nur [NO].</li>
+</ol>
+</div>
+<div>
+[[S usb_disk | USB DISK MODE]]
+</div>
+</div>
+{{man:usb,stems,card}}
+
+<h2 id="qmidi">MIDI an den 5-Pol-Buchsen</h2>
+<table class="tight">
+<tr><th>Buchse</th><th>Im Himmel</th><th>Im Sequencer</th></tr>
+<tr><td class="n"><b>MIDI Out</b></td><td>Noten der MIDI-Module GUMBALLS, PITCH, MARBLES, PONG</td><td>Note oder Akkord jedes Tracks und sein Program Change; SYNC auf SEND: Clock, Start, Stop; mit PCCH: Program Change des Patterns</td></tr>
+<tr><td class="n"><b>MIDI In</b></td><td>CCs für die Quad-Panner; Clock und Start für MARBLES</td><td>SYNC auf RECV: Clock, Start, Continue, Stop; mit PCCH: Program Change wählt das Pattern</td></tr>
+<tr><td class="n"><b>MIDI Thru</b></td><td colspan="2">Gibt MIDI In weiter (Hardware)</td></tr>
+</table>
+<div class="two">
+<div>
+<h3>Noten von einem Track</h3>
+<ol class="steps">
+<li>Im Sequencer Track wählen, [MIDI] drücken.</li>
+<li>((A)), MCH, von OFF auf den Kanal Ihres Instruments.</li>
+<li>((B)) NOTE: Note, ((C)) CHRD: Akkord darauf, ((D)) GATE: Länge, ((E)) PROG: Program Change.</li>
+<li>Steps setzen. Jeder sendet die Note mit seiner Velocity.</li>
+</ol>
+<p>Step halten, [MIDI], NOTE oder CHRD drehen: ein Lock. So spielt ein Track Melodien. Für reine MIDI-Tracks MACH auf SRC auf MIDI stellen.</p>
+[[S seq_midi | MIDI-Seite eines Tracks]]
+</div>
+<div>
+<h3>Sync und Patternwechsel</h3>
+<p>[MIDI] erneut: zweiter Satz. Seine zwei Regler gelten für den ganzen Sequencer:</p>
+<table class="tight">
+<tr><th>SYNC, Regler ((A))</th><th>Wirkung</th></tr>
+<tr><td class="k">OFF</td><td>Keine Clock hinaus; ankommende Clock und Transport ignoriert</td></tr>
+<tr><td class="k">SEND</td><td>Clock geht ständig hinaus, solange der Sequencer zu sehen ist; Start mit [PLAY], Stopp mit [STOP]</td></tr>
+<tr><td class="k">RECV</td><td>Folgt ankommender Clock: Start, Continue, Stop. Drei Punkte vor dem Tempo</td></tr>
+</table>
+<table class="tight">
+<tr><th>PCCH, Regler ((B))</th><th>Wirkung</th></tr>
+<tr><td class="k">OFF</td><td>Keine Program Changes für Patterns</td></tr>
+<tr><td class="k">1 bis 16</td><td>Auf diesem Kanal ist Program 1–4 Pattern A–D, gesendet beim Wechsel, befolgt beim Empfang</td></tr>
+</table>
+[[S seq_midi_sync | SYNC und PCCH: zweiter Satz der MIDI-Seite]]
+</div>
+</div>
+<p><b>Tracks vom Keyboard spielen.</b> Noten auf Kanal 1 bis 8 spielen Tracks 1 bis 8 (Note 60 = eigene Tonhöhe); LIVE-Aufnahme schreibt mit. NIN, Regler ((C)), schaltet das ab.</p>
+{{man:midi,pmidi,sync,midimod,midiimp}}
+
+<h2 id="qproj">Projekte und Speichern</h2>
+<div class="two">
+<div>
+<p><b>Zum Weitermachen ist kein Speichern nötig.</b> AERIA OS sichert den Zustand selbst: Nach dem Aus- und Einschalten ist alles wie vorher.</p>
+<p><b>Ein Projekt</b> bewahrt ein Stück für später: alles, um es wieder zu spielen, unter einem Namen mit bis zu zwölf Zeichen. Es gibt sechzehn; jedes enthält beide Gesichter: Kette und alle Regler, Wetter, Szenen, Master, geladene Samples und alle vier Patterns. Gespeichert werden die <b>Orte</b> der Samples, nicht ihr Klang: Die Karte braucht dieselben Dateien in denselben Ordnern.</p>
+<ol class="steps">
+<li>[PROJ] drücken, in beiden Gesichtern.</li>
+<li>Mit einem Trig eines der sechzehn wählen.</li>
+<li><b>Speichern:</b> [FUNC] + [YES]. Namen auf den Trigs tippen (zwei Buchstaben pro Trig; 14 Ziffern, 15 Leerzeichen, 16 löscht), dann [YES]. Popup: ``SAVED``.</li>
+<li><b>Laden:</b> [YES]. Popup: ``LOADED`` und der Name.</li>
+<li>[NO] oder [PROJ] schließt.</li>
+</ol>
+</div>
+<div>
+[[S project_name | Namen tippen: Buchstabenreihen = Trigs 1–8 und 9–16]]
+</div>
+</div>
+{{man:projects,kept}}
+
+<h2 id="qsavers" class="run">Bildschirmschoner und Spiele</h2>
+<p>Nach einer Weile ohne Berührung übernimmt ein Bildschirmschoner das Display. Es gibt {{SAVER_COUNT}}: <b>vier Spiele</b>, PADDLE, BRICKS, ROCKS und BLOCKS, die übrigen zum Zuschauen. Der Klang läuft weiter.</p>
+[[G4]]
+ss_paddle | PADDLE
+ss_bricks | BRICKS
+ss_rocks | ROCKS
+ss_blocks | BLOCKS
+[[/G]]
+<p><b>Einstellungen</b> auf SYSTEM, im Himmel: [FX2]. ((E)), SAVER: OFF, ein Name oder RANDOM; ((F)), WAIT: Zeit bis zum Start, 1 bis 60 Minuten; [YES] startet sofort. <b>Im Spiel</b> spielen [LEFT] [RIGHT] [UP] [DOWN], [YES], ((A)) oder ((LEVEL)); nach drei Sekunden Pause spielt es wieder selbst. [NO], jede andere Taste und jeder Regler beenden den Schoner.</p>
+{{man:savers,system}}
+
+<h2 id="qkeys">Tastenkombinationen</h2>
+<div class="cards sheet">
+<div class="card"><div class="ct">Beide Gesichter</div>
+<div class="cr"><span>[FUNC] + [MIDI]</span><span>Himmel zum Sequencer und zurück</span></div>
+<div class="cr"><span>[PROJ]</span><span>PROJECTS: Trig wählt, [YES] lädt, [FUNC] + [YES] sichert</span></div>
+<div class="cr"><span>[MIX]</span><span>MASTER: Trigs = Delay-Zeit, [NO] tippt Tempo</span></div>
+<div class="cr"><span>Crossfader auf B</span><span>Friert das Master-Delay ein</span></div>
+<div class="cr"><span>[NO]</span><span>Beendet Bildschirmschoner</span></div>
+<div class="cr"><span>[FUNC] beim Einschalten</span><span>Startup Menu. Dort nie TRIG 2</span></div>
+</div>
+<div class="card"><div class="ct">Himmel: Seiten</div>
+<div class="cr"><span>[SRC] / [AMP] / [LFO]</span><span>CHAIN / SKY / SOURCE</span></div>
+<div class="cr"><span>[FX1] / [FX2]</span><span>MIX (erneut: GAIN) / SYSTEM</span></div>
+<div class="cr"><span>[PART] / [AED] / [ARR]</span><span>BALLOON / LOOP / STARS</span></div>
+<div class="cr"><span>[MIDI]</span><span>MIDI-Module; erneut: nächstes</span></div>
+<div class="cr"><span>[CUE]</span><span>OUT: Routing, Quad-Panner</span></div>
+<div class="cr"><span>[REC]</span><span>Grain-Wolken-Editor</span></div>
+<div class="cr"><span>[FUNC] gehalten / [PAGE]</span><span>Zweiter Reglersatz / einrasten</span></div>
+</div>
+<div class="card"><div class="ct">Himmel: Kette</div>
+<div class="cr"><span>[T1] bis [T7]</span><span>Slot wählen, CHAIN zeigen</span></div>
+<div class="cr"><span>[FUNC] + [T1] bis [T7]</span><span>Slot umgehen oder zurückholen</span></div>
+<div class="cr"><span>[BANK] auf CHAIN</span><span>Regal: [YES] nimmt, [NO] zurück</span></div>
+<div class="cr"><span>((A)) bis ((F)) drücken</span><span>Regler zurück ans Wetter</span></div>
+<div class="cr"><span>[T1] + [T2] / [T3] + [T4]</span><span>Eingänge A B / C D: stereo/mono</span></div>
+</div>
+<div class="card"><div class="ct">Himmel: Wetter</div>
+<div class="cr"><span>SKY, MIX, GAIN: [TRIG 1]</span><span>CLEAR: alles Wetter aus</span></div>
+<div class="cr"><span>[TRIG 2] bis [TRIG 7]</span><span>CLOUDY RAIN STORM SNOW HEAT FOG</span></div>
+<div class="cr"><span>[TRIG 8] oder ((LEVEL)) drücken</span><span>AUTO-Wetter</span></div>
+<div class="cr"><span>[TRIG 16]</span><span>Blitz</span></div>
+<div class="cr"><span>[TRIG 9] [TRIG 10] [TRIG 11]</span><span>WIND, HAIL, AURORA</span></div>
+<div class="cr"><span>[TRIG 12]</span><span>Ein TWISTER</span></div>
+<div class="cr"><span>((LEVEL)), [UP] [DOWN]</span><span>Nächstes oder voriges Wetter</span></div>
+<div class="cr"><span>[YES] / [NO]</span><span>Tag oder Nacht / neuer Himmel</span></div>
+<div class="cr"><span>MIX: ((F)) WSND</span><span>Wetterklang ein oder aus</span></div>
+</div>
+<div class="card"><div class="ct">Himmel: Quellen und Ballons</div>
+<div class="cr"><span>SOURCE: [TRIG 1] [TRIG 2] [TRIG 3]</span><span>LOOP, STARS, BALLOONS ein/aus</span></div>
+<div class="cr"><span>SOURCE: [FUNC] + [TRIG 1] / [TRIG 2]</span><span>Loop / Sterne-Ordner wählen</span></div>
+<div class="cr"><span>[REC1] / [REC2] / [REC3]</span><span>Ballon 1/2/3 fangen; erneut: schwebt</span></div>
+<div class="cr"><span>[FUNC] + [REC1] / [REC2] / [REC3]</span><span>Platzen lassen</span></div>
+<div class="cr"><span>[PTN] / [BANK]</span><span>STARS: RING oder BIRDS / nächste Bank</span></div>
+</div>
+<div class="card"><div class="ct">Himmel: Szenen und System</div>
+<div class="cr"><span>[SCENE A] oder [SCENE B] + Regler</span><span>Wert in diese Szene</span></div>
+<div class="cr"><span>[SCENE A] oder [SCENE B] + Trig</span><span>Hält Szene 1–16</span></div>
+<div class="cr"><span>[SCENE A] oder [SCENE B] + [NO]</span><span>Löscht diese Szene</span></div>
+<div class="cr"><span>SYSTEM: [TRIG 1] / [YES]</span><span>USB DISK MODE / Schoner jetzt</span></div>
+</div>
+<div class="card"><div class="ct">Sequencer: Tracks und Transport</div>
+<div class="cr"><span>[T1] bis [T8]</span><span>Track wählen</span></div>
+<div class="cr"><span>[UP] [DOWN]</span><span>Track darüber/darunter</span></div>
+<div class="cr"><span>[FUNC] + [T1] bis [T8]</span><span>Stumm ein/aus</span></div>
+<div class="cr"><span>[CUE] + [T1] bis [T8]</span><span>Solo ein/aus</span></div>
+<div class="cr"><span>[PLAY]</span><span>Ab Step 1 spielen</span></div>
+<div class="cr"><span>[STOP]; erneut</span><span>Stopp; Stille</span></div>
+<div class="cr"><span>[TEMPO]</span><span>Tippen. Gehalten + ((LEVEL)): 1 BPM/Raste</span></div>
+<div class="cr"><span>((LEVEL))</span><span>Lautstärke des gewählten Tracks</span></div>
+<div class="cr"><span>[BANK]</span><span>Mixer: 1–8 Mute, 9–16 Solo</span></div>
+</div>
+<div class="card"><div class="ct">Sequencer: Steps</div>
+<div class="cr"><span>[REC]</span><span>GRID oder LIVE</span></div>
+<div class="cr"><span>Trig tippen</span><span>Step setzen oder löschen</span></div>
+<div class="cr"><span>Trig halten</span><span>Regler gehören dem Step</span></div>
+<div class="cr"><span>Gehalten + [SRC] [AMP] [FX1] [MIDI]</span><span>Regler dieser Seite locken</span></div>
+<div class="cr"><span>Gehalten + [YES] / [NO]</span><span>Rückwärts / Locks löschen</span></div>
+<div class="cr"><span>Gehalten + [LEFT] [RIGHT]</span><span>Früher/später schieben</span></div>
+<div class="cr"><span>[LEFT] [RIGHT]</span><span>Seite mit 16 Steps</span></div>
+<div class="cr"><span>LIVE: Trigs 1–8 / 9–16</span><span>Pads / Mutes, Tracks 1–8</span></div>
+<div class="cr"><span>[YES] gehalten</span><span>FILL</span></div>
+</div>
+<div class="card"><div class="ct">Sequencer: Seiten, Patterns, Kopieren</div>
+<div class="cr"><span>[SRC] [AMP] [LFO] [FX1] [FX2]</span><span>SRC AMP MOD FLT FX</span></div>
+<div class="cr"><span>[ARR] / [MIDI] / [PAGE]</span><span>GEN / MIDI / PTN</span></div>
+<div class="cr"><span>Seitentaste erneut / [FUNC] gehalten</span><span>Zweiter Satz</span></div>
+<div class="cr"><span>[YES] auf FX</span><span>Effektliste</span></div>
+<div class="cr"><span>[FUNC] + [YES] auf SRC</span><span>Kit von der Karte laden</span></div>
+<div class="cr"><span>[PTN] + [TRIG 1] bis [TRIG 4]</span><span>Pattern A–D; mehrere: Chain</span></div>
+<div class="cr"><span>[FUNC] + [REC]</span><span>Track kopieren ([PTN] dazu: Pattern)</span></div>
+<div class="cr"><span>[FUNC] + [STOP] / [PLAY]</span><span>Einfügen / Track löschen</span></div>
+</div>
+</div>
+<p class="more"><b>Weiterlesen.</b> Das <b>AERIA OS Benutzerhandbuch</b> (AERIA_OS_Manual_Dark.pdf oder _Light.pdf, im selben Ordner) beschreibt jede Seite, alle Effekte, Quad-Panner, MIDI-Module, Grenzen und Fehlersuche; Anhang „{{title:keys}}“ listet alle Kombinationen. +: erste Taste halten, zweite drücken.</p>

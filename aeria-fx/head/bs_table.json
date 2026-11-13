@@ -1,0 +1,8 @@
+[
+ {"dir": "pitch",  "pkg": "aeria-pitch", "id": 31, "abbr": "PTCH", "full": "AERIA PITCH", "out": "aeria-pitch.mwrm"},
+ {"dir": "reso",   "pkg": "aeria-reso",  "id": 10, "abbr": "RESO", "full": "AERIA RESO",  "out": "aeria-reso.mwrm"},
+ {"dir": "disto",  "pkg": "aeria-dist",  "id": 11, "abbr": "DIST", "full": "AERIA DIST",  "out": "aeria-dist.mwrm"},
+ {"dir": "ringph", "pkg": "aeria-ring",  "id": 26, "abbr": "RING", "full": "AERIA RING",  "out": "aeria-ring.mwrm"},
+ {"dir": "smear",  "pkg": "aeria-smear", "id": 30, "abbr": "SMER", "full": "AERIA SMEAR", "out": "aeria-smear.mwrm"},
+ {"dir": "grains", "pkg": "aeria-grain", "id": 9,  "abbr": "GRN",  "full": "AERIA GRAIN", "out": "aeria-grain.mwrm"}
+]

@@ -1,0 +1,14 @@
+Jit@154: No profiler detected
+operands parsed: 2307 at 2307 PCs
+m4 ffffff sp 000000
+after 300: pc 33842 X:33a10 000000 X:33a90 6fa35f shared 000000
+== repro seed 12: 33308 frames, late 0, violations 0, max SP 9
+   longest bbd.init       222 instr (14 a sample)
+   longest bbd.proc       10882 instr (680 a sample)
+   longest pt2399.init    305 instr (19 a sample)
+   longest pt2399.proc    14272 instr (892 a sample)
+   longest tape.init      362 instr (23 a sample)
+   longest tape.proc      6288 instr (393 a sample)
+   deepest stack inside bbd      +6 below the dispatcher's
+   deepest stack inside pt2399   +6 below the dispatcher's
+   deepest stack inside tape     +5 below the dispatcher's

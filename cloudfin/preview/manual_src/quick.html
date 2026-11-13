@@ -1,0 +1,544 @@
+<div class="cover">
+  <img src="img/aeria_logo.png" alt="AERIA" style="width:120mm; margin-bottom:26px">
+  <h1>AERIA OS</h1>
+  <div class="sub">FOR OCTATRACK MKII</div>
+  <div class="big">QUICK GUIDE</div>
+  <div class="by">BY SADNOISE</div>
+  <div class="ed">For the build {{BUILD}}</div>
+</div>
+
+<h2 id="welcome">Welcome</h2>
+<p class="lead">AERIA OS is an operating system for the Octatrack MKII, written by sadnoise. It takes the place of the instrument's own and turns the same panel, the same sockets and the same sound processor into a different instrument with <b>two faces</b>: a live multi-effect built around a sky, and an eight-track sequencer.</p>
+<figure class="draw narrow">{{DIAGRAM faces}}</figure>
+<div class="big3">
+<div><b>The sky</b>What you play into inputs A to D runs through a <b>chain</b> of up to seven effects. The <b>weather</b> moves their knobs and lends effects of its own. A loop, a ring of one-shots called stars, and balloons you record yourself feed the chain as well.</div>
+<div><b>The sequencer</b>A groove box: <b>eight tracks</b> on the sixteen trigs. Each track has a voice (a sample, one of four small synthesizers, or MIDI alone), two filters and room for one effect. Every step can have its own values: parameter locks.</div>
+<div><b>Shared by both</b>The master section (a freeze delay, a four-band EQ, bass mono and a limiter on the main output), the tempo, sixteen <b>projects</b>, the card, USB audio and the screensavers.</div>
+</div>
+<p>[FUNC] + [MIDI] goes from one face to the other. The popup says ``SEQUENCER`` or ``AERIA``.</p>
+<div class="two w64">
+<div>
+<h3>How this guide is written</h3>
+<table class="tight">
+<tr><td>[FUNC]</td><td>A <b>key</b>, by the name printed on it</td></tr>
+<tr><td>[FUNC] + [MIDI]</td><td><b>Hold</b> the first key and <b>press</b> the second</td></tr>
+<tr><td>[T1] to [T8]</td><td>The eight <b>track keys</b> beside the screen</td></tr>
+<tr><td>[TRIG 1] to [TRIG 16]</td><td>The sixteen <b>trig keys</b> along the bottom</td></tr>
+<tr><td>((LEVEL)), ((A)) to ((F))</td><td>A <b>knob</b>. ((A)) ((B)) ((C)) are the top row of data knobs, ((D)) ((E)) ((F)) the bottom row</td></tr>
+<tr><td>``FREEZE ON``</td><td>A <b>message</b> on the screen, usually in the <b>popup</b>: the box that shows a value for a little over a second</td></tr>
+<tr><td>&lt;&lt;TEMPO&gt;&gt;</td><td>A <b>lamp</b>: the light in a key</td></tr>
+</table>
+</div>
+<div>
+<h3>In this guide</h3>
+{{QTOC}}
+</div>
+</div>
+<p><small>This guide is the short way in; each section ends with the chapters of the AERIA OS User Manual that go deeper. The screen pictures are drawn by AERIA's own screen code and the panel drawings are our own. AERIA OS is not an Elektron product, and Elektron does not support it.</small></p>
+
+<h2 id="qpanel">Panel layout</h2>
+<figure class="draw">{{FRONT}}<figcaption>The front panel. The names printed on it stay; most keys have a new job, and a different one in each face.</figcaption></figure>
+<table class="long tight plist">
+<thead><tr><th></th><th>Control</th><th>In the sky</th><th>In the sequencer</th></tr></thead>
+<tr><td>1</td><td>[REC1] [REC2]</td><td>Catch a balloon from inputs A B / C D. Again: it floats. With [FUNC]: pop it</td><td>Not used</td></tr>
+<tr><td>2</td><td>[REC3]</td><td>Catch the sky (the chain's output) into balloon 3</td><td>Not used</td></tr>
+<tr><td>3</td><td>[T1] to [T8]</td><td>[T1] to [T7] select chain slot 1 to 7. With [FUNC]: bypass the slot. [T1] + [T2] together: inputs A B stereo or mono; [T3] + [T4]: C D</td><td>Take a track in hand. With [FUNC]: mute it. With [CUE]: solo it</td></tr>
+<tr><td>4</td><td>Screen</td><td colspan="2">128 by 64 pixels. In the sky a page fades after about ten seconds and leaves the landscape; any key or knob brings it back</td></tr>
+<tr><td>5</td><td>&lt;&lt;CARD STATUS&gt;&gt;</td><td colspan="2">Lights while the card is read or written</td></tr>
+<tr><td>6</td><td>((LEVEL))</td><td>Turn: the next or previous weather. Push: AUTO weather. In a list: moves through it</td><td>The volume of the track in hand. With [TEMPO] held: the tempo</td></tr>
+<tr><td>7</td><td>((A)) to ((F))</td><td>The six knobs of the page on screen. With [FUNC] held: the second set. On CHAIN, push a knob to give it back to the weather</td><td>The six knobs of the knob page. While a step is held: that step's own values</td></tr>
+<tr><td>8</td><td>[TEMPO]</td><td>Not used</td><td>Tap the tempo. Held, with ((LEVEL)): one BPM a click</td></tr>
+<tr><td>9</td><td>[SCENE A] [SCENE B]</td><td>Hold one and turn a knob: the value goes into that scene. Hold one and press a trig: scene 1 to 16. Hold one and press [NO]: clear it</td><td>Act on the MASTER page's knobs only</td></tr>
+<tr><td>10</td><td>[PAGE]</td><td>Latches the second set of knobs on or off</td><td>The PTN page: lengths, swing, tempo, ducking</td></tr>
+<tr><td>11</td><td>Crossfader</td><td colspan="2">Moves every knob held in scene A toward its place in scene B. Pushed most of the way to B it freezes the master's delay</td></tr>
+<tr><td>12</td><td>[STOP]</td><td>Not used</td><td>Stops. Again: silence at once. [FUNC] + [STOP] pastes</td></tr>
+<tr><td>13</td><td>[PLAY]</td><td>Not used</td><td>Plays from the first step. [FUNC] + [PLAY] clears the track in hand</td></tr>
+<tr><td>14</td><td>[REC]</td><td>The grain cloud editor</td><td>GRID (steps) or LIVE (pads). [FUNC] + [REC] copies the track</td></tr>
+<tr><td>15</td><td>[SRC] [AMP] [LFO] [FX1] [FX2]</td><td>Pages CHAIN, SKY, SOURCE, MIX (again: GAIN), SYSTEM</td><td>Knob pages SRC, AMP, MOD, FLT, FX. The same key again: the second set</td></tr>
+<tr><td>16</td><td>[UP] [DOWN] [LEFT] [RIGHT]</td><td>[LEFT] [RIGHT]: the slot on CHAIN, elsewhere the page. [UP] [DOWN]: the weather; in a list, move through it</td><td>[LEFT] [RIGHT]: the page of sixteen steps. [UP] [DOWN]: the track above or below</td></tr>
+<tr><td>17</td><td>[NO]</td><td>Closes what is open. Elsewhere: a new sky</td><td>With a step held: clears that step's locks</td></tr>
+<tr><td>18</td><td>[YES]</td><td>Confirms: loads, picks, opens. Where there is nothing to confirm: day or night</td><td>Held: FILL. With a step held: the step plays backward. On FX: the list of effects</td></tr>
+<tr><td>19</td><td>[BANK]</td><td>On CHAIN: the shelf of effects. Elsewhere: the next bank of STARS</td><td>The mixer</td></tr>
+<tr><td>20</td><td>[CUE]</td><td>OUT: routing and the quad panner</td><td>[CUE] + a track key: solo</td></tr>
+<tr><td>21</td><td>[TRIG 1] to [TRIG 16]</td><td>They change with the page: slots, weathers, the delay's time, sources, projects, letters</td><td>GRID: the sixteen steps. LIVE: pads 1 to 8, mutes 9 to 16. With [PTN] held: patterns A to D</td></tr>
+<tr><td>22</td><td>[PTN]</td><td>STARS mode: RING or BIRDS</td><td>Hold it and press [TRIG 1] to [TRIG 4]: the pattern</td></tr>
+<tr><td>23</td><td>[FUNC]</td><td colspan="2">Hold it with another key or a knob for that control's second job. Held while switching on: the Elektron Startup Menu</td></tr>
+<tr><td>24</td><td>[PROJ]</td><td colspan="2">PROJECTS: save and load everything under a name</td></tr>
+<tr><td>25</td><td>[PART]</td><td>The BALLOON page</td><td>Not used</td></tr>
+<tr><td>26</td><td>[AED]</td><td>The LOOP page</td><td>Not used</td></tr>
+<tr><td>27</td><td>[MIX]</td><td colspan="2">The MASTER page: the freeze delay and the tempo</td></tr>
+<tr><td>28</td><td>[ARR]</td><td>The STARS page</td><td>The GEN page</td></tr>
+<tr><td>29</td><td>[MIDI]</td><td>The MIDI modules. [FUNC] + [MIDI]: to the sequencer</td><td>The MIDI page. [FUNC] + [MIDI]: back to the sky</td></tr>
+<tr><td>30</td><td>((HEADPHONES VOL))</td><td colspan="2">The volume of the headphone socket</td></tr>
+</table>
+{{man:panel,controls,seqkeys}}
+
+<h2 id="qconn">Connections</h2>
+<figure class="draw">{{REAR}}</figure>
+<table class="tight plist">
+<tr><th></th><th>Connector</th><th>What AERIA OS does with it</th></tr>
+<tr><td>1</td><td>Power</td><td>The power switch. Hold [FUNC] while switching on for the Elektron Startup Menu</td></tr>
+<tr><td>2</td><td>12VDC 2A</td><td>The power supply that came with the unit</td></tr>
+<tr><td>3</td><td>USB</td><td>To a computer: an <b>audio interface</b> with 6 or 18 channels, <b>USB DISK MODE</b>, and the update tools. No MIDI over USB</td></tr>
+<tr><td>4</td><td>Compact Flash</td><td>The card with your samples: loops, folders of stars, kits. FAT16 or FAT32. AERIA OS only reads it</td></tr>
+<tr><td>5</td><td>MIDI Thru</td><td>A copy of what arrives at MIDI In, made by the hardware itself</td></tr>
+<tr><td>6</td><td>MIDI Out</td><td>Notes and chords, program changes and, with SYNC at SEND, clock, start and stop</td></tr>
+<tr><td>7</td><td>MIDI In</td><td>Control changes for the quad panners; with SYNC at RECV, clock, start, continue and stop; a program change picks the pattern</td></tr>
+<tr><td>8</td><td>Inputs A B C D</td><td>Two pairs, A B and C D. In the sky they feed the chain, each pair stereo or mono. In the sequencer they pass to the output dry</td></tr>
+<tr><td>9</td><td>Cue Out L R</td><td>The <b>second output pair</b>: effect slots or tracks routed to CUE. The master section is not on this pair</td></tr>
+<tr><td>10</td><td>Main Out L R</td><td>The main mix, after the master section: freeze delay, EQ, bass mono, limiter</td></tr>
+<tr><td>11</td><td>Headphones</td><td>Main and cue together. ((HEADPHONES VOL)) on the front sets its level</td></tr>
+</table>
+<figure class="draw">{{DIAGRAM hookup}}</figure>
+{{man:rearpanel,usb,midi}}
+
+<h2 id="qstart">Switching on and finding your way</h2>
+<div class="two">
+<div>
+<ol class="steps">
+<li>Connect <b>Main Out L R</b> to your mixer or speakers, or plug in headphones.</li>
+<li>Connect something to play to <b>inputs A B</b>: a synthesizer, a drum machine, a microphone preamp.</li>
+<li>Put in the CompactFlash card if you have samples on one. AERIA OS plays without it.</li>
+<li><b>Switch on.</b> The intro paints the logo and writes BY SADNOISE; the sea rises and the sky opens. The intro is silent. Any key skips it.</li>
+</ol>
+</div>
+<div>
+[[G2]]
+intro1 | The brush paints the logo
+intro3 | The sea rises, and the sky opens
+[[/G]]
+</div>
+</div>
+<p>AERIA OS comes back <b>as you left it</b>: it keeps what you are doing in the unit's battery-backed memory, the sound about two seconds after a change and the sequence at every touch. If you switched off in the sequencer, it starts in the sequencer, stopped. The very first time, the chain holds PITCH, GRAINS, RING and SMEAR in slots 1, 3, 4 and 5, all <b>dry</b>: you hear your sound as it comes in.</p>
+[[PANEL FUNC TRIG2=never | The way back: the Startup Menu
+[FUNC] held while switching on :: The Elektron Startup Menu. It is always there: AERIA OS never writes to the bootloader. It is how any operating system is sent into the unit, AERIA OS again or the Octatrack's own
+[TRIG 2] in that menu :: EMPTY RESET. <b>Do not press it</b>
+]]
+<div class="warn"><b>Never press TRIG 2 (EMPTY RESET) in the Startup Menu</b> unless you mean to wipe the unit. If AERIA OS will not start, hold [FUNC] while switching on, choose <b>MIDI UPGRADE</b> and send <small>AERIA_OS.syx</small> into the <b>MIDI In</b> socket from a MIDI interface on your computer.</div>
+
+<div class="big3">
+<div><b>Pages</b>One screenful with its own six knobs. A page key opens it. The six names on the screen are in the order of the knobs on the panel.</div>
+<div><b>The second set</b>Most pages have six more knobs. In the sky hold [FUNC], or press [PAGE] to stay on it. In the sequencer hold [FUNC], or press the page's key again.</div>
+<div><b>Lamps</b>All lamps are white; brightness is the only signal. In the sky they show what a key would do on this page. In the sequencer they show steps, notes and the playhead. The lamps above [REC1] and [REC2] are the levels of inputs A B C D; the card lamp flickers while the card is busy; above [ARR], the main level in the sky.</div>
+</div>
+<h3>The screen</h3>
+[[ANNO chain | The CHAIN page of the sky, as the unit first starts
+1,1,56,8 | L | The page, or the name of/the selected effect
+8,10,112,12 | L | The seven slots of the chain/on a string
+10,24,10,2 | L | The bar marks the selected slot
+1,57,26,7 | L | Input routing: A B and C D
+100,1,27,8 | R | The weather that is on
+8,27,116,16 | R | The six knobs as bowls:/the fuller, the higher
+8,43,116,8 | R | Their names, ((A)) at the left/to ((F)) at the right
+0,51,128,7 | R | The sea, with the boat
+]]
+
+<h3>The keys that open the pages</h3>
+<table class="tight">
+<tr><th>Key</th><th>In the sky</th><th>In the sequencer</th></tr>
+<tr><td>[SRC]</td><td>CHAIN: the seven slots and the selected effect's knobs</td><td>SRC: the machine and its sound</td></tr>
+<tr><td>[AMP]</td><td>SKY: wind, clouds, waves, weather</td><td>AMP: envelope, volume, pan, drive, bits</td></tr>
+<tr><td>[LFO]</td><td>SOURCE: LOOP, STARS, BALLOONS on or off</td><td>MOD: one modulation a track</td></tr>
+<tr><td>[FX1]</td><td>MIX; again: GAIN and the master EQ</td><td>FLT: filters, delay send, output</td></tr>
+<tr><td>[FX2]</td><td>SYSTEM</td><td>FX: the track's effect</td></tr>
+<tr><td>[MIX]</td><td colspan="2">MASTER: the freeze delay and the tempo</td></tr>
+<tr><td>[PART] / [AED] / [ARR]</td><td>BALLOON / LOOP / STARS</td><td>[ARR]: GEN: density, direction, rotation, warp, rate</td></tr>
+<tr><td>[MIDI]</td><td>The MIDI modules: GUMBALLS, PITCH, MARBLES, PONG</td><td>MIDI: channel, note, chord, gate, program; sync</td></tr>
+<tr><td>[PAGE]</td><td>(latches the second set of knobs)</td><td>PTN: lengths, swing, tempo, ducking</td></tr>
+<tr><td>[CUE]</td><td>OUT: routing and the quad panner</td><td>(solo, with a track key)</td></tr>
+<tr><td>[REC]</td><td>The grain cloud editor</td><td>(GRID or LIVE)</td></tr>
+<tr><td>[BANK]</td><td>The shelf of effects (on CHAIN)</td><td>The mixer</td></tr>
+<tr><td>[PROJ]</td><td colspan="2">PROJECTS</td></tr>
+</table>
+{{man:quick,overview,update}}
+
+<h2 id="qsky">First sound in the sky</h2>
+<p>Play something into inputs A B and listen on the main outputs or the headphones. Each step shows the keys to press and what the screen should look like afterwards.</p>
+[[STEP 1 | SRC TRIG1-7=slots | qs_sky_chain]]
+<p><b>Open the chain.</b> Press [SRC]. The seven slots hang on a string; slot 1, PITCH, is selected. You hear your sound as it is, because every effect is dry.</p>
+[[/STEP]]
+[[STEP 2 | TRIG3 F=MIX | qs_sky_mix]]
+<p><b>Bring an effect in.</b> Press [TRIG 3] to select GRAINS. Turn ((F)), MIX, up to about half. Your sound is now cut into grains.</p>
+[[/STEP]]
+[[STEP 3 | A=SIZE B=DENS C=POS D=SPRY E=PTCH | chain_popup_ms]]
+<p><b>Play its knobs.</b> ((A)) to ((E)) are the effect's other knobs. The popup reads in real units. Hold [FUNC] for the effect's second set.</p>
+[[/STEP]]
+[[STEP 4 | TRIG6 BANK=shelf YES UP DOWN LEVEL | shelf]]
+<p><b>Pick another effect.</b> Press [TRIG 6], an empty slot, then [BANK] (or [YES]) for the <b>shelf</b>: the list of effects. Choose with ((LEVEL)) or [UP] [DOWN] and press [YES]. [NO] goes back.</p>
+[[/STEP]]
+[[STEP 5 | AMP=SKY TRIG3=RAIN TRIG1=CLEAR | qs_sky_rain]]
+<p><b>Change the weather.</b> Press [AMP] for the SKY page, then [TRIG 3]: RAIN. The effects' knobs glide to rainier places and a low-pass eases in. [TRIG 1] clears the sky again.</p>
+[[/STEP]]
+[[STEP 6 | MIX=MASTER F=WET TRIGS=time | qs_sky_delay]]
+<p><b>Add the master's delay.</b> Press [MIX] for the MASTER page. Turn ((F)), WET, up. The sixteen trigs set the delay's time in sixteenth notes.</p>
+[[/STEP]]
+[[STEP 7 | XFADER=freeze | master_freeze]]
+<p><b>Freeze it.</b> Push the crossfader to B. The popup says ``FREEZE ON``: what is in the delay goes round for as long as you like. Bring the crossfader back and it lets go.</p>
+[[/STEP]]
+[[STEP 8 | SCENEA SCENEB XFADER KNOBS SRC | scene_knob]]
+<p><b>Make two scenes.</b> Press [SRC]. Hold [SCENE A] and turn a knob; hold [SCENE B] and turn the same knob somewhere else. Now the crossfader moves that knob between the two places.</p>
+[[/STEP]]
+<div class="two">
+<div class="note"><b>Effects start dry.</b> An effect's MIX (knob ((F))) says how much of it you hear. The weather never moves a MIX. An effect taken from the shelf comes in at its own default MIX.</div>
+<div class="tip"><b>Good to know on CHAIN.</b> [FUNC] + a trig or track key bypasses a slot. Push a knob to hand it back to the weather. The first line of the shelf, a dash, empties the slot.</div>
+</div>
+{{man:chain,fx,mix,scenes,out}}
+
+<h2 id="qweather" class="run">The weather</h2>
+<p>The weather is the heart of the sky. Each weather is <b>on or off by itself</b>, and several can be on at once. On the <b>SKY</b>, <b>MIX</b> and <b>GAIN</b> pages the trigs are the weathers:</p>
+[[TRIGS 1121111111110001 | The trigs on SKY, MIX and GAIN. Here RAIN is on. 1 turns every weather off; 12 sends one twister across; 16 is a lightning strike | 1=CLEAR 2=CLOUDY 3=RAIN 4=STORM 5=SNOW 6=HEAT 7=FOG 8=AUTO 9=WIND 10=HAIL 11=AUR. 12=TWIST. 16=bolt]]
+[[G3]]
+sky_rain | RAIN
+sky_storm | STORM, at a lightning strike
+sky_snow | SNOW: the sea freezes flat
+sky_fog | FOG
+sky_aurora | AURORA, at night
+sky_twister | A TWISTER half way across
+[[/G]]
+<div class="two">
+<div>
+<h3>It moves the knobs</h3>
+<p>CLOUDY, RAIN, STORM, SNOW, HEAT and FOG each have a character, and set the knobs of every effect in the chain to suit: RAIN wetter and longer, STORM wild: it throws every free knob of every effect somewhere new every few seconds, and its lightning drops effects in and takes them out again, SNOW very long and dark (it freezes SMEAR), HEAT dry and bright. It goes by the knob's name: SIZE, TIME, DECY, FDBK, TONE, RATE, RES, WDTH, DPTH, SMR, FRZ, GRN, DENS, WIDE, TILT, BRIT, GATE, DTUN, MOD and FOLW follow the weather.</p>
+<ul>
+<li>A knob follows the weather <b>until you turn it</b>. Then it is yours. Push the knob on CHAIN to give it back.</li>
+<li><b>MIX never follows the weather.</b></li>
+<li>SNOW and HEAT cannot be on together.</li>
+<li>The weather never touches the master section.</li>
+</ul>
+</div>
+<div>
+<h3>It lends effects</h3>
+<p>The weather also acts on the sound directly. RAIN and STORM ease a low-pass in; thunder rolls it down; in a STORM a lightning strike lends a random effect to the last empty slot for 45 to 90 seconds.</p>
+<p><b>FOG, WIND, HAIL, AURORA</b> and the <b>TWISTER</b> each bring an effect of their own. While the weather lasts, the sky puts it into the <b>last empty slot</b> of the chain and fades it in; the popup says, for example, ``AERIA WIND IN``. When the weather goes, the effect fades and the slot is emptied.</p>
+<ul>
+<li>No empty slot, or no room left in the sound processor (``NO ROOM`` ``DSP FULL``): the sky still shows the weather, and its sound is left out.</li>
+<li>WIND and FOG are never on together, nor HAIL and AURORA.</li>
+</ul>
+</div>
+</div>
+<div class="warn"><b>WSND is the switch for all of it.</b> WSND is knob ((F)) on the MIX page ([FX1]). At ON, the weather is heard: its filters, the thunder, and the effects it lends. At OFF the sky shows the weather and still moves the knobs, but nothing of it is heard and nothing is lent. If a weather seems to do nothing, look at WSND, then for an empty slot.</div>
+[[PANEL AMP=SKY FX1=MIX LEVEL UP DOWN YES NO TRIG16=bolt | The weather from any page
+((LEVEL)) turned, or [UP] [DOWN] :: The next or previous weather, by itself: CLEAR, CLOUDY, RAIN, STORM, SNOW, HEAT, FOG
+((LEVEL)) pushed :: AUTO weather on or off: the weather changes by itself
+[YES] :: Day or night (where there is nothing to confirm)
+[NO] :: A new sky (where there is nothing to close)
+[TRIG 16] :: Lightning, on SKY, MIX, GAIN and CHAIN
+]]
+{{man:sky,moreweather,wxfx,fxweather}}
+
+<h2 id="qrec">Recording: balloons and samples</h2>
+<p>In the sky you record into <b>balloons</b>. A balloon is a recording of up to 15 seconds that floats in the sky and sings as a cloud of long grains, through the chain. There are three.</p>
+[[STEP 1 | REC1=A_B REC2=C_D REC3=sky | balloon_filling]]
+<p><b>Catch, and let go.</b> Press [REC1] to record inputs A B into balloon 1, [REC2] for inputs C D into balloon 2, or [REC3] to catch the sky itself (the chain's output) into balloon 3. The popup says ``CATCHING`` and the balloon swells on the water. Press the same key again and it floats up.</p>
+[[/STEP]]
+[[STEP 2 | LFO=SOURCE TRIG1=LOOP TRIG2=STARS TRIG3=BALLN | source]]
+<p><b>Let it sing.</b> Press [LFO] for SOURCE and [TRIG 3]: BALLOONS on. Every floating balloon now sings into the start of the chain, so the effects work on it too.</p>
+[[/STEP]]
+[[STEP 3 | PART=BALLOON KNOBS FUNC RECS | balloon_popup]]
+<p><b>Shape it, or pop it.</b> [PART] opens the BALLOON page: SIZE, SPRY, PTCH, DENS, POS and SEND. [FUNC] + the recorder key pops a balloon; its recording is gone.</p>
+[[/STEP]]
+<div class="note">The balloons' recordings are not kept when the power goes off, and a project does not hold them.</div>
+<h3>Samples from the card</h3>
+<p>The other two sources of the sky, and the sequencer's kit, play <b>WAV files from the CompactFlash card</b>. AERIA OS only reads the card; to put files on it, use USB DISK MODE (section 10). In the card browser [UP] [DOWN] or ((LEVEL)) move, [YES] opens or loads, [NO] goes back.</p>
+<table class="tight">
+<tr><th>Keys</th><th>What it loads</th></tr>
+<tr><td>SOURCE: [FUNC] + [TRIG 1]</td><td>The <b>LOOP</b>: one looping sample. [AED] is its page</td></tr>
+<tr><td>SOURCE: [FUNC] + [TRIG 2]</td><td>A folder for <b>STARS</b>: sixteen of its files, as one-shots. [ARR] is its page</td></tr>
+<tr><td>Sequencer, SRC: [FUNC] + [YES]</td><td>A <b>kit</b>: a folder whose first sixteen WAV files become samples 7.1 to 7.16</td></tr>
+</table>
+<p>The unit remembers which files were loaded and reads them from the card again at start-up and when a project loads. To record what AERIA OS plays, record into a computer over USB (section 10). Recording into a sequencer track is not in this version yet.</p>
+{{man:sources,card,cloud}}
+
+<h2 id="qbeat">First beat in the sequencer</h2>
+<p>Before you start: on a computer, put eight or more short WAV files in a folder on the card. Number them so that the kick lists first: 01 kick, 02 clap, 03 hat and so on.</p>
+[[STEP 1 | FUNC MIDI | qs_seq_empty]]
+<p><b>Go to the sequencer.</b> Press [FUNC] + [MIDI]. The popup says ``SEQUENCER``. Eight rows of dots: eight empty tracks. Track 1 is in hand: its row is the tall one.</p>
+[[/STEP]]
+[[STEP 2 | SRC FUNC YES UP DOWN | seq_kit]]
+<p><b>Load a kit.</b> Press [SRC], then [FUNC] + [YES]. The card opens. Move to your folder with [UP] [DOWN] and press [FUNC] + [YES] on it. Tracks 1 to 8 play its first eight files.</p>
+[[/STEP]]
+[[STEP 3 | T1 TRIG1 TRIG5 TRIG9 TRIG13 | qs_seq_kick]]
+<p><b>Set a kick.</b> Press [T1]; while stopped you hear the track as you pick it. Tap [TRIG 1], [TRIG 5], [TRIG 9] and [TRIG 13]: a kick on every beat.</p>
+[[/STEP]]
+[[STEP 4 | PLAY STOP TEMPO LEVEL | qs_seq_play]]
+<p><b>Play.</b> Press [PLAY]. The step being played is lit on the screen and on the trigs, and &lt;&lt;TEMPO&gt;&gt; flashes on the beat. Tap [TEMPO] to set the speed, or hold it and turn ((LEVEL)).</p>
+[[/STEP]]
+[[STEP 5 | T2 T3 TRIG5 TRIG13 TRIG3 TRIG7 TRIG11 TRIG15 | qs_seq_hats]]
+<p><b>Add a clap and hats.</b> Press [T2] and tap [TRIG 5] and [TRIG 13]. Press [T3] and tap [TRIG 3], [TRIG 7], [TRIG 11] and [TRIG 15].</p>
+[[/STEP]]
+[[STEP 6 | TRIG15=hold E=RTCH | qs_seq_ratchet]]
+<p><b>Roll one hat.</b> Hold [TRIG 15]: the knobs become that step's own. Turn ((E)), RTCH, to 3 and let go. That hat now plays three times inside its step.</p>
+[[/STEP]]
+[[STEP 7 | TRIG7=hold FX1=FLT B=LP | qs_seq_lock]]
+<p><b>Lock a step.</b> Hold [TRIG 7], press [FX1], and turn ((B)), LP, down. Let go. That one hat is darker than the others: a <b>parameter lock</b>.</p>
+[[/STEP]]
+[[STEP 8 | FX2=FX YES UP DOWN | qs_seq_fxlist]]
+<p><b>Give the track an effect.</b> Press [FX2], then [YES]. Choose ECHO with [UP] [DOWN] and press [YES]. The echo's six knobs are now on ((A)) to ((F)).</p>
+[[/STEP]]
+[[STEP 9 | BANK=mixer LEVEL T1-8 TRIG1-8=mute TRIG9-16=solo | qs_seq_mixer]]
+<p><b>Balance.</b> Press [BANK] for the mixer. Press a track key and turn ((LEVEL)). Trigs 1 to 8 mute, 9 to 16 solo. [BANK] again closes it.</p>
+[[/STEP]]
+<h2 id="qseq" class="run">The sequencer at a glance</h2>
+[[ANNO seq_anno | The sequencer, playing. Track 3 is in hand and the SRC page is showing
+1,1,9,6 | L | The track in hand
+12,1,5,6 | L | The pattern playing
+0,10,128,5 | L | Tracks 1 and 2: thin rows./A block is a trig, a dot an empty step
+0,15,128,8 | L | The tall row: the track in hand
+1,40,14,6 | L | The knob page
+37,1,12,6 | R | Page of sixteen steps / pages the track has
+52,1,13,6 | R | The tempo
+67,1,17,6 | R | PLAY or LIVE
+32,10,8,28 | R | The step being played
+104,40,24,6 | R | LEN: the track's length in steps
+0,49,128,15 | B | The six knobs ((A)) to ((F)): name above, value below
+]]
+<h3>Eight knob pages for the track in hand</h3>
+<figure class="draw">{{DIAGRAM seq_map}}</figure>
+<p>MACH on the SRC page chooses the track's <b>machine</b>: SMPL (a sample), SUB (a sine with a falling pitch), FM (two sines), NOIS (noise), PLUK (a plucked string) or MIDI (no sound: the track only plays another instrument). ((LEVEL)) is the volume of the track in hand on every page. A track is 1 to 64 steps long (LEN on PTN); [LEFT] [RIGHT] turn its pages of sixteen. The sequence is kept in the unit's memory at every touch. While the sequencer is showing, the sky's chain and sources are not heard; inputs A to D pass to the output dry.</p>
+<div class="cards">
+<div class="card"><div class="ct">Steps (GRID)</div>
+<div class="cr"><span>Tap a trig</span><span>Set a step, or clear it</span></div>
+<div class="cr"><span>Hold a trig</span><span>The six knobs are that step's own: VEL MICR PROB COND RTCH CURV</span></div>
+<div class="cr"><span>Held + [YES]</span><span>The step plays backward</span></div>
+<div class="cr"><span>Held + [LEFT] [RIGHT]</span><span>Nudge it earlier or later</span></div>
+<div class="cr"><span>[YES] held</span><span>FILL: steps with the FILL condition play</span></div>
+</div>
+<div class="card"><div class="ct">Parameter locks</div>
+<div class="cr"><span>Hold a trig, press [SRC] [AMP] [FX1] or [MIDI]</span><span>The popup says ``LOCK``: that page's knobs are the step's</span></div>
+<div class="cr"><span>Turn a knob</span><span>The value is the step's own, and underlined. Up to three locks a step</span></div>
+<div class="cr"><span>Held + [NO]</span><span>``LOCKS CLEARED``</span></div>
+</div>
+<div class="card"><div class="ct">Playing live</div>
+<div class="cr"><span>[REC]</span><span>LIVE, and back to GRID</span></div>
+<div class="cr"><span>[TRIG 1] to [TRIG 8]</span><span>Pads: play tracks 1 to 8. While playing they are written into the pattern</span></div>
+<div class="cr"><span>[TRIG 9] to [TRIG 16]</span><span>Mute tracks 1 to 8</span></div>
+<div class="cr"><span>A knob, while playing</span><span>Written as a lock into the step going by</span></div>
+</div>
+<div class="card"><div class="ct">Mute, solo, mixer</div>
+<div class="cr"><span>[FUNC] + [T1] to [T8]</span><span>Mute or unmute: ``T3 MUTED``</span></div>
+<div class="cr"><span>[CUE] + [T1] to [T8]</span><span>Solo, or end the solo</span></div>
+<div class="cr"><span>[BANK]</span><span>The mixer: trigs 1 to 8 mute, 9 to 16 solo, ((LEVEL)) the volume</span></div>
+<div class="cr"><span>[SCENE A] + [FUNC] + a trig</span><span>Keep the mutes as a mute scene, 1 to 16</span></div>
+<div class="cr"><span>[SCENE A] + a trig</span><span>That mute scene comes back</span></div>
+<div class="cr"><span>[FUNC] + [BANK]</span><span>Resample the main output into sample 6.1, one pattern long</span></div>
+</div>
+<div class="card"><div class="ct">Patterns and chains</div>
+<div class="cr"><span>[PTN] + [TRIG 1] to [TRIG 4]</span><span>Pattern A to D. While playing it takes over at the end of the playing pattern</span></div>
+<div class="cr"><span>[PTN] + several trigs in a row</span><span>A chain of up to eight: ``CHAIN SET``. A single pattern ends it</span></div>
+</div>
+<div class="card"><div class="ct">Copy, paste, clear</div>
+<div class="cr"><span>[FUNC] + [REC]</span><span>Copy the track in hand: steps, locks, length</span></div>
+<div class="cr"><span>[PTN] + [FUNC] + [REC]</span><span>Copy the whole pattern</span></div>
+<div class="cr"><span>[FUNC] + [STOP]</span><span>Paste</span></div>
+<div class="cr"><span>[FUNC] + [PLAY]</span><span>Clear the track in hand. There is no undo</span></div>
+</div>
+<div class="card"><div class="ct">Tempo and swing</div>
+<div class="cr"><span>[TEMPO], tapped</span><span>Two to four taps on the beat. One tempo for both faces, 60 to 187 BPM</span></div>
+<div class="cr"><span>[TEMPO] held + ((LEVEL))</span><span>One BPM a click</span></div>
+<div class="cr"><span>[PAGE], then ((D)) TMPO</span><span>The same tempo, on the PTN page</span></div>
+<div class="cr"><span>[PAGE], then ((C)) SWNG</span><span>Swing for the pattern: 50% is straight</span></div>
+</div>
+<div class="card"><div class="ct">The delay as a send</div>
+<div class="cr"><span>[FX1], then ((C)) DLY</span><span>How much of the track goes to the master's freeze delay</span></div>
+<div class="cr"><span>[MIX], then ((F)) WET</span><span>Hear the delay. The crossfader at B freezes it</span></div>
+</div>
+</div>
+{{man:seq,seqsteps,seqpages,seqsong}}
+
+<h2 id="qusb">USB: recording into a computer, and the card</h2>
+<p>Connect the USB socket to a computer. AERIA OS appears as one device named <b>AERIA</b>. It needs no driver. Its audio interface sends sound <b>from the unit to the computer</b> at 44.1 kHz, 24-bit, in one of two formats. The computer chooses.</p>
+<figure class="draw">{{DIAGRAM usb_formats}}</figure>
+<div class="two">
+<div>
+<h3>Six channels</h3>
+<p>The format a computer picks by itself. Channels 1 to 4 are inputs A, B, C, D as they come in; 5 and 6 are the main output, exactly what leaves the Main Out sockets. Record your dry playing and AERIA's result at once.</p>
+<h3>Eighteen channels: stems</h3>
+<p>Channels 1 and 2 are the main output; 3 to 18 are eight stereo stems, one for each sequencer track, for mixing a recorded jam afterwards.</p>
+<ul>
+<li>A track with no effect is mono: its stem is the same on both channels.</li>
+<li>The delay's echoes are in the main pair only. A muted track sends nothing.</li>
+</ul>
+</div>
+<div>
+<h3>Choosing 18 channels on a Mac</h3>
+<ol class="steps">
+<li>Open <b>Audio MIDI Setup</b> (in Applications, Utilities).</li>
+<li>In the list at the left, click <b>AERIA</b>.</li>
+<li>Under Input, open the <b>Format</b> menu and choose <b>18 ch</b>.</li>
+<li>In your recording program, choose AERIA as the input device and make nine stereo tracks.</li>
+</ol>
+<ul>
+<li>To go back, choose 6 ch in the same menu.</li>
+<li>In the sky, the stems carry silence.</li>
+<li>While stems stream, the screen is redrawn more slowly. The sound does not change.</li>
+</ul>
+</div>
+</div>
+<h3>USB DISK MODE: files onto the card</h3>
+<div class="two w64">
+<div>
+<ol class="steps">
+<li>In the sky, press [FX2] for SYSTEM, then [TRIG 1]. The card appears on the computer as a drive you can read and write.</li>
+<li>Copy your WAV files: loops, folders of one-shots, kits.</li>
+<li><b>Eject the drive on the computer first</b>, then press [NO]. Only [NO] works on the panel meanwhile.</li>
+</ol>
+</div>
+<div>
+[[S usb_disk | USB DISK MODE]]
+</div>
+</div>
+{{man:usb,stems,card}}
+
+<h2 id="qmidi">MIDI on the 5-pin sockets</h2>
+<table class="tight">
+<tr><th>Socket</th><th>In the sky</th><th>In the sequencer</th></tr>
+<tr><td class="n"><b>MIDI Out</b></td><td>The notes of the MIDI modules GUMBALLS, PITCH, MARBLES and PONG</td><td>Each track's note or chord and its program change; with SYNC at SEND: clock, start and stop; with PCCH set: a program change for the pattern</td></tr>
+<tr><td class="n"><b>MIDI In</b></td><td>Control changes for the quad panners; clock and start for MARBLES</td><td>With SYNC at RECV: clock, start, continue and stop; with PCCH set: a program change picks the pattern</td></tr>
+<tr><td class="n"><b>MIDI Thru</b></td><td colspan="2">Passes on whatever arrives at MIDI In. It is a function of the hardware</td></tr>
+</table>
+<div class="two">
+<div>
+<h3>Notes out from a track</h3>
+<ol class="steps">
+<li>In the sequencer, take a track in hand and press [MIDI].</li>
+<li>Turn ((A)), MCH, from OFF to the MIDI channel of your instrument.</li>
+<li>((B)) NOTE is the note, ((C)) CHRD a chord on it, ((D)) GATE its length, ((E)) PROG a program change for that instrument.</li>
+<li>Set steps. Each one sends the note, at the step's velocity.</li>
+</ol>
+<p>Hold a step, press [MIDI] and turn NOTE or CHRD: a lock. That is how a track plays a melody. For a track that only sends MIDI, turn MACH on SRC to MIDI.</p>
+[[S seq_midi | The MIDI page of a track]]
+</div>
+<div>
+<h3>Sync and pattern changes</h3>
+<p>Press [MIDI] again for the second set. Its two knobs belong to the whole sequencer:</p>
+<table class="tight">
+<tr><th>SYNC, knob ((A))</th><th>What happens</th></tr>
+<tr><td class="k">OFF</td><td>No clock is sent; clock and transport coming in are ignored</td></tr>
+<tr><td class="k">SEND</td><td>MIDI clock goes out all the time the sequencer is showing; start with [PLAY], stop with [STOP]</td></tr>
+<tr><td class="k">RECV</td><td>The sequencer follows the clock that arrives, and starts, continues and stops with it. Three dots stand before the tempo</td></tr>
+</table>
+<table class="tight">
+<tr><th>PCCH, knob ((B))</th><th>What happens</th></tr>
+<tr><td class="k">OFF</td><td>No program changes for patterns</td></tr>
+<tr><td class="k">1 to 16</td><td>On that channel: program 1 to 4 is pattern A to D, sent when the pattern changes and obeyed when it arrives</td></tr>
+</table>
+[[S seq_midi_sync | SYNC and PCCH: the second set of the MIDI page]]
+</div>
+</div>
+<p><b>Play the tracks from a keyboard.</b> Notes arriving on channels 1 to 8 play tracks 1 to 8 (note 60 is the track's own pitch); LIVE recording writes them down. NIN, knob ((C)), switches this off.</p>
+{{man:midi,pmidi,sync,midimod,midiimp}}
+
+<h2 id="qproj">Projects and saving</h2>
+<div class="two">
+<div>
+<p><b>You do not have to save to carry on.</b> AERIA OS keeps the saved state by itself: switch off and on, and everything is as it was.</p>
+<p><b>A project</b> is for coming back to a piece later: everything needed to play it again, under a name of up to twelve characters. There are sixteen, and a project holds both faces: the chain and every knob, the weathers, the scenes, the master, which samples are loaded, and all four patterns of the sequence. It keeps the <b>places</b> of its samples, not their sound: the card must hold the same files in the same folders.</p>
+<ol class="steps">
+<li>Press [PROJ], from either face.</li>
+<li>Pick one of the sixteen with a trig.</li>
+<li><b>To save:</b> [FUNC] + [YES]. Type a name on the trigs (two letters to a trig; trig 14 digits, 15 space, 16 rubs out) and press [YES]. The popup says ``SAVED``.</li>
+<li><b>To load:</b> [YES]. The popup says ``LOADED`` and the name.</li>
+<li>[NO] or [PROJ] closes the page.</li>
+</ol>
+</div>
+<div>
+[[S project_name | Typing a name: the rows of letters are trigs 1 to 8 and 9 to 16]]
+</div>
+</div>
+{{man:projects,kept}}
+
+<h2 id="qsavers" class="run">Screensavers and games</h2>
+<p>When you have not touched a key or a knob for a while, a screensaver takes the screen. There are {{SAVER_COUNT}}: <b>four games you can play</b>, PADDLE, BRICKS, ROCKS and BLOCKS, and the rest to watch. The sound carries on underneath.</p>
+[[G4]]
+ss_paddle | PADDLE
+ss_bricks | BRICKS
+ss_rocks | ROCKS
+ss_blocks | BLOCKS
+[[/G]]
+<p><b>Settings</b> are on SYSTEM, in the sky: press [FX2]. ((E)), SAVER, chooses OFF, one by name, or RANDOM; ((F)), WAIT, is the time before it starts, 1 to 60 minutes; [YES] starts it now. <b>In a game</b>, [LEFT] [RIGHT] [UP] [DOWN], [YES], ((A)) or ((LEVEL)) play; stop for three seconds and the game plays itself again. [NO] always ends a screensaver, and so does any other key or knob.</p>
+{{man:savers,system}}
+
+<h2 id="qkeys">Key combinations</h2>
+<div class="cards sheet">
+<div class="card"><div class="ct">Both faces</div>
+<div class="cr"><span>[FUNC] + [MIDI]</span><span>Sky to sequencer, and back</span></div>
+<div class="cr"><span>[PROJ]</span><span>PROJECTS: a trig picks, [YES] loads, [FUNC] + [YES] saves</span></div>
+<div class="cr"><span>[MIX]</span><span>MASTER: trigs set the delay's time, [NO] taps the tempo</span></div>
+<div class="cr"><span>Crossfader to B</span><span>Freezes the master's delay</span></div>
+<div class="cr"><span>[NO]</span><span>Ends a screensaver</span></div>
+<div class="cr"><span>[FUNC] held at power-on</span><span>The Elektron Startup Menu. Never TRIG 2 there</span></div>
+</div>
+<div class="card"><div class="ct">Sky: pages</div>
+<div class="cr"><span>[SRC] / [AMP] / [LFO]</span><span>CHAIN / SKY / SOURCE</span></div>
+<div class="cr"><span>[FX1] / [FX2]</span><span>MIX (again: GAIN) / SYSTEM</span></div>
+<div class="cr"><span>[PART] / [AED] / [ARR]</span><span>BALLOON / LOOP / STARS</span></div>
+<div class="cr"><span>[MIDI]</span><span>The MIDI modules; again: the next</span></div>
+<div class="cr"><span>[CUE]</span><span>OUT: routing, quad panner</span></div>
+<div class="cr"><span>[REC]</span><span>The grain cloud editor</span></div>
+<div class="cr"><span>[FUNC] held / [PAGE]</span><span>The second set of knobs / latch it</span></div>
+</div>
+<div class="card"><div class="ct">Sky: the chain</div>
+<div class="cr"><span>[T1] to [T7]</span><span>Select a slot and show CHAIN</span></div>
+<div class="cr"><span>[FUNC] + [T1] to [T7]</span><span>Bypass the slot, or bring it back</span></div>
+<div class="cr"><span>[BANK] on CHAIN</span><span>The shelf: [YES] takes, [NO] goes back</span></div>
+<div class="cr"><span>Push ((A)) to ((F))</span><span>The knob goes back to the weather</span></div>
+<div class="cr"><span>[T1] + [T2] / [T3] + [T4]</span><span>Inputs A B / C D: stereo or mono</span></div>
+</div>
+<div class="card"><div class="ct">Sky: the weather</div>
+<div class="cr"><span>SKY, MIX, GAIN: [TRIG 1]</span><span>CLEAR: every weather off</span></div>
+<div class="cr"><span>[TRIG 2] to [TRIG 7]</span><span>CLOUDY RAIN STORM SNOW HEAT FOG</span></div>
+<div class="cr"><span>[TRIG 8], or ((LEVEL)) pushed</span><span>AUTO weather</span></div>
+<div class="cr"><span>[TRIG 16]</span><span>Lightning</span></div>
+<div class="cr"><span>[TRIG 9] [TRIG 10] [TRIG 11]</span><span>WIND, HAIL, AURORA</span></div>
+<div class="cr"><span>[TRIG 12]</span><span>One TWISTER</span></div>
+<div class="cr"><span>((LEVEL)), [UP] [DOWN]</span><span>The next or previous weather</span></div>
+<div class="cr"><span>[YES] / [NO]</span><span>Day or night / a new sky</span></div>
+<div class="cr"><span>MIX: ((F)) WSND</span><span>The weather's sound, on or off</span></div>
+</div>
+<div class="card"><div class="ct">Sky: sources and balloons</div>
+<div class="cr"><span>SOURCE: [TRIG 1] [TRIG 2] [TRIG 3]</span><span>LOOP, STARS, BALLOONS on or off</span></div>
+<div class="cr"><span>SOURCE: [FUNC] + [TRIG 1] / [TRIG 2]</span><span>Choose the loop / the stars' folder</span></div>
+<div class="cr"><span>[REC1] / [REC2] / [REC3]</span><span>Catch balloon 1 / 2 / 3; again: it floats</span></div>
+<div class="cr"><span>[FUNC] + [REC1] / [REC2] / [REC3]</span><span>Pop it</span></div>
+<div class="cr"><span>[PTN] / [BANK]</span><span>STARS: RING or BIRDS / next bank</span></div>
+</div>
+<div class="card"><div class="ct">Sky: scenes and system</div>
+<div class="cr"><span>[SCENE A] or [SCENE B] + a knob</span><span>The value goes into that scene</span></div>
+<div class="cr"><span>[SCENE A] or [SCENE B] + a trig</span><span>That end holds scene 1 to 16</span></div>
+<div class="cr"><span>[SCENE A] or [SCENE B] + [NO]</span><span>Clears that scene</span></div>
+<div class="cr"><span>SYSTEM: [TRIG 1] / [YES]</span><span>USB DISK MODE / screensaver now</span></div>
+</div>
+<div class="card"><div class="ct">Sequencer: tracks and transport</div>
+<div class="cr"><span>[T1] to [T8]</span><span>Take a track in hand</span></div>
+<div class="cr"><span>[UP] [DOWN]</span><span>The track above or below</span></div>
+<div class="cr"><span>[FUNC] + [T1] to [T8]</span><span>Mute or unmute</span></div>
+<div class="cr"><span>[CUE] + [T1] to [T8]</span><span>Solo, or end the solo</span></div>
+<div class="cr"><span>[PLAY]</span><span>Play from step 1</span></div>
+<div class="cr"><span>[STOP]; again</span><span>Stop; silence</span></div>
+<div class="cr"><span>[TEMPO]</span><span>Tap. Held + ((LEVEL)): one BPM a click</span></div>
+<div class="cr"><span>((LEVEL))</span><span>The volume of the track in hand</span></div>
+<div class="cr"><span>[BANK]</span><span>The mixer: 1 to 8 mute, 9 to 16 solo</span></div>
+</div>
+<div class="card"><div class="ct">Sequencer: steps</div>
+<div class="cr"><span>[REC]</span><span>GRID or LIVE</span></div>
+<div class="cr"><span>A trig, tapped</span><span>Set or clear a step</span></div>
+<div class="cr"><span>A trig, held</span><span>The knobs are the step's own</span></div>
+<div class="cr"><span>Held + [SRC] [AMP] [FX1] [MIDI]</span><span>That page's knobs lock for the step</span></div>
+<div class="cr"><span>Held + [YES] / [NO]</span><span>Backward / clear its locks</span></div>
+<div class="cr"><span>Held + [LEFT] [RIGHT]</span><span>Nudge earlier or later</span></div>
+<div class="cr"><span>[LEFT] [RIGHT]</span><span>The page of sixteen steps</span></div>
+<div class="cr"><span>LIVE: trigs 1 to 8 / 9 to 16</span><span>Pads / mutes for tracks 1 to 8</span></div>
+<div class="cr"><span>[YES] held</span><span>FILL</span></div>
+</div>
+<div class="card"><div class="ct">Sequencer: pages, patterns, copy</div>
+<div class="cr"><span>[SRC] [AMP] [LFO] [FX1] [FX2]</span><span>SRC AMP MOD FLT FX</span></div>
+<div class="cr"><span>[ARR] / [MIDI] / [PAGE]</span><span>GEN / MIDI / PTN</span></div>
+<div class="cr"><span>A page key again, or [FUNC] held</span><span>The page's second set</span></div>
+<div class="cr"><span>[YES] on FX</span><span>The list of effects</span></div>
+<div class="cr"><span>[FUNC] + [YES] on SRC</span><span>Load a kit from the card</span></div>
+<div class="cr"><span>[PTN] + [TRIG 1] to [TRIG 4]</span><span>Pattern A to D; several: a chain</span></div>
+<div class="cr"><span>[FUNC] + [REC]</span><span>Copy the track ([PTN] held too: the pattern)</span></div>
+<div class="cr"><span>[FUNC] + [STOP] / [PLAY]</span><span>Paste / clear the track in hand</span></div>
+</div>
+</div>
+<p class="more"><b>Going further.</b> The <b>AERIA OS User Manual</b> (AERIA_OS_Manual.pdf, beside this guide) has every page knob by knob, all sixteen effects, the quad panner, the grain cloud, the MIDI modules, conditions and ratchets, measured limits, troubleshooting and updating. Its appendix “{{title:keys}}” lists every key and combination. + means: hold the first, press the second.</p>

@@ -1,0 +1,8 @@
+Jit@154: No profiler detected
+operands parsed: 2307 at 2307 PCs
+m4 ffffff sp 000000
+after 300: pc 33842 X:33a10 000000 X:33a90 de20e7 shared 000000
+== solo:pt2399 seed 15: 16949 frames, late 0, violations 0, max SP 9
+   longest pt2399.init    305 instr (19 a sample)
+   longest pt2399.proc    14268 instr (892 a sample)
+   deepest stack inside pt2399   +6 below the dispatcher's
