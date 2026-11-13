@@ -52,6 +52,11 @@ python3 ../flash/mk_flash.py --stock <official OS .bin> --image ../build/flashim
 
 AERIA Flasher (`aeria-os/flasher`) expects the same layout, the Modwerk venv and a running AERIA OS on the unit; it is set up for the author's machine.
 
+## History
+
+- [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — every release build and how the project got there.
+- [`docs/LOG.md`](docs/LOG.md) — the full log: every request made while building AERIA OS, word for word, and what was done about it.
+
 ## Beta notes
 
 - Latest (v0.9.2): less aliasing — PITCH, GRAINS and AURORA filter before shifting up, RING's carrier stays below Nyquist; the MOD page shows its routing in columns.

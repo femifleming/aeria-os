@@ -21,7 +21,7 @@ def arg(name, default):
 
 
 def main():
-    langs = arg('--lang', 'en').split(',')   # English only (13 Nov 2026: the owner dropped the translations; they are in archive_translations/)
+    langs = arg('--lang', 'en').split(',')   # English only (13 Nov 2026: the owner dropped the translations)
     themes = arg('--theme', 'dark').split(',')   # dark only
     kinds = arg('--only', 'manual,quick').split(',')
     jobs = int(arg('-j', '1'))
