@@ -21,8 +21,8 @@ def arg(name, default):
 
 
 def main():
-    langs = arg('--lang', ','.join(lang.LANGS)).split(',')
-    themes = arg('--theme', 'dark,light').split(',')
+    langs = arg('--lang', 'en').split(',')   # English only (13 Nov 2026: the owner dropped the translations; they are in archive_translations/)
+    themes = arg('--theme', 'dark').split(',')   # dark only
     kinds = arg('--only', 'manual,quick').split(',')
     jobs = int(arg('-j', '1'))
     todo, skipped = [], []
@@ -77,6 +77,10 @@ def main():
                 seen.add(key); print(' ', c)
     for s in skipped:
         print('  SKIPPED', s)
+    # only two PDFs are kept (13 Nov 2026): AERIA_OS_Manual.pdf and AERIA_OS_Quick_Guide.pdf at the top of manual/
+    # (English, dark); the per-language folder the builders also write is removed
+    import shutil
+    shutil.rmtree(os.path.expanduser('~/octa/aeria-os/manual/en'), ignore_errors=True)
     if any(rc for _, rc, _, _, _ in results):
         sys.exit(1)
 

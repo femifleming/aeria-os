@@ -17,7 +17,7 @@ Effects (hand-written DSP56300 assembly): PITCH, GRAINS, RING, RESO, SMEAR (FFT)
 
 ## Manuals
 
-Full manual (≈160 pages) and an 18-page quick start guide, in **English, 中文, 日本語 and Deutsch**, dark and light — attached to the [beta release](../../releases). Their sources are in `cloudfin/preview/manual_src/` (`python3 build_all.py`).
+The full manual (165 pages) and an 18-page quick start guide, in English (dark), are attached to the [beta release](../../releases). Their sources are in `cloudfin/preview/manual_src/` (`python3 build_all.py`).
 
 ## In this repository
 
