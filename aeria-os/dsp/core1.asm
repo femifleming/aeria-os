@@ -1,4 +1,5 @@
 ; AERIA OS DSP: core 1's effect engine (our own code), loaded at P:$33800 in the shared window.
+; (15 Nov 2026: a ninth entry, X:$33A90, is the sequencer's reverb bus: its knobs at $33D00, its buffers $33D40 / $33D60)
 ; Core 1 has no audio port: core 0's chain hands it blocks through the shared window (core 0's proxy, engine.asm
 ; pproc). Up to eight slots, entries at X:$33A10 + 16k (written by the ColdFire through core 0):
 ;   +0 active  +1 proc  +2 init  +3 r6 (knob block, shared)  +4 r7 (state, core 1's own X)  +5 Y buffer base
@@ -16,7 +17,7 @@ start:
         move    a,x:<$3f
 ; the shared entries start as whatever the RAM held: a cold boot ran garbage "slots" (10 Nov 2026). All cleared.
         move    #>$33a00,r4
-        do      #$90,c1zr
+        do      #$a0,c1zr
         move    a,x:(r4)+
 c1zr:
         nop
@@ -54,7 +55,7 @@ c1nrp:
         move    a1,x:>$33a00
         move    #>$33a10,r4
         move    r4,x:>$2c8
-        do      #8,c1sl
+        do      #9,c1sl
         move    x:>$2c8,r4
         nop
         move    x:(r4),a

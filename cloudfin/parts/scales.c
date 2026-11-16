@@ -56,9 +56,6 @@ static void reso_text(char *n, int midi)
 #if defined(AERIAOS)
 uint8_t preview_scale_key;
 void aos_limiter(int on);
-void aos_master_eq(int band, int freq, int db);
 static void scale_tick(void) { preview_scale_key = (uint8_t)(scale_now() * 12 + aos_scale_root()); aos_limiter(pv(PG_MIX, 10) != 1);   /* and MIX's LIMT: the main out's limiter */
-    /* the master EQ (GAIN, FUNC layer) */
-    aos_master_eq(0, 37, pv(PG_GAIN, 6) - 13); aos_master_eq(1, pv(PG_GAIN, 10), pv(PG_GAIN, 7) - 13);
-    aos_master_eq(2, pv(PG_GAIN, 11), pv(PG_GAIN, 8) - 13); aos_master_eq(3, 105, pv(PG_GAIN, 9) - 13); }
+}
 #endif

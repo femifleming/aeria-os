@@ -30,9 +30,14 @@ static int part_knob(int t, int fx2, int k) { return preview_part_fx[t][fx2 * 6 
 #ifndef CORE_ROOM
 #define CORE_ROOM 1700
 #endif
-#define CORE0_BASE 420     /* the engine's own share of core 0 at its worst (master EQ on all four bands, rain and helium, USB recording):
-                            * 370 measured on the unit 13 Nov 2026 once the engine ran from core 0's private P (it was 700 from the
-                            * shared window, where every fetch waits a cycle and core 1 contends for the block) */
+/* core 0's engine share (13 Nov 2026: counted from what is on, no longer its worst case at all times). Measured 370 at
+ * its worst on the unit (the master EQ on all four bands, rain and helium, USB recording) + 50 room = 420; the EQ
+ * (4 x 30) is gone since, and the weather's two filters (rain's lowpass, helium's high-pass, the DJ filter, 2 x 24)
+ * are reserved only while they run: they stay off ("DSP FULL") until there is room for them (wxf_reserve). */
+#define CORE0_ENGINE 260
+#define CORE0_WXF 50
+static uint8_t wxf_reserved = 1;   /* boots counted; lets go when unused */
+#define CORE0_BASE (CORE0_ENGINE + (wxf_reserved ? CORE0_WXF : 0))
 #define CORE1_BASE 250     /* core 1 is the weaker in practice: VERB + ECHO (1,404) run clean, VERB + ECHO + SMEAR (1,673) drop
                             * blocks (measured on the unit with USB recording on, 12 Nov 2026) -- so its room ends near 1,450 */
 static int8_t slot_core[7] = {-1, -1, -1, -1, -1, -1, -1};
@@ -78,6 +83,20 @@ static int place_effect(int s, int row, int commit)
 }
 int aos_place(int s, int row) { place_effect(s, row, 1); return s >= 0 && s < 7 ? slot_core[s] : 0; }   /* main.c, when a slot's effect changes */
 int aos_slot_core(int s) { return s >= 0 && s < 7 ? slot_core[s] : -1; }                                 /* ... and each pass: has it been moved? */
+/* room on core 0 for `extra` more of the engine's own work, with the effects where they are now */
+static int core0_spare(void)
+{
+    int l = CORE0_BASE, n = 0;
+    for (int i = 0; i < 7; i++) if (slot_core[i] == 0) { l += slot_cost[i]; n++; }
+    return (n ? CORE_ROOM : CORE0_BASE + 1170) - l;
+}
+/* the weather's filters ask for their share when they come on, and give it back when they go off */
+static int wxf_reserve(int want)
+{
+    if (!want) { wxf_reserved = 0; return 0; }
+    if (!wxf_reserved) { if (core0_spare() < CORE0_WXF) return 0; wxf_reserved = 1; }
+    return 1;
+}
 int aos_core_load(int core) { int l = core ? CORE1_BASE : CORE0_BASE; for (int i = 0; i < 7; i++) if (slot_core[i] == core) l += slot_cost[i]; return l * 100 / 1760; }
 static int fx_is(int row, const char *n) { const char *p = fx_info[row - 1].name + 6; while (*n && *p == *n) { p++; n++; } return !*n && !*p; }
 /* two effects that keep their sound in the same memory (12 Nov 2026: Chloaelis' delays) -- the pair either way round */
@@ -230,7 +249,8 @@ static void shelf_build(int fx2)
     for (int r = 1; r < n && shelf_n < 48; r++) {
         list_name(fx2, r, nm);
         if (!(nm[0] == 'A' && nm[1] == 'E' && nm[2] == 'R' && nm[3] == 'I' && nm[4] == 'A' && nm[5] == ' ')) continue;
-        if ((nm[6] == 'T' && nm[7] == 'A' && nm[8] == 'P') || (nm[6] == 'H' && nm[7] == 'E' && nm[8] == 'A' && nm[9] == 'D')) continue;
+        if ((nm[6] == 'T' && nm[7] == 'A' && nm[8] == 'P' && nm[9] != 'E') ||   /* TAP (not TAPE: hidden by mistake until 15 Nov 2026) */
+            (nm[6] == 'H' && nm[7] == 'E' && nm[8] == 'A' && nm[9] == 'D')) continue;
         if (fx_banned(nm)) continue;
         shelf_rows[shelf_n++] = r;
     }
@@ -273,7 +293,7 @@ static int name_has(const char *name, const char *part)
 }
 /* effects the owner does not want offered (12 Nov 2026: no clipping or distortion): kept in the firmware so saved
  * rows still mean the same, but never on a list, never lent, never set up */
-static int fx_banned(const char *name) { return name_has(name, "DIST") || name_has(name, "AERIA -"); }   /* "AERIA -": a removed effect's empty row (BBD, 13 Nov 2026) */   /* (BBD, PT2399 and TAPE were held back on 13 Nov 2026 until a crash was found: PT2399 now lives at X:$2000) */
+static int fx_banned(const char *name) { return name_has(name, "DIST") || name_has(name, "AERIA -") || name_has(name, "WIND") || name_has(name, "HAIL") || name_has(name, "TWIS"); }   /* WIND, HAIL, TWISTER: gone with their weathers (13 Nov 2026) */   /* "AERIA -": a removed effect's empty row (BBD, 13 Nov 2026) */   /* (BBD, PT2399 and TAPE were held back on 13 Nov 2026 until a crash was found: PT2399 now lives at X:$2000) */
 static int rule_of(const char *knob)
 {
     for (int r = 0; r < N_RULES; r++) {
@@ -347,6 +367,7 @@ static void slot_pick(int s, int row)
     int ok = pick_effect(slot_track(s), slot_fx(s), row);
 #if defined(AERIAOS)
     if (ok) for (int k = 0; k < 6; k++) preview_slot_p2[s][k] = row > 0 && row <= FX_COUNT ? fx_info[row - 1].def2[k] : 0;
+    else { sl->pending = -1; picking = -1; say("NO ROOM", "DSP FULL"); return; }   /* (15 Nov 2026) refused: said at once, not after five seconds */
 #endif
     (void)ok;
 }

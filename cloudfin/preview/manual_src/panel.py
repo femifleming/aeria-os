@@ -447,7 +447,8 @@ def export(out_dir, chrome=None):
             open(html, 'w').write(f'<body style="margin:0;background:{theme.BG}"><div style="width:{w}px">{svg}</div></body>')
             png = os.path.join(out_dir, f'panel_{k}.png')
             subprocess.run([chrome, '--headless', '--disable-gpu', '--hide-scrollbars', '--force-device-scale-factor=2', f'--window-size={w},{h}', f'--screenshot={png}', 'file://' + html],
-                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                           check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)   # Chrome 157 exits 2 after writing the file (its teardown watchdog)
+            assert os.path.exists(png) and os.path.getsize(png) > 0, 'Chrome did not write ' + png
             os.remove(html); made.append(png)
     return made
 

@@ -24,11 +24,11 @@ EFFECTS = [  # folder, org, ybase (None = no buffer), core (0, 1, or 2 = either:
     ('grains', 0x35000, 0x00000, 0, 330),   # 35,280 words (800 ms), wrapped in code: core 0's Y:$0000-$89cf
     ('ringph', 0x35800, None, 2, 236),
     ('reso',   0x36000, 0x0A000, 0, 243),   # DTND stereo out (was 215)
-    ('spectral', 0x36800, 0x3C000, 2, 1165),  # the FFT SMEAR (12 Nov 2026; 1,024-point STFT, mean 1,065 / worst call 1,137): Y:$3C000-$3E3FF, $3E400-$3FFFF free
+    ('spectral', 0x36800, 0x3C000, 2, 641),   # 13 Nov 2026: hop 512, Vorbis window (mean 577, worst call 631, split blocks 641; was 1165)  # the FFT SMEAR (12 Nov 2026; 1,024-point STFT, mean 1,065 / worst call 1,137): Y:$3C000-$3E3FF, $3E400-$3FFFF free
     ('rose',   0x37000, None, 2, 205),
     # code in the shared window below the engine
     ('comp',   0x30000, None, 2, 223),
-    ('verb',   0x30800, 0x00000, 1, 1145),
+    ('verb',   0x30800, 0x00000, 1, 736),    # half rate since 13 Nov 2026 (was 1145): worst block 682, 736 with split blocks
     # 12 Nov 2026: ECHO is now Chloaelis' dual delay (aeria-fx/echo2), in the old ECHO's row, slot and memory (saved rows keep
     # their meaning: the name stays AERIA ECHO). 1,378 words with the stub; worst block 310.2
     ('echo2',  0x31000, 0x08000, 1, 311),   # its right line: core 1's X:$4000-$7fff (fixed in the code)
@@ -40,7 +40,7 @@ EFFECTS = [  # folder, org, ybase (None = no buffer), core (0, 1, or 2 = either:
     ('fog',     0x32400, 0x08a00, 0, 126),
     ('twister', 0x32800, 0x08000, 1, 190),
     ('hail',    0x32C00, 0x02000, 1, 134),
-    ('aurora',  0x37800, 0x02000, 1, 216),
+    ('aurora',  0x37800, 0x02000, 1, 165),   # half rate since 13 Nov 2026 (was 216): mean 157, worst call 164; 919 words with the stub
     # 12 Nov 2026: Chloaelis' multimode filter (TPT SVF, LP > BP > HP > NOTCH, a cutoff a side: SKEW and the ColdFire's
     # Lorenz words r6+6 / r6+7). No buffer: either core. Code in the last 1K of P:$37800's slot, after AURORA (926 words)
     ('filt',    0x37C00, None, 2, 129),     # aeria-fx/filt: mean 126.3, worst call 128.1 (the first call)
@@ -152,7 +152,7 @@ LAW = {
  ('ringph', 'SPRD'): lambda v: '%dDEG' % round(90 * v / 127), ('ringph', 'BIAS'): lambda v: _pct(v), ('ringph', 'CNTR'): lambda v: _hz(200 * 25 ** (v / 127)),
  ('reso', 'PTCH'): lambda v: _note(30 + v), ('reso', 'FINE'): lambda v: _sg(round((v - 64) * 50 / 64), 'C'),
  ('reso', 'DECY'): lambda v: _ms(20 * 1000 ** (v / 127)), ('reso', 'TONE'): lambda v: _pct(v), ('reso', 'DTUN'): lambda v: '+' + _n(25 * v / 127, 'C'),
- ('spectral', 'SMR'): lambda v: 'OFF' if v == 0 else _ms(1000 * SPG.smr_t60(v)), ('spectral', 'FRZ'): lambda v: 'HOLD' if v == 127 else _pct(v),
+ ('spectral', 'SMR'): lambda v: 'OFF' if v == 0 else _n(SPG.smr_t60(v) / 60, 'MIN') if SPG.smr_t60(v) >= 120 else _ms(1000 * SPG.smr_t60(v)), ('spectral', 'FRZ'): lambda v: 'HOLD' if v == 127 else _pct(v),
  ('spectral', 'GATE'): lambda v: 'OFF' if v == 0 else _n(SPG.gate_db(v), 'DB'), ('spectral', 'WIDE'): lambda v: _pct(v),
  ('spectral', 'TILT'): lambda v: 'FLAT' if v == 64 else _sg(round((SPG.tilt_db(v, 2000) - SPG.tilt_db(v, 500)) / 2, 1), 'DB'),
  ('rose', 'ROOT'): lambda v: _note(24 + v), ('rose', 'SHAP'): lambda v: ('HARM', 'PRIM', 'CIRC', 'SQRE', 'ROSE', 'GOTH')[v],

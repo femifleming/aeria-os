@@ -14,7 +14,7 @@ def seqmode(on):
     not from the sequence's head (tests rewrite that)"""
     import aos
     a=None
-    for l in open('/private/tmp/claude-501/-Users-you-octa/a6e8c4e0-16ca-4199-84ec-2e9cf68c9ec3/scratchpad/sym.txt'):
+    for l in open('/Users/you/octa/aeria-os/build/sym.txt'):
         f=l.split()
         if f[-1]=='seq_on': a=int(f[0],16)
     was=aos.rdc(d,a,1)[0]==1

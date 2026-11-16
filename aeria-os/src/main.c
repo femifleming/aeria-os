@@ -851,7 +851,7 @@ static void fx_configure(int s, int row)
         dsp_write(base + 1, PROXY_PROC, 0); dsp_write(base + 2, PROXY_INIT, 0); dsp_write(base + 3, kb, 0);
         dsp_write(base + 4, r7, 0); dsp_write(base + 5, aw, 0); dsp_write(base + 6, 0, 0);
         dsp_write(base + 7, 0x220u + 9u * (uint32_t)s, 0);
-        for (int k = 0; k < 5; k++) route_sent[s][k] = 0xFFFFFFFFu;
+        ph_forget(s); for (int k = 0; k < 5; k++) route_sent[s][k] = 0xFFFFFFFFu;
         dsp_write(base, 1, 0);
         return;
     }
@@ -868,7 +868,7 @@ static void fx_configure(int s, int row)
     dsp_write(base + 5, aw, 0);
     dsp_write(base + 6, 1, 0);
     dsp_write(base + 7, 0x220u + 9u * (uint32_t)s, 0);   /* its routing block (engine.asm) */
-    for (int k = 0; k < 5; k++) route_sent[s][k] = 0xFFFFFFFFu;
+    ph_forget(s); for (int k = 0; k < 5; k++) route_sent[s][k] = 0xFFFFFFFFu;
     if (fi->org == 0x35000u) for (int i = 0; i <= 64; i++) dsp_write(r7 + 0x80u + (uint32_t)i, grain_win[i], 0);   /* GRAINS: its window */
     dsp_write(base, 1, 0);
 }
@@ -881,15 +881,19 @@ static void route_write(int s, int on, const uint32_t g[4]);
 void aos_route(int s, int on, const uint32_t g[4])
 {
     if (s < 0 || s >= (seq_mode ? FX_SLOTS : CHAIN_SLOTS)) return;
-    if (seq_mode) { sq.ui_route[s] = (uint8_t)(on != 0); if (!on) return; }
+    if (seq_mode) {
+        sq.ui_route[s] = (uint8_t)(on != 0); if (!on) return;
+        uint32_t ph[2] = {sq_sat(g[0] + g[2]), sq_sat(g[1] + g[3])}; ph_write(s, 0, ph, 0);   /* the phones hear main + cue */
+    }
     route_write(s, on, g);
 }
 /* bass mono (the engine's, under 50 Hz on the main pair) stands back while anything is placed among the four outputs */
 static uint8_t quad_slot[FX_SLOTS];
+static uint8_t lone_slot[FX_SLOTS];   /* (15 Nov 2026) a sequencer track on one side of the main pair alone (OUT EACH, MAIN L or R) */
 static void bass_mono_tick(void)
 {
     static int sent = -1; int any = 0;
-    for (int s = 0; s < FX_SLOTS; s++) any |= quad_slot[s];
+    for (int s = 0; s < FX_SLOTS; s++) any |= quad_slot[s] | lone_slot[s];
     if (any != sent) { sent = any; dsp_write(0x8a41u, (uint32_t)any, 0); }
 }
 static void route_write(int s, int on, const uint32_t g[4])
@@ -898,6 +902,17 @@ static void route_write(int s, int on, const uint32_t g[4])
     quad_slot[s] = (uint8_t)(on && (g[2] | g[3]));
     uint32_t blk = 0x220u + 9u * (uint32_t)s, v[5] = {(uint32_t)(on != 0), g[0], g[1], g[2], g[3]};
     for (int k = 0; k < 5; k++) if (v[k] != route_sent[s][k]) { route_sent[s][k] = v[k]; dsp_write(blk + (uint32_t)k, v[k], 0); }
+}
+/* (15 Nov 2026) the sequencer's phones: a track's phones block (engine.asm trkmix, X:$8a80 + 9 x slot): which pairs
+ * take it summed to mono (bit 0 main, 1 cue, 2 phones) and its two gains L->phones R->phones. Only changes go out. */
+static uint32_t ph_sent[FX_SLOTS][3];
+static void ph_forget(int s) { for (int k = 0; k < 3; k++) ph_sent[s][k] = 0xFFFFFFFFu; lone_slot[s] = 0; }
+static void ph_write(int s, unsigned mono, const uint32_t g[2], int lone)
+{
+    if (s < 0 || s >= FX_SLOTS) return;
+    lone_slot[s] = (uint8_t)(lone != 0);
+    uint32_t blk = 0x8A80u + 9u * (uint32_t)s, v[3] = {mono & 7u, g[0], g[1]};
+    for (int k = 0; k < 3; k++) if (v[k] != ph_sent[s][k]) { ph_sent[s][k] = v[k]; dsp_write(blk + (uint32_t)k, v[k], 0); }
 }
 /* whether the cue pair carries a copy of the chain (while nothing is routed to it) */
 void aos_cue_chain(int on)
@@ -932,31 +947,73 @@ void aos_grain_window(const uint32_t w[65])
         for (int i = 0; i <= 64; i++) dsp_write(0x1000u + 0x100u * (uint32_t)s + 0x80u + (uint32_t)i, grain_win[i], 0);
 }
 int aos_scale_snap(int dc); int aos_reso_snap(int midi, int *off); int aos_scale_root(void);
-/* the master EQ (engine.asm: X:$8800 + 6 x band: a biquad and the band's amount): band 0 a low shelf (a lowpass
- * added to the signal), 1 and 2 bandpasses, 3 a high shelf (a high-pass added); freq an index 0..127 (20 Hz .. 20 kHz,
- * log), db -12..12. Only changes go out; 0 dB switches the band off (the engine skips it). */
-#include "eq_table.inc"
-void aos_master_eq(int band, int freq, int db)
-{
-    static int16_t fs[4] = {-1, -1, -1, -1}, ds[4] = {99, 99, 99, 99};
-    if (band < 0 || band > 3) return;
-    freq = freq < 0 ? 0 : freq > 127 ? 127 : freq; db = db < -12 ? -12 : db > 12 ? 12 : db;
-    uint32_t base = 0x8800u + 6u * (uint32_t)band;
-    if (freq != fs[band]) {
-        const uint32_t *c = band == 0 ? eq_lp1[freq] : band == 3 ? eq_hp1[freq] : eq_bp[freq];
-        dsp_write(base + 5, 0, 0);                                   /* flat while its filter changes */
-        for (int k = 0; k < 5; k++) dsp_write(base + (uint32_t)k, c[k], 0);
-        fs[band] = (int16_t)freq; ds[band] = 99;
-    }
-    if (db != ds[band]) { dsp_write(base + 5, eq_gain[db + 12], 0); ds[band] = (int16_t)db; }
-}
 /* the main out's limiter (engine.asm: X:$320): MIX, FUNC layer, LIMT */
 void aos_limiter(int on) { static int was = -1; if (on != was) { was = on; dsp_write(0x320, on ? 1 : 0, 0); } }
 extern uint8_t preview_scale_key;   /* changes when the scale or its root does */
 /* the sequencer's effects: one a track (the sequence's fx_row / fx_knob / fx_core), in the engine's eight slots */
+/* ---- the sequencer's reverb bus (15 Nov 2026): one VERB on core 1's ninth entry, fed by every track's RVB send
+ * (each track's phones block +5, engine.asm trkmix), its output back into the main and the phones (engine.asm rvbus).
+ * Off, it is not loaded at all: core 1 does nothing for it. ---- */
+#define RB_ENTRY 0x8A60u        /* core 0's bus slot entry; +8 / +9 / +10 the return to main, cue, phones */
+#define RB_C1 C1_ENTRY(8)
+#define RB_KNOBS 0x33D00u
+#define RB_IN 0x33D40u
+#define RB_OUT 0x33D60u
+static int rb_on_sent;
+static uint8_t rb_knob_sent[3], rb_lev_sent = 0xFF;
+static uint32_t rb_send_sent[SQ_TRACKS] = {1, 1, 1, 1, 1, 1, 1, 1};
+int aos_verb_row(void) { for (int r = 1; r <= FX_COUNT; r++) if (fx_named(r, "VERB")) return r; return 0; }
+void aos_seq_rv_defaults(void)
+{
+    SqHead *h = SQH; int r = aos_verb_row();
+    if (h->rv_ok == 1) return;
+    h->rv_on = 0; h->rv_lev = 100;
+    for (int k = 0; k < 3; k++) h->rv_knob[k] = r ? fx_info[r - 1].def[k] : 64;
+    h->rv_ok = 1;
+}
+static void rb_send(int t, uint32_t g)
+{
+    if (t < 0 || t >= SQ_TRACKS || g == rb_send_sent[t]) return;
+    rb_send_sent[t] = g; dsp_write(0x8A80u + 9u * (uint32_t)t + 5u, g, 0);
+}
+static void rb_configure(int on)
+{
+    dsp_write(RB_ENTRY, 0, 0); dsp_write(RB_C1, 0, 0);
+    rb_on_sent = 0; rb_lev_sent = 0xFF; for (int k = 0; k < 3; k++) rb_knob_sent[k] = 0xFF;
+    int row = aos_verb_row();
+    if (!on || !row) { for (int k = 0; k < 3; k++) dsp_write(RB_ENTRY + 8u + (uint32_t)k, 0, 0); return; }
+    const FxInfo *fi = &fx_info[row - 1];
+    const SqHead *h = SQH;
+    for (int k = 0; k < 6; k++) dsp_write(RB_KNOBS + (uint32_t)k, (uint32_t)(k < 3 ? h->rv_knob[k] & 0x7F : k == 5 ? 127 : fi->def[k]) << 16, 0);   /* MIX all wet */
+    for (int w = 0; w < 3; w++) dsp_write(RB_KNOBS + 0xCu + (uint32_t)w, 0, 0);
+    dsp_write(RB_KNOBS + 0x10u, RB_C1, 0); dsp_write(RB_KNOBS + 0x11u, RB_IN, 0); dsp_write(RB_KNOBS + 0x12u, RB_OUT, 0);
+    for (int i = 0; i < 32; i++) dsp_write(RB_OUT + (uint32_t)i, 0, 0);
+    dsp_write(RB_C1 + 1, fi->org + 2, 0); dsp_write(RB_C1 + 2, fi->org, 0); dsp_write(RB_C1 + 3, RB_KNOBS, 0);
+    dsp_write(RB_C1 + 4, 0x1800u, 0); dsp_write(RB_C1 + 5, fi->ybase, 0); dsp_write(RB_C1 + 6, 1, 0);
+    dsp_write(RB_C1 + 7, 0, 0); dsp_write(RB_C1 + 8, 0, 0); dsp_write(RB_C1 + 9, RB_IN, 0); dsp_write(RB_C1 + 10, RB_OUT, 0);
+    dsp_write(RB_C1 + 11, 0x1908u, 0);
+    dsp_write(RB_C1, 1, 0);
+    dsp_write(RB_ENTRY + 1, PROXY_PROC, 0); dsp_write(RB_ENTRY + 2, PROXY_INIT, 0); dsp_write(RB_ENTRY + 3, RB_KNOBS, 0);
+    dsp_write(RB_ENTRY + 4, 0, 0); dsp_write(RB_ENTRY + 5, 0x1908u, 0); dsp_write(RB_ENTRY + 6, 0, 0);
+    dsp_write(RB_ENTRY, 1, 0);
+    rb_on_sent = 1;
+}
+static void rb_off(void) { if (rb_on_sent) rb_configure(0); for (int t = 0; t < SQ_TRACKS; t++) rb_send(t, 0); }
+static void rb_forget(void) { rb_on_sent = 0; for (int t = 0; t < SQ_TRACKS; t++) rb_send_sent[t] = 1; }
+static void rb_tick(void)
+{
+    SqHead *h = SQH;
+    if (h->rv_ok != 1) aos_seq_rv_defaults();
+    int on = h->rv_on != 0 && aos_verb_row();
+    if (on != rb_on_sent) rb_configure(on);
+    if (!on) return;
+    for (int k = 0; k < 3; k++) if ((h->rv_knob[k] & 0x7F) != rb_knob_sent[k]) { rb_knob_sent[k] = h->rv_knob[k] & 0x7F; dsp_write(RB_KNOBS + (uint32_t)k, (uint32_t)rb_knob_sent[k] << 16, 0); }
+    if (h->rv_lev != rb_lev_sent) { rb_lev_sent = h->rv_lev; uint32_t g = sq_sqr(h->rv_lev); dsp_write(RB_ENTRY + 8u, g, 0); dsp_write(RB_ENTRY + 10u, g, 0); }
+}
 static void seq_fx(void)
 {
     const SqHead *h = SQH;
+    rb_tick();
     for (int s = 0; s < FX_SLOTS; s++) {
         int row = h->fx_row[s]; if (row > FX_COUNT) row = 0;
         if (row && (fx_named(row, "DIST") || (row <= FX_COUNT && !fx_words[row - 1]))) row = 0;   /* no distortion; a removed effect (BBD) */
@@ -979,6 +1036,7 @@ static void fx_either(void)
     static int was = -1;
     if (was != seq_mode) {
         if (was >= 0 || seq_mode) for (int s = 0; s < FX_SLOTS; s++) { dsp_write(0x280u + 8u * (uint32_t)s, 0, 0); dsp_write(C1_ENTRY(s), 0, 0); slot_row[s] = 0xFF; slot_knobs[s] = 0x1800u + 0x20u * (uint32_t)s; slots_ready = 1; }
+        if (was >= 0 || seq_mode) { rb_configure(0); rb_forget(); }   /* the reverb bus: set up again from the sequence */
         was = seq_mode;
     }
     if (seq_mode) seq_fx(); else fx_slots();

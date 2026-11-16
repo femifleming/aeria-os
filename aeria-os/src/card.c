@@ -24,13 +24,15 @@ int card_ok;
 uint32_t card_act_n;   /* counts every read or write: the card lamp flickers with it */
 static int card_swap = 1;     /* 1: swap the bytes of each data word (found from the boot sector's 55 AA) */
 
+static void card_idle(void);   /* sampler.c: keeps the sample stream fed during long reads */
 static int ata_wait(int bits_set, uint32_t ms)
 {
-    uint32_t t = now();
+    uint32_t t = now(), fed = t;
     for (;;) {
         uint8_t s = C8(ATA_ALT);
         if (!(s & 0x80) && (s & bits_set) == bits_set) return s & 1 ? -1 : 1;
         if (now() - t > CMS(ms)) return 0;
+        if (now() - fed > CMS(1) / 4) { card_idle(); fed = now(); }   /* (15 Nov 2026) a card thinking for a while: the stream goes on */
     }
 }
 /* the controller as stock starts it: timing, the card's reset released, then wait for the card */
@@ -72,7 +74,8 @@ uint32_t card_capacity(void)
     (void)C8(ATA_CMD);
     return hi << 16 | lo;
 }
-/* n sectors (1..255) from lba into buf (512 n bytes) */
+/* n sectors (1..255) from lba into buf (512 n bytes). The stream is fed after every sector (15 Nov 2026: once a
+ * 64-sector read, it ran dry on every long file -- the pump sends at most 40 samples a call) */
 int card_read(uint32_t lba, int n, uint8_t *buf)
 {
     if (!card_ok || n < 1 || n > 255 || !ata_cmd(lba, n, 0x20)) return 0;
@@ -84,6 +87,7 @@ int card_read(uint32_t lba, int n, uint8_t *buf)
             if (card_swap) { *buf++ = (uint8_t)w; *buf++ = (uint8_t)(w >> 8); }
             else { *buf++ = (uint8_t)(w >> 8); *buf++ = (uint8_t)w; }
         }
+        card_idle();
     }
     (void)C8(ATA_CMD);
     return 1;

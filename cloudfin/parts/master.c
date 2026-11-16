@@ -1,6 +1,5 @@
 /* ---- MASTER: the freeze delay on the main mix, and the tempo (AERIA OS, sadnoise, 12 Nov 2026) --------------------
- * After the chain and after the weather; the weather never moves it. (The master EQ is on GAIN's FUNC layer, the
- * limiter's switch on MIX's.) The MIX key opens the page:
+ * After the chain and after the weather; the weather never moves it. (The limiter's switch is on MIX's FUNC layer.) The MIX key opens the page:
  *   TIME  the delay's time in sixteenth notes at the tempo, 1..16 -- the sixteen trigs pick it at a touch
  *   FDBK  how much comes round again      HPF / LPF  a high-pass and a lowpass in the feedback
  *   SEND  how much of the mix goes in     WET  how much of the delay is heard (0: the delay is off)
@@ -8,7 +7,9 @@
  *   FREEZE: the crossfader at B. Nothing more goes in, what is in it goes round for ever; a change of TIME or
  *         tempo then jumps
  *   NO    tap the tempo (the last taps' average)
- *   The crossfader (FUNC: XFRZ on): at A the delay runs, moved to B it freezes -- and thaws on the way back. */
+ *   The crossfader does ONE thing, XMOD (15 Nov 2026): SCENES (it moves between scene A and scene B), FREEZE (at B
+ *   the delay freezes, back towards A it thaws), DJ FILTER, EFFECTS WET or MOD DEPTH. FUNC + SCENE A makes it the
+ *   scenes' fader, FUNC + SCENE B the freeze; the screen's bottom line and the SCENE lamps say which it is. */
 #if defined(AERIAOS)
 void aos_freeze_delay(int on, int sixteenths, int bpm, int fb, int hp, int lp, int send, int wet, int frozen);
 static uint8_t fz_frozen;
@@ -22,7 +23,11 @@ static uint8_t fz_fader;   /* the crossfader holds it frozen */
  *   1 DJF   a DJ filter on the main mix: left of the middle a low-pass comes down, right of it a high-pass goes up
  *   2 WET   every effect's MIX scaled by the fader: A all dry, B as set
  *   3 MOD   the MOD page's routes scaled by the fader: A still, B full */
-static int xf_mode(void) { Param *p = &params[PG_MASTER][9]; int v = p->user >= 0 ? p->user : p->value; return v & 3; }
+enum { XM_SCENES, XM_DJF, XM_WET, XM_MOD, XM_FREEZE, N_XMODES };
+static const char *const xf_mode_names[N_XMODES] = {"SCENES", "DJ FILTER", "EFFECTS WET", "MOD DEPTH", "FREEZE"};
+static int xf_mode(void) { Param *p = &params[PG_MASTER][9]; int v = p->user >= 0 ? p->user : p->value; return v < 0 || v >= N_XMODES ? 0 : v; }
+static const char *xf_mode_name(void) { return xf_mode_names[xf_mode()]; }
+static void xf_set_mode(int m) { Param *p = &params[PG_MASTER][9]; p->value = p->user = (int16_t)clamp(m, 0, N_XMODES - 1); say("CROSSFADER", xf_mode_name()); }
 static int xf_scale(void) { return xfade(); }                                    /* 0..127 */
 static void xf_filters(int *lp, int *hp)
 {
@@ -50,7 +55,7 @@ static void master_tick(void)
 {
     int wet = pv(PG_MASTER, 5);
     /* the crossfader: past three quarters of the way to B it freezes, back under a quarter past the middle it thaws */
-    if (pv(PG_MASTER, 7) == 2) { int x = xfade(); if (x > 96 && !fz_fader) { fz_fader = 1; say("FREEZE", "ON"); } else if (x < 80 && fz_fader) { fz_fader = 0; if (!fz_frozen) say("FREEZE", "OFF"); } }
+    if (xf_mode() == XM_FREEZE) { int x = xfade(); if (x > 96 && !fz_fader) { fz_fader = 1; say("FREEZE", "ON"); } else if (x < 80 && fz_fader) { fz_fader = 0; if (!fz_frozen) say("FREEZE", "OFF"); } }
     else fz_fader = 0;
     master_rfrz();
     aos_freeze_delay(wet > 0 || master_frozen(), pv(PG_MASTER, 0), master_bpm(), pv(PG_MASTER, 1), pv(PG_MASTER, 2), pv(PG_MASTER, 3),
@@ -78,8 +83,7 @@ static void master_say(int i, int v, char *n)
 {
     int k = 0;
     if (i == 0) { num(n, v); while (n[k]) k++; n[k++] = '/'; n[k++] = '1'; n[k++] = '6'; n[k] = 0; say("DELAY TIME", n); }
-    else if (i == 7) say("FADER FREEZES", v == 2 ? "ON" : "OFF");
-    else if (i == 9) { static const char *const xm[4] = {"SCENES", "DJ FILTER", "EFFECTS WET", "MOD DEPTH"}; say("CROSSFADER", xm[v & 3]); }
+    else if (i == 9) say("CROSSFADER", xf_mode_names[v < 0 || v >= N_XMODES ? 0 : v]);
     else if (i == 6) { num(n, 60 + v); while (n[k]) k++; n[k++] = 'B'; n[k++] = 'P'; n[k++] = 'M'; n[k] = 0; say("TEMPO", n); }
     else if (i == 2 || i == 3) {                                              /* the one-pole's corner, about */
         int c = i == 3 ? (v >= 127 ? 32768 : 600 + v * v * 2) : v * v / 2, hz = c >= 30000 ? 0 : c * 7019 / (32768 - c / 2);

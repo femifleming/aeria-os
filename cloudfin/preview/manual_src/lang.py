@@ -48,7 +48,7 @@ STRINGS = {
     # a list the builder makes (the screensavers' names)
     'list_sep': {'en': ', ', 'zh': '、', 'ja': '、', 'de': ', '},
     # the date of the build, where the text says {{BUILD}}
-    'build_name': {'en': 'AERIA OS, 12 November 2026', 'zh': 'AERIA OS，2026年11月12日', 'ja': 'AERIA OS、2026年11月12日', 'de': 'AERIA OS, 12. November 2026'},
+    'build_name': {'en': 'AERIA OS, 15 November 2026', 'zh': 'AERIA OS，2026年11月12日', 'ja': 'AERIA OS、2026年11月12日', 'de': 'AERIA OS, 12. November 2026'},
     # the index: the heading over the entries that start with a CJK character, and those that start with kana
     'ix_han': {'en': '#', 'zh': '中文', 'ja': '漢字', 'de': '#'},
     'ix_kana': {'en': '#', 'zh': '假名', 'ja': 'かな', 'de': '#'},

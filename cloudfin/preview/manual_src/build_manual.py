@@ -38,7 +38,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 man_dir = os.path.expanduser('~/octa/aeria-os/manual')
 img_dir = os.path.join(man_dir, 'img')
 CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-BUILD_NAME = 'AERIA OS, 12 November 2026'      # the English; a translation's is lang.S('build_name')
+BUILD_NAME = 'AERIA OS, 15 November 2026'      # the English; a translation's is lang.S('build_name')
 used = []
 FONT_EN = '"Helvetica Neue", Helvetica, Arial, sans-serif'
 
@@ -645,10 +645,14 @@ def to_pdf(html_path, pdf_path):
     """Chrome prints the page. Each print has a profile of its own (so that several builds can run at once), and
     one that fails is tried again."""
     for attempt in range(3):
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
         with tempfile.TemporaryDirectory(prefix='aeria_chrome_') as prof:
             r = subprocess.run([CHROME, '--headless', '--disable-gpu', '--no-pdf-header-footer', '--run-all-compositor-stages-before-draw', f'--user-data-dir={prof}',
                                 '--virtual-time-budget=20000', f'--print-to-pdf={pdf_path}', 'file://' + html_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if r.returncode == 0 and os.path.exists(pdf_path):
+        if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
+            if r.returncode != 0:   # Chrome 157 writes the PDF and then trips its own teardown watchdog (exit 2): the file is whole
+                print(f'  (Chrome exited {r.returncode} after writing {os.path.basename(pdf_path)})', file=sys.stderr)
             return
     raise SystemExit(f'Chrome could not print {html_path} (exit {r.returncode})')
 

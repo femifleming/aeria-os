@@ -1,0 +1,58 @@
+"""walk every sequencer key path on the unit (both banks), watching that the OS stays alive. sweep_seq.py"""
+import sys; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); from ut import *
+import numpy as np
+MT=0x100C8000
+keep=seq_backup(); keepmt=aos.rd(d,MT,0x4400); old=inputs_off(); dry0=dry()
+try:
+    seqmode(1); alive('enter')
+    aos.wr(d,B+64,bytes([96,64,0,0,127,100,0,127,64]+[0]*10+[0]+[0,36,0,0,0,0,0,0,0,0,0,0]))
+    aos.wr(d,B+64+32,bytes([97,64,0,0,60,90,0,127,64]+[0]*10+[1]+[0,36,0,0,0,0,0,0,0,0,0,0]))
+    aos.wr(d,B+0x400,bytes(12*64*8)); aos.wr(d,B+33,bytes([1]))
+    for n in (0,4,8,12): aos.wr(d,B+0x400+12*n,bytes([1,110,0,0,0,0,0,0,0,0,0,0]))
+    for n in range(0,16,2): aos.wr(d,B+0x400+12*(64+n),bytes([1,90,0,0,0,0,0,0,0,0,0,0]))
+    for nm in ('SRC','AMP','LFO','FX1','FX2','ARR','PAGE'):
+        key(K[nm]); key(K[nm])
+        for e in range(6): enc(e,1); enc(e,-1)
+        alive('page '+nm)
+    combo(K['FUNC'],K['LFO']); enc(0,1); enc(0,-1); alive('track midi page'); key(K['SRC']); key(K['SRC'])
+    key(K['PLAY']); time.sleep(0.5); alive('play')
+    key(K['BANK']); key(K['TRIG']+8); key(K['TRIG']+1); key(K['TRIG']+8); key(K['TRIG']+1); key(K['NO']); alive('mixer')
+    key(K['MIX']); enc(0,1); enc(0,-1); key(K['TRIG']+3); key(K['NO']); alive('master')
+    key(K['REC']); key(K['TRIG']+2); key(K['TRIG']+9); key(K['TRIG']+9); key(K['REC']); alive('live')
+    key(K['TRACK']+2); combo(K['FUNC'],K['TRACK']+2); combo(K['FUNC'],K['TRACK']+2)
+    key(K['CUE'],1); key(K['TRACK']+3); key(K['CUE'],0); key(K['CUE'],1); key(K['TRACK']+3); key(K['CUE'],0)
+    key(K['UP']); key(K['DOWN']); key(K['LEFT']); key(K['RIGHT']); alive('nav')
+    key(K['TRACK']+0); key(K['TRIG']+0,1); key(K['SRC']); enc(1,5); key(K['YES']); key(K['LEFT']); key(K['AMP']); enc(2,-10); key(K['NO']); key(K['TRIG']+0,0); alive('lock')
+    key(K['PATTERN'],1); key(K['TRIG']+1); key(K['TRIG']+0); key(K['PATTERN'],0); alive('pattern chain')
+    key(K['SCENEA'],1); combo(K['FUNC'],K['TRIG']+4); key(K['TRIG']+4); key(K['SCENEA'],0); alive('mute scene')
+    key(K['PATTERN'],1); key(K['TRIG']+0); key(K['PATTERN'],0)
+    key(K['YES']); key(K['TEMPO']); key(K['TEMPO']); key(K['TEMPO'],1); enc(6,3); enc(6,-3); key(K['TEMPO'],0); alive('tempo')
+    combo(K['FUNC'],K['SCENEB']); combo(K['FUNC'],K['SCENEA']); alive('xf modes')
+    combo(K['FUNC'],K['REC']); key(K['TRACK']+4); combo(K['FUNC'],K['STOP']); combo(K['FUNC'],K['PLAY']); key(K['TRACK']+0); alive('copy')
+    key(K['PATTERN'],1); combo(K['FUNC'],K['REC']); key(K['PATTERN'],0); combo(K['FUNC'],K['STOP']); alive('pattern copy')
+    key(K['FX2']); key(K['YES']); picked=[]
+    for i in range(18):
+        key(K['DOWN']); key(K['YES']); time.sleep(0.5); alive('fx %d'%i); picked.append(aos.rd(d,B+64+256+32,1)[0]); key(K['YES'])
+    print('effects picked in turn:',picked,loads(0.4))
+    key(K['NO']); key(K['YES'])
+    for _ in range(25): key(K['UP'])
+    key(K['YES']); time.sleep(0.3)
+    combo(K['FUNC'],K['FX2']); enc(0,1); time.sleep(0.8); alive('rvb on'); enc(0,-1); time.sleep(0.4); alive('rvb off')
+    combo(K['FUNC'],K['BANK']); time.sleep(0.2); combo(K['FUNC'],K['BANK']); alive('resample')
+    key(K['SRC']); combo(K['FUNC'],K['YES']); time.sleep(0.4); key(K['STOP']); key(K['PLAY']); key(K['TRACK']+1); alive('kit browser'); print('after the browser: br_mode',i32('br_mode'))
+    # the MIDI bank
+    key(K['MIDI']); alive('midi bank'); print('bank toast',toast())
+    for nm in ('SRC','SRC','ARR','ARR','PAGE','PAGE','AMP','LFO','FX1','FX2'):
+        key(K[nm])
+        for e in range(6): enc(e,1); enc(e,-1)
+        alive('midi bank page '+nm)
+    key(K['TRACK']+1); key(K['TRIG']+0); key(K['TRIG']+2); key(K['TRIG']+2,1); key(K['SRC']); enc(1,3); key(K['TRIG']+2,0)
+    combo(K['FUNC'],K['TRACK']+1); combo(K['FUNC'],K['TRACK']+1); key(K['CUE'],1); key(K['TRACK']+1); key(K['CUE'],0); key(K['CUE'],1); key(K['TRACK']+1); key(K['CUE'],0)
+    key(K['BANK']); key(K['TRIG']+9); key(K['TRIG']+9); key(K['NO']); key(K['REC']); key(K['TRIG']+1); key(K['REC'])
+    combo(K['FUNC'],K['REC']); key(K['TRACK']+2); combo(K['FUNC'],K['STOP']); combo(K['FUNC'],K['PLAY']); alive('midi bank keys')
+    key(K['UP']); key(K['DOWN']); key(K['LEFT']); key(K['RIGHT']); key(K['YES']); enc(6,2); enc(6,-2)
+    key(K['MIDI']); print('back to audio:',toast()); alive('audio bank')
+    key(K['STOP']); time.sleep(0.2); key(K['STOP']); alive('silence')
+    print('DONE seq sweep: dry +%d, %s'%(dry()-dry0,loads(0.5)))
+finally:
+    key(K['STOP']); time.sleep(0.2); seq_restore(keep); aos.wr(d,MT,keepmt); inputs_back(old); print('state put back')

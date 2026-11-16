@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """Generates the AERIA VERB source (8-line FDN reverb, a fixed-point port of
-Cloudfin's FDNReverb.h).
+Cloudfin's FDNReverb.h), the reverb core at HALF RATE (22.05 kHz).
 
-    RING=full (default)  -> verb.asm       32,768-word ring, m = $7fff, the
-                                           plugin's own line lengths
-    RING=test            -> verb_test.asm  every delay length x 0.5 so the ring
-                                           fits the harness's 15,870-word
-                                           window (m = $3dfd)
+    RING=full (default)  -> verb.asm       32,768-word ring, m = $7fff (the
+                                           region is unchanged; about 14.3K used)
+    RING=test            -> verb_test.asm  the same lengths in a 15,870-word
+                                           ring (m = $3dfd), the harness's window
 (or: gen.py full | gen.py test | gen.py both)
+
+Half rate (13 Nov 2026; the full-rate build is gen.py.prehalf, as pt2399 did):
+a polyphase IIR halfband decimator (halfband.py, 5 allpasses, >= 62 dB from
+12.05 kHz) takes in/4 to 22.05 kHz, the whole FDN (input filters, allpasses,
+lines, damping, Hadamard) runs once every second sample, and an identical
+halfband interpolates the wet back to 44.1 kHz. Only the halfbands and the mix
+run at 44.1 kHz. Times (line and allpass lengths, T60, LFO rates, modulation
+depth in ms, filter frequencies) are unchanged; the wet stops at about 10.5 kHz
+(the TONE low-pass is held under 0.45 x 22.05 kHz = 9.9 kHz, was 19.8 kHz).
+Since the lengths halve in samples, the test build now runs the real lengths.
 """
 import math
 import os
@@ -15,14 +24,17 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from asmgen import ins, q, smooth, mix, finish, e2_sub, snap_close  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import halfband as HB  # noqa: E402
 
 FS = 44100.0
+FSH = FS / 2              # the core's rate
 LINE_MS = (43.1, 51.7, 59.3, 67.9, 76.3, 83.9, 94.7, 103.1)
 AP_MS = ((4.77, 3.59, 12.73, 9.31), (5.21, 3.97, 11.83, 8.71))
-DMAX = 25                 # modulation reach, samples (MOD 127 = 24.7 = 2 x 0.28 ms)
-DEPTH_MAX = 2 * 0.00028 * FS
+DMAX = 13                 # modulation reach, half-rate samples (MOD 127 = 12.4 = 2 x 0.28 ms)
+DEPTH_MAX = 2 * 0.00028 * FSH
 AP_G = 0.62
-DAMP_A = 1.0 - math.exp(-2 * math.pi * 7500.0 / FS)
+DAMP_A = 1.0 - math.exp(-2 * math.pi * 7500.0 / FSH)
 T60_MIN, T60_MAX = 0.3, 30.0
 OUT_C = 0.55 * 2 * math.sqrt(8) / 4       # x4 after the sum (asl 2)
 REC = 10                  # words per line record
@@ -35,6 +47,51 @@ S_COEF = 0x38             # 4 sections x (b0/2, b1/2, -a1/2, -a2/2)
 S_APT = 0x48              # 8 x (-(read age), -(write age))
 S_LINE = 0x58             # 8 x REC: eps, s hi, s lo, c hi, c lo, kconst, noff, z, g', c_i/32
 S_END = S_LINE + 8 * REC
+S_DEC = S_FILT + 12       # the decimated input of a side sits in its filter block's unused word (+12, +28)
+# the halfband block (r7 + HBO; n3 holds its address in the sample loop, r2 = n3 in the wrapper)
+HBO = 0xb0
+H_PAR, H_U0, H_U1 = 0, 1, 3                 # parity; interpolator outputs (L, R) of the last core sample
+H_CE = 5                                    # decimator A1 coefficients L, R (the even sample)
+H_CO = H_CE + 2 * HB.K1                     # decimator A0 L, R (the odd sample)
+H_CI = H_CO + 2 * HB.K0                     # interpolator A0 then A1 (a side at a time)
+H_SE = H_CI + HB.K0 + HB.K1                 # chains: decimator A1 L, R
+H_SO = H_SE + 2 * (HB.K1 + 1)               # decimator A0 L, R
+H_SI = H_SO + 2 * (HB.K0 + 1)               # interpolator L (A0, A1), R (A0, A1)
+H_END = H_SI + 2 * (HB.K0 + HB.K1 + 2)
+assert S_END <= HBO and HBO + H_END <= 0x100 and H_END <= 63
+
+
+class _Col:
+    """collects HB.path's lines (the halfband emitter of pt2399/halfband.py)."""
+    def __init__(self):
+        self.L = []
+
+    def __call__(self, op, *args, c=''):
+        self.L.append(ins(op, *args, c=c))
+
+    def p(self, alu, move='', c=''):
+        self.L.append(f'        {alu} {move}'.rstrip() + (f'  ; {c}' if c else ''))
+
+
+def hbpath(K, pre=False):
+    """one halfband path, st r3, cf r1 (both linear). Pre: x0 = input. Post: x0 = output (also in s[K])."""
+    A = _Col()
+    HB.path(A, K, pre=pre, st='r3', cf='r1')
+    return A.L
+
+
+def dec(co, so, K, fin):
+    """the decimator paths K of both sides on this sample's x/4 (r2 -> the halfband block). fin: the odd sample,
+    d = (A0 + A1) / 2 -> the side's filter block word +12."""
+    out = [ins('lua', f'(r2+${co:02x})', 'r1'), ins('lua', f'(r2+${so:02x})', 'r3')]
+    for k in range(2):
+        out += [ins('move', ('x:(r0)', 'x:(r0+$1)')[k], 'a'),
+                '        asr     a x:(r1)+,y0', '        asr     a x:(r3),b', ins('move', 'a', 'x0')]
+        out += hbpath(K, pre=True)
+        if fin:
+            out += [ins('move', f'x:(r2+${H_SE + k * (HB.K1 + 1) + HB.K1:02x})', 'b', c='A1 of the even sample'),
+                    ins('add', 'x0', 'b'), ins('asr', 'b'), ins('move', 'b', r7(S_DEC + 16 * k), c='d = (A0 + A1)/2')]
+    return out
 
 
 def nimm(age):
@@ -49,11 +106,11 @@ def r7(slot):
 def geometry(mode):
     """Ring layout and constants of one build ('full' or 'test')."""
     full = mode == 'full'
-    scale = 1.0 if full else 0.5
+    scale = 1.0                      # (the full-rate build's test ring held every length x 0.5)
     ringsize = 32768 if full else 15870
-    ln = [ms * FS / 1000.0 * scale for ms in LINE_MS]          # line lengths (fractional samples)
+    ln = [ms * FSH / 1000.0 * scale for ms in LINE_MS]          # line lengths (fractional samples)
     iln = [int(math.floor(v)) for v in ln]
-    apl = [[max(1, int(ms * FS / 1000.0 * scale)) for ms in ch] for ch in AP_MS]
+    apl = [[max(1, int(ms * FSH / 1000.0 * scale)) for ms in ch] for ch in AP_MS]
     age = 0
     ap_start = [[0] * 4, [0] * 4]
     for c in range(2):
@@ -65,11 +122,11 @@ def geometry(mode):
         ln_start.append(age)
         age += iln[i] + DMAX + 5
     assert age <= ringsize, (age, ringsize)
-    eps = [round(2 * math.sin(math.pi * (0.07 + 0.053 * i) / FS) * (1 << 23)) / (1 << 23) for i in range(8)]
+    eps = [round(2 * math.sin(math.pi * (0.07 + 0.053 * i) / FSH) * (1 << 23)) / (1 << 23) for i in range(8)]
     return dict(mode=mode, full=full, scale=scale, ring=ringsize, m=ringsize - 1, used=age,
                 name='verb.asm' if full else 'verb_test.asm', ln=ln, iln=iln, apl=apl,
                 ap_start=ap_start, ln_start=ln_start, nclr=-(-ringsize // 256), eps=eps,
-                lfo_hz=[math.asin(e / 2) * FS / math.pi for e in eps])
+                lfo_hz=[math.asin(e / 2) * FSH / math.pi for e in eps])
 
 
 def build(mode):
@@ -87,8 +144,10 @@ def build(mode):
         return [ins('bpl', l), ins('add', '#>$1', acc), f'{l}:']
 
     H = f'''; CYCLES_FORWARD_BRANCHES
-; AERIA VERB ({'full size' if full else 'TEST size: every delay length x 0.5'}) -- generated by verb/gen.py, do not edit.
-; Fixed-point port of Cloudfin's 8-line FDN reverb (FDNReverb.h), 44.1 kHz.
+; AERIA VERB ({'full size' if full else 'TEST size: the same lengths in the harness window'}) -- generated by verb/gen.py, do not edit.
+; Fixed-point port of Cloudfin's 8-line FDN reverb (FDNReverb.h), the FDN at HALF RATE (22.05 kHz):
+; in/4 -> halfband decimator (polyphase IIR, {HB.N_COEF} allpasses) -> the FDN every second sample ->
+; halfband interpolator -> the mix at 44.1 kHz. Ages and lengths below are half-rate samples.
 ;
 ;  in/4 -> HP (4th-order Butterworth, 2 biquads) -> LP (4th-order, 2 biquads)
 ;       -> 4 Schroeder allpasses per side (g {AP_G}) -> lines (L even, R odd)
@@ -97,7 +156,7 @@ def build(mode):
 ;  Hadamard 8x8, two output sign patterns x 0.55.
 ;
 ;  DECY  T60 {T60_MIN} .. {T60_MAX:g} s (log)
-;  TONE  DJ filter, 64 = centre (HP 500 Hz): left HP -> 50 Hz and LP 20 k -> 302 Hz,
+;  TONE  DJ filter, 64 = centre (HP 500 Hz): left HP -> 50 Hz and LP (20 k, held under 9.9 k) -> 302 Hz,
 ;        right HP -> 5 kHz
 ;  MOD   modulation depth 0 .. {DEPTH_MAX:.1f} samples peak (64 = the plugin's 0.28 ms)
 ;  MIX   0 = exact dry
@@ -116,9 +175,10 @@ def build(mode):
 ; r7 (${S_END:02x} words used): 00 base 01 ptr 02 clear count 03/04 mix t/s
 ;   05/06 depth t/s (samples/32) 07/08 decay t/s (log2(T60/0.3)/32)
 ;   09/0a tone t/s (t/2) 0b 0c scratch (w1 w2) 0d 0e out L R 0f scratch
-;   10..2f filter state L, R (16 each; +15 = diffused input)
+;   10..2f filter state L, R (16 each; +12 = decimated input/4, +15 = diffused input)
 ;   30..37 y'  38..47 biquad coefficients  48..57 allpass offsets
 ;   58.. line k at +{REC}k: eps, sin hi lo, cos hi lo, kconst, noff, z, g', c/32
+;   b0.. the halfband block (n3 in the loop): parity, U0 L R, U1 L R, coefficients, chains
 '''
     L = [H]
     # ------------------------------------------------------------------ init
@@ -143,7 +203,11 @@ def build(mode):
             + put(q(0.5 * math.cos(ph))) + [ins('move', 'b', 'x:(r4)+')] \
             + put(q((frac + DMAX + 1) / 64)) + put(nimm(ln_start[i] + iln[i] - DMAX - 1)) \
             + [ins('move', 'b', 'x:(r4)+'), ins('move', 'b', 'x:(r4)+')] \
-            + put(q(3 * math.log2(10) * ln[i] / (FS * T60_MIN) / 32))
+            + put(q(3 * math.log2(10) * ln[i] / (FSH * T60_MIN) / 32))
+    L += [ins('move', 'r7', 'r4'), ins('move', f'#>${HBO + H_CE:06x}', 'n4'), ins('move', '(r4)+n4'),
+          '; halfband coefficients: decimator A1 L R, A0 L R, interpolator A0 A1']
+    for c in HB.A1 + HB.A1 + HB.A0 + HB.A0 + HB.A0 + HB.A1:
+        L += put(q(c))
     L += [ins('rts')]
 
     # ------------------------------------------------------------------ proc
@@ -188,29 +252,45 @@ def build(mode):
           ins('move', '#>$400000', 'a'), ins('move', r7(S_TONS), 'x0'), ins('sub', 'x0', 'a'),
           ins('move', 'a', 'x0'), ins('move', q(2 * math.log2(10) / 32), 'y0'), ins('mpy', 'y0', 'x0', 'a'),
           ins('bsr', 'vexp', c='10^(t-1)'),
-          ins('move', 'b', 'x0'), ins('move', q(2 * math.pi * 5000 / FS / 4), 'y0'), ins('mpy', 'y0', 'x0', 'a'),
+          ins('move', 'b', 'x0'), ins('move', q(2 * math.pi * 5000 / FSH / 4), 'y0'), ins('mpy', 'y0', 'x0', 'a'),
           ins('move', 'a', 'x0', c='w/4, HP 50 Hz .. 5 kHz'),
           ins('lua', f'(r7+${S_COEF:02x})', 'r3'), ins('move', '#>$1', 'a'), ins('move', 'a', r7(S_TMP)),
           ins('bsr', 'vcoef'),
           ins('move', r7(S_TONS), 'a'), ins('neg', 'a'), ins('tst', 'a'), ins('bge', 'vlppos'), ins('clr', 'a'),
           'vlppos:', ins('move', 'a', 'x0'), ins('move', q(2 * 1.82 * math.log2(10) / 32), 'y0'),
           ins('mpy', 'y0', 'x0', 'a'), ins('bsr', 'vexp', c='10^(1.82 t), t < 0'),
-          ins('move', 'b', 'x0'), ins('move', q(2 * math.pi * 20000 / FS / 4), 'y0'), ins('mpy', 'y0', 'x0', 'a'),
+          ins('move', 'b', 'x0'), ins('move', q(2 * math.pi * 20000 / FSH / 8), 'y0'), ins('mpy', 'y0', 'x0', 'a'), ins('asl', 'a'),
           ins('move', q(2 * math.pi * 0.45 / 4), 'x0'), ins('cmp', 'x0', 'a'), ins('tgt', 'x0', 'a'),
-          ins('move', 'a', 'x0', c='w/4, LP 302 Hz .. 0.45 fs'),
+          ins('move', 'a', 'x0', c='w/4, LP 302 Hz .. 0.45 fs (fs = 22.05 kHz)'),
           ins('clr', 'a'), ins('move', 'a', r7(S_TMP)), ins('bsr', 'vcoef')]
     # ----------------------------------------------------------- sample loop
-    L += ['; ---- sample loop ----',
+    L += ['; ---- sample loop: the halfbands and the mix at 44.1 kHz, the FDN every second sample ----',
           ins('move', mimm, 'm4'), ins('move', mimm, 'm5'), ins('move', r7(S_PTR), 'r5'),
-          ins('do', 'n7', '>vend')]
-    L += smooth(S_MIXT, S_MIXS, 7) + smooth(S_DEPT, S_DEPS, 8)
+          ins('move', 'r7', 'r3'), ins('move', f'#>${HBO:06x}', 'n3'), ins('move', '(r3)+n3'),
+          ins('move', 'r3', 'n3', c='n3 -> the halfband block'),
+          ins('do', 'n7', '>vend'),
+          '; MODEFORK_BEGIN (cycle_count.py: the parity fork; the static figure is the odd sample, the dearer arm)',
+          ins('move', 'n3', 'r2'),
+          ins('move', f'x:(r2+${H_PAR:02x})', 'a'), ins('eor', '#$1', 'a'),
+          ins('move', 'a1', f'x:(r2+${H_PAR:02x})', c='1 = the pair\'s first (even) sample'),
+          ins('beq', 'vodd'),
+          '; MODEFORK_MID',
+          '; even: the decimator\'s A1 paths take this sample; out: the interpolator\'s second outputs']
+    L += dec(H_CE, H_SE, HB.K1, False)
+    for k in range(2):
+        L += [ins('move', f'x:(r2+${H_U1 + k:02x})', 'a'), ins('asl', 'a', c='wet (interpolated at / 2)')] \
+            + mix(mixslot=S_MIXS)
+    L += [ins('bra', 'vlast'),
+          '; MODEFORK_MID',
+          'vodd:', '; odd: the decimator\'s A0 paths finish the pair; the FDN runs; out: the interpolator\'s first outputs']
+    L += dec(H_CO, H_SO, HB.K0, True)
+    L += smooth(S_MIXT, S_MIXS, 6) + smooth(S_DEPT, S_DEPS, 7)
     L += [ins('lua', f'(r7+${S_FILT:02x})', 'r2'), ins('move', '#>$fffffd', 'n2'),
           ins('move', 'r7', 'r1'), ins('move', f'#>${S_APT:06x}', 'n1'), ins('move', '(r1)+n1'),
-          ins('move', '#>$0', 'n0'),
           '; ---- per side: in/4, four biquads, four allpasses ----',
           ins('do', '#2', '>vchend'),
           ins('lua', f'(r7+${S_COEF:02x})', 'r3'),
-          ins('move', 'x:(r0+n0)', 'a'), ins('asr', '#$2', 'a', 'a'), ins('move', 'a', 'x0'),
+          ins('move', 'x:(r2+$c)', 'x0', c='decimated in/4'),
           ins('do', '#4', '>vbqend'),
           ins('clr', 'a'), ins('move', 'x:(r2)+', 'a0', c='residue of the last truncation'),
           ins('asr', 'a'),
@@ -232,7 +312,7 @@ def build(mode):
           ins('add', 'b', 'a'), ins('move', 'x:(r1)+', 'n5'), ins('move', 'a', 'y:(r5+n5)'),
           ins('move', 'a', 'x1'), ins('move', 'x0', 'a'), ins('mac', '-y1', 'x1', 'a'),
           'vapend:',
-          ins('move', 'a', 'x:(r2)+', c='diffused input'), ins('move', '#>$1', 'n0'),
+          ins('move', 'a', 'x:(r2)+', c='diffused input'),
           'vchend:',
           '; ---- eight lines: LFO, Hermite read, damping, gain ----',
           ins('lua', f'(r7+${S_Y:02x})', 'r3'), ins('move', f'#>${REC:06x}', 'n1'),
@@ -280,8 +360,8 @@ def build(mode):
     for i in range(8):
         L += [ins('move', r7(S_Y + i), 'x0'), ins('mac', ('' if SL[i] > 0 else '-') + 'x0', 'y1', 'a'),
               ins('mac', ('' if SR[i] > 0 else '-') + 'x0', 'y1', 'b')]
-    L += [ins('asl', '#$2', 'a', 'a'), ins('move', 'a', r7(S_OL)),
-          ins('asl', '#$2', 'b', 'b'), ins('move', 'b', r7(S_OR))]
+    L += [ins('asl', 'a'), ins('move', 'a', r7(S_OL), c='wet / 2'),
+          ins('asl', 'b'), ins('move', 'b', r7(S_OR))]
     L += ['; ---- Hadamard (h = 1, 2 in place; h = 4 into the lines with the input) ----']
     for p, p2 in ((0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7)):
         L += [ins('move', r7(S_Y + p), 'a'), ins('move', r7(S_Y + p2), 'x0'), ins('move', 'a', 'b'),
@@ -295,9 +375,16 @@ def build(mode):
               ins('add', 'x0', 'a'), ins('sub', 'x0', 'b'), ins('add', inj, 'a'), ins('add', inj, 'b'),
               ins('move', nimm(ln_start[j]), 'n5'), ins('move', 'a', 'y:(r5+n5)'),
               ins('move', nimm(ln_start[j + 4]), 'n5'), ins('move', 'b', 'y:(r5+n5)')]
-    L += ['; ---- mix ----', ins('move', r7(S_OL), 'a')] + mix(mixslot=S_MIXS) \
-        + [ins('move', r7(S_OR), 'a')] + mix(mixslot=S_MIXS) + [ins('move', '(r5)+')]
-    L += ['vend:', ins('nop'), ins('move', 'r5', r7(S_PTR))]
+    L += [ins('move', '(r5)+'), '; ---- interpolator (both outputs of this core sample), then the mix ----',
+          ins('move', 'n3', 'r2'), ins('lua', f'(r2+${H_SI:02x})', 'r3')]
+    for k in range(2):
+        L += [ins('lua', f'(r2+${H_CI:02x})', 'r1'), ins('move', r7(S_OL + k), 'x0')] + hbpath(HB.K0) \
+            + [ins('move', 'x0', f'x:(r2+${H_U0 + k:02x})'), ins('move', r7(S_OL + k), 'x0')] + hbpath(HB.K1) \
+            + [ins('move', 'x0', f'x:(r2+${H_U1 + k:02x})')]
+    for k in range(2):
+        L += [ins('move', f'x:(r2+${H_U0 + k:02x})', 'a'), ins('asl', 'a')] + mix(mixslot=S_MIXS)
+    L += ['vlast:', ins('nop', c='(the loop\'s last instruction)'), '; MODEFORK_END',
+          'vend:', ins('move', 'r5', r7(S_PTR))]
     for m in ('m4', 'm5'):
         L += [ins('move', '#>$ffffff', m)]
     L += [ins('rts')]

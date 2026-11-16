@@ -38,6 +38,7 @@ static void weather_fresh(void);
 /* this weather alone (the knob, the up and down keys, the weather's own turning) */
 static void set_weather(int w)
 {
+    if (!wx_kept(w) || pv_base(PG_SKY, 5)) w = CLEAR;                  /* a weather that is gone, or WX OFF: a clear sky */
     if (w == weather && wx_on == (w == CLEAR ? 0 : 1u << w)) return;
     weather = w; wx_on = (uint8_t)(w == CLEAR ? 0 : 1u << w);
     weather_fresh();
@@ -46,6 +47,8 @@ static void set_weather(int w)
 static void toggle_weather(int w)
 {
     if (w <= CLEAR || w >= N_WEATHER) { set_weather(CLEAR); return; }
+    if (!wx_kept(w)) return;
+    if (pv_base(PG_SKY, 5)) { say("WEATHER", "OFF"); return; }
     wx_on ^= (uint8_t)(1u << w);
     if (WON(w)) { if (w == SNOW) wx_on &= (uint8_t)~(1u << HEAT); if (w == HEAT) wx_on &= (uint8_t)~(1u << SNOW); weather = w; }
     else { weather = CLEAR; for (int i = N_WEATHER - 1; i > CLEAR; i--) if (WON(i)) { weather = i; break; } }
@@ -90,7 +93,7 @@ static void sound_tick(void)
 #if defined(PREVIEW) && defined(AERIAOS)
     /* the balloons' long grains (aeria-os sampler.c): each floating balloon sings, unless trig 1-3 quieted it */
     for (int b = 0; b < 3; b++)
-        aos_balloon_cloud(b, src_balloons && balloon[b].state == B_FLOATING && !((balloon_quiet >> b) & 1),
+        aos_balloon_cloud(b, !seq_on && src_balloons && balloon[b].state == B_FLOATING && !((balloon_quiet >> b) & 1),
                           pv(PG_BALLOON, 0), pv(PG_BALLOON, 3), pv(PG_BALLOON, 4), pv(PG_BALLOON, 1),
                           pv(PG_BALLOON, 2) - 64 + 12 * (pv(PG_BALLOON, 6) - 3) + pv(PG_BALLOON, 9 + b) - 25,
                           pv(PG_BALLOON, 7) - 1, pv(PG_BALLOON, 8) - 1, pv(PG_BALLOON, 5));

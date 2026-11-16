@@ -236,8 +236,10 @@ static int glyph_of(char c)
     return -1;
 }
 static int text_w(const char *s) { int n = 0; while (s[n]) n++; return n * 4 - 1; }
+static const char *T(const char *s);   /* the language (params12.c): a string in Dutch when LANG says so, else itself */
 static void text(int x, int y, const char *s, int ink)
 {
+    s = T(s);
     for (; *s; s++, x += 4) {
         int g = glyph_of(*s);
         if (g < 0) continue;
@@ -261,12 +263,19 @@ static void num(char *out, int v)
 /* ---- weather ---------------------------------------------------------------------- */
 enum { CLEAR, CLOUDY, RAIN, STORM, SNOW, HEAT, FOG, N_WEATHER };
 static const char *const weather_name[N_WEATHER] = {"CLEAR", "CLOUDY", "RAIN", "STORM", "SNOW", "HEAT", "FOG"};
-static int weather = CLOUDY, auto_weather, xf_right = STORM, amount;
+static int weather = CLEAR, auto_weather, xf_right = STORM, amount;
 /* Several weathers at once (sadnoise, 12 Nov 2026): each of CLOUDY RAIN STORM SNOW HEAT FOG is on or off by itself --
  * only SNOW and HEAT never together; none on is CLEAR. wx_on is the set (bit = the weather's number); `weather` is
  * the one turned on last (the sky's main mood, the spells' clock). */
-static uint8_t wx_on = 1u << CLOUDY;
+static uint8_t seq_on;   /* the sequencer face is up (seqmode.c) */
+static uint8_t wx_on = 0;
 #define WON(w) ((wx_on >> (w)) & 1u)
+/* 13 Nov 2026: the owner keeps RAIN and FOG (and the AURORA, wx.c); CLOUDY, STORM, SNOW, HEAT, WIND, HAIL and the
+ * TWISTER are gone (SMEAR's own FRZ knob is the freeze the snow used to turn). Their numbers stay so saved projects
+ * still load; whatever they had on of those is dropped. */
+#define WX_KEEP ((1u << RAIN) | (1u << FOG))
+static int wx_kept(int w) { return w == CLEAR || (w > 0 && w < N_WEATHER && ((WX_KEEP >> w) & 1u)); }
+static int wx_step(int w, int d) { int n = w; do n += d; while (n > 0 && n < N_WEATHER && !wx_kept(n)); return n < 0 || n >= N_WEATHER ? w : n; }
 static uint32_t spell_left;
 static int flash, thunder, bolt_x, bolt_t, gust;
 static const uint16_t spell_s[N_WEATHER][2] = {{90, 300}, {60, 240}, {60, 200}, {30, 120}, {90, 300}, {120, 360}, {60, 180}};
@@ -274,13 +283,14 @@ static const uint8_t next_w[N_WEATHER][N_WEATHER] = {
     {4, 11, 0, 0, 0, 5, 0}, {7, 0, 7, 3, 3, 0, 0}, {4, 10, 0, 6, 0, 0, 0}, {0, 8, 12, 0, 0, 0, 0},
     {8, 12, 0, 0, 0, 0, 0}, {12, 3, 0, 5, 0, 0, 0}, {8, 8, 4, 0, 0, 0, 0}};
 
-static char toast[24];
+static char toast[32];
 static uint32_t toast_until;
 static void say(const char *a, const char *b)
 {
     int i = 0;
-    while (*a && i < 12) toast[i++] = *a++;
-    if (b) { toast[i++] = ' '; while (*b && i < 23) toast[i++] = *b++; }
+    a = T(a); b = T(b);
+    while (*a && i < 20) toast[i++] = *a++;
+    if (b) { toast[i++] = ' '; while (*b && i < 31) toast[i++] = *b++; }
     toast[i] = 0;
     toast_until = ticks + 80;
 }

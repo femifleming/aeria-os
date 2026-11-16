@@ -11,7 +11,8 @@ docker run --rm --network none --user "$(id -u):$(id -g)" -v "$(cd ../dsp && pwd
   /opt/toolchain/vendor/dsp56300/build/source/dsp_host/dsp_asm -in core1.asm -org 33800 -out core1.bin -list > core1.lst 2>&1 &&
   /opt/toolchain/vendor/dsp56300/build/source/dsp_host/dsp_asm -in stage1.asm -org 31000 -out stage1.bin -list > stage1.lst 2>&1 &&
   /opt/toolchain/vendor/dsp56300/build/source/dsp_host/dsp_asm -in stage1b.asm -org 32000 -out stage1b.bin -list > stage1b.lst 2>&1 &&
-  ! grep -v "^0" slots.lst core1.lst stage1.lst | grep -v ":assembled\|:wrote" '
+  ! grep -v "^0" slots.lst core1.lst stage1.lst | grep -v ":assembled\|:wrote" &&
+  ! grep -i "mpy\|mac" slots.lst core1.lst | grep "; 01" '
 python3 ../dsp/pmove.py ../dsp/slots.bin && python3 ../dsp/pmove.py ../dsp/stage1.bin stage1
 python3 ../dsp/mkinc.py ../dsp/slots.bin dsp_slots.inc 200 slots
 python3 ../dsp/mkinc.py ../dsp/core1.bin dsp_core1.inc 33800 core1

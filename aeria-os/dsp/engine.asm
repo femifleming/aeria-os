@@ -96,6 +96,12 @@ zerng:
         move    a,x:(r0)+
 zetab:
         nop
+; the sequencer's reverb bus slot and levels, phones blocks and bus (X:$8a60-$8aff)
+        move    #>$8a60,r0
+        do      #$a0,zeph
+        move    a,x:(r0)+
+zeph:
+        nop
 ; the limiter's page X:$300-$3ff cleared (the host interrupt's saves are there too), its ceiling (half of -1 dBFS:
 ; it works on the main mix at half scale), gain 1, a history of "no reduction needed", its delay ring at $380
         move    #>$300,r0
@@ -105,11 +111,6 @@ zelim:
         nop
         move    #>$1c8312,x0
         move    x0,x:>$321
-        move    #>$8800,r0
-        do      #$40,zeeq
-        move    a,x:(r0)+
-zeeq:
-        nop
         move    #>$7fffff,x0
         move    x0,x:>$322
         move    x0,x:>$325
@@ -319,9 +320,41 @@ mixend:
         move    a,x:(r0)+
 qclr:
         nop
+; the sequencer's phones bus (15 Nov 2026: X:$8ad0, 16 pairs) starts each frame silent too
+        jclr    #3,x:<$37,pzce
+        move    #>$8ad0,r0
+        do      #32,pzcl
+        move    a,x:(r0)+
+pzcl:
+        nop
+; ... and the reverb bus (X:$8b00, 16 pairs)
+        move    #>$8b00,r0
+        do      #32,pzrc
+        move    a,x:(r0)+
+pzrc:
+        nop
+pzce:
         bsr     >chain
         bsr     >record
         bsr     >wthr
+; the phones in the sequencer (15 Nov 2026): their own bus (each track's phones gains, trkmix) with the inputs' mix and
+; the master return, at the main's quarter scale; the output loop gives them the master level and the limiter's gain.
+; (Outside the sequencer the phones are the limited main + the back bus, as before.)
+        jclr    #3,x:<$37,pzso
+        move    #>$900,r0
+        move    #>$8ad0,r1
+        move    #>$8840,r2
+        do      #32,pzsm
+        move    x:(r0)+,x0
+        move    x:(r1),a
+        add     x0,a
+        move    x:(r2)+,x0
+        add     x0,a
+        asr     #2,a,a
+        move    a,x:(r1)+
+pzsm:
+        nop
+pzso:
 ; out: main 2/3 = (chain + front bus) x master ($2e8 left, $2ec right: the balance); cue x $2eb (its level); cue 0/1 = (back bus + chain x $2ea) x master (the chain is copied
 ; to cue while nothing is routed back); phones 4/5 = main + back; slots 6/7 silent. X:$2f8-$2fd the six results.
 ; ---- the limiter (after Balloon Shop's PeakLimiter): a look-ahead brickwall at -1 dBFS on the main out. The main
@@ -385,36 +418,7 @@ limpre:
 bmlp:
         move    b,x:>$8a40
 bmoff:
-; ---- the master EQ (12 Nov 2026): four bands on the main mix, after the weather's filters and before the limiter,
-; never moved by the weather. A band adds g times a filter of the signal to the signal: the low band a 2-pole
-; lowpass (a shelf), the two middle ones a bandpass, the high band a high-pass. X:$8800 + 6 x band: the filter
-; (b0 b1 b2 -a1 -a2, halved) and g / 4 (0 = the band is flat and skipped); state X:$8820 + 8 x band (left, right).
-        move    #>$8800,r1
-        move    #>$8820,r2
-        do      #4,eqbands
-        move    x:(r1+$5),a
-        tst     a
-        beq     eqflat
-        move    #>$340,r0
-        bsr     >eqone
-        move    (r2)+
-        move    (r2)+
-        move    (r2)+
-        move    (r2)+
-        move    #>$341,r0
-        bsr     >eqone
-        move    (r2)-
-        move    (r2)-
-        move    (r2)-
-        move    (r2)-
-eqflat:
-        move    #>$6,n1
-        move    #>$8,n2
-        move    (r1)+n1
-        move    (r2)+n2
-        nop
-eqbands:
-        nop
+; (the master EQ ran here, 12-13 Nov 2026: removed at the owner's request)
 ; the frame's loudest sample
         move    #>$340,r4
         clr     b
@@ -506,7 +510,7 @@ lmrs:
         move    #>$360,r6
         move    x:>$2c0,r5
         move    #>$900,r0
-        move    #>$9a0,r1
+        move    #>$8ad0,r1
         move    #>$9c0,r2
         do      #16,outend
 ; (13 Nov 2026) each output once: cue = (chain x $2ea + back) x $2eb; main = the limiter's delayed block x its gain;
@@ -522,8 +526,14 @@ lmrs:
         mpy     y0,x0,b
         move    b,x:>$2fa
         move    x:>$2e8,y0
-        mpy     y0,x1,b
+        mpy     x1,y0,b
         move    b,x:>$2fc
+; (in the sequencer the phones are their own bus, r1, not the back bus)
+        jclr    #3,x:<$37,pzlf
+        move    x:(r1)+,x1
+        mpy     x1,y0,b
+        move    b,x:>$2fc
+pzlf:
         move    x:(r0)+,x0
         move    x:>$2ea,y0
         mpy     y0,x0,b
@@ -534,8 +544,13 @@ lmrs:
         mpy     y0,x0,b
         move    b,x:>$2fb
         move    x:>$2ec,y0
-        mpy     y0,x1,b
+        mpy     x1,y0,b
         move    b,x:>$2fd
+        jclr    #3,x:<$37,pzrt
+        move    x:(r1)+,x1
+        mpy     x1,y0,b
+        move    b,x:>$2fd
+pzrt:
         move    x:>$322,a
         move    x:>$323,x0
         add     x0,a
@@ -548,9 +563,18 @@ lmrs:
         asl     #2,a,a
         move    a,x0
         move    x0,x:>$2f8
+        jset    #3,x:<$37,pzgl
         move    x:>$2fc,b
         add     x0,b
         move    b,x:>$2fc
+        jclr    #0,x:<$3f,pzdl
+; the sequencer's phones: the limiter's gain on them as on the main (no look-ahead: they are not delayed), back to full scale
+pzgl:
+        move    x:>$2fc,x1
+        mpy     x1,y0,b
+        asl     #2,b,b
+        move    b,x:>$2fc
+pzdl:
         move    x:(r4),x1
         move    x:(r3)+,x0
         move    x0,x:(r4)+
@@ -558,9 +582,17 @@ lmrs:
         asl     #2,a,a
         move    a,x0
         move    x0,x:>$2f9
+        jset    #3,x:<$37,pzgr
         move    x:>$2fd,b
         add     x0,b
         move    b,x:>$2fd
+        jclr    #0,x:<$3f,pzdr
+pzgr:
+        move    x:>$2fd,x1
+        mpy     x1,y0,b
+        asl     #2,b,b
+        move    b,x:>$2fd
+pzdr:
         move    x:>$2fa,x0
         move    x0,x:(r5)+
         move    x:>$2fb,x0
@@ -571,11 +603,11 @@ lmrs:
         move    x:>$2f9,x0
         move    x0,x:(r5)+
         move    x0,x:(r6)+
-; the phones' pair: R first, then L (measured through a splitter, 12 Nov 2026: in the other order the phones' tip
-; carried the right side)
-        move    x:>$2fd,x0
-        move    x0,x:(r5)+
+; the phones' pair: L then R, as the other pairs (15 Nov 2026: the 12 Nov splitter test that put R first was fooled
+; by the phones' broken multiply -- measured again through the cable loop with it fixed, the tip carried slot 5)
         move    x:>$2fc,x0
+        move    x0,x:(r5)+
+        move    x:>$2fd,x0
         move    x0,x:(r5)+
         clr     a
         move    a,x:(r5)+
@@ -891,52 +923,6 @@ wthp:
         bsr     >bqd
 wtdone:
         rts
-; one EQ band over a channel of the limiter's block: r0 its first sample (stride 2), r1 the filter and g / 4, r2 its
-; state. The same ten-instruction biquad as bqd; then the band's g times the filter's output is added to the sample.
-eqone:
-        move    r3,x:>$330
-        move    r4,x:>$331
-        move    n0,x:>$332
-        move    x:(r1),x0
-        move    x0,y:>$89e8
-        move    x:(r1+$2),x0
-        move    x0,y:>$89e9
-        move    x:(r1+$1),x0
-        move    x0,y:>$89ea
-        move    x:(r1+$4),x0
-        move    x0,y:>$89eb
-        move    x:(r1+$3),x0
-        move    x0,y:>$89ec
-        move    x:(r1+$5),y1
-        move    #>$89e8,r4
-        move    #>$4,m4
-        move    #>$1,m2
-        move    #>$1,m3
-        lua     (r2+$2),r3
-        move    #>$2,n0
-        do      #16,eqfin
-        move    x:(r0),x0 y:(r4)+,y0
-        mpy     y0,x0,a x:(r2)+,x1 y:(r4)+,y0
-        mac     x1,y0,a x:(r2)-,x1 y:(r4)+,y0
-        mac     x1,y0,a x0,x:(r2)+ y:(r4)+,y0
-        move    x:(r3)+,x1
-        mac     x1,y0,a x:(r3)-,x1 y:(r4)+,y0
-        mac     x1,y0,a
-        asl     a
-        move    a,x1
-        mpy     y1,x1,b a,x:(r3)+
-        asl     #2,b,b
-        add     x0,b
-        move    b,x:(r0)+n0
-eqfin:
-        nop
-        move    #>$ffffff,m2
-        move    #>$ffffff,m3
-        move    #>$ffffff,m4
-        move    x:>$330,r3
-        move    x:>$331,r4
-        move    x:>$332,n0
-        rts
 
 ; ---- the chain: 8 slots at X:$280 ----
 chain:
@@ -1131,6 +1117,7 @@ chnext:
 chend:
         nop
         jclr    #3,x:<$37,chret
+        bsr     >rvbus
         move    #>$8a20,r0
         move    #>$900,r1
         do      #32,chback
@@ -1139,6 +1126,63 @@ chend:
 chback:
         nop
 chret:
+        rts
+; ---- the sequencer's reverb bus (15 Nov 2026): every track's send (trkmix) gathered at X:$8b00 goes through the bus
+; slot (entry X:$8a60, as a chain slot's: +0 on +1 proc +2 init +3 r6 +4 r7 +5 X:$213 value +6 init pending; its
+; effect is VERB on core 1, through the proxy), and comes back at X:$8a68 (main), $8a69 (cue), $8a6a (phones)
+rvbus:
+        move    x:>$8a60,a
+        tst     a
+        beq     rvend
+        move    #>$8b00,r0
+        move    #>$900,r1
+        do      #32,rvcp
+        move    x:(r0)+,x0
+        move    x0,x:(r1)+
+rvcp:
+        nop
+        move    x:>$8a66,a
+        tst     a
+        beq     rvpr
+        clr     a
+        move    a,x:>$8a66
+        move    x:>$8a65,x0
+        move    x0,x:>$213
+        move    x:>$8a63,r6
+        move    x:>$8a64,r7
+        move    x:>$8a62,r2
+        bsr     >callr2
+rvpr:
+        move    x:>$8a65,x0
+        move    x0,x:>$213
+        move    x:>$8a63,r6
+        move    x:>$8a64,r7
+        move    x:>$8a61,r2
+        move    #>$900,r0
+        move    #>16,n7
+        move    #>$1,a
+        bsr     >callr2
+        move    #>$900,r0
+        move    #>$9a0,r1
+        move    #>$9c0,r2
+        move    #>$8ad0,r3
+        move    x:>$8a68,y0
+        move    x:>$8a69,y1
+        move    x:>$8a6a,x1
+        do      #32,rvmx
+        move    x:(r0)+,x0
+        move    x:(r1),a
+        mac     y0,x0,a
+        move    a,x:(r1)+
+        move    x:(r2),a
+        mac     x0,y1,a
+        move    a,x:(r2)+
+        move    x:(r3),a
+        mac     x1,x0,a
+        move    a,x:(r3)+
+rvmx:
+        nop
+rvend:
         rts
 ; the effect is called with the registers it expects; it may use any of them, and its own do loops
 callr2:
@@ -1161,7 +1205,11 @@ callr2:
         move    #>$ffffff,m7
         rts
 
-; a track to the outputs: its routing block's four gains (glided), the main pair always, the cue pair when it has any
+; a track to the outputs: its routing block's four gains (glided), the main pair always, the cue pair when it has any;
+; (15 Nov 2026) then the phones pair from the slot's phones block at X:$8a80 + 9 x slot (beside its routing block at
+; $220 + 9 x slot): +0 which pairs take the track summed to mono (bit 0 main, 1 cue, 2 phones), +1/+2 the target gains
+; L->phones R->phones, +3/+4 the gains in use. A pair that takes it as mono reads X:$980 ((L + R) / 2 on both sides:
+; in the sequencer nothing else uses it).
 trkmix:
         move    x:>$2c8,r4
         nop
@@ -1178,9 +1226,66 @@ trkmix:
         add     b,a
         move    a,x:(r1+n1)
 tmgl:
+        move    r5,a
+        move    #>$8860,x0
+        add     x0,a
+        move    a1,r6
+        nop
+        move    r6,r1
+        move    #>$2,n1
+        do      #2,tmpg
+        move    (r1)+
+        move    x:(r1+n1),a
+        move    x:(r1),b
+        sub     a,b
+        asr     #5,b,b
+        add     b,a
+        move    a,x:(r1+n1)
+tmpg:
+; the track's reverb send (+5 the target, +6 in use, glided): the track as it leaves its slot, stereo, into X:$8b00
+        move    x:(r6+$5),b
+        move    x:(r6+$6),a
+        sub     a,b
+        asr     #5,b,b
+        add     b,a
+        move    a,x:(r6+$6)
+        tst     a
+        beq     tmrz
+        move    a,y0
+        move    #>$900,r0
+        move    #>$8b00,r1
+        do      #32,tmrv
+        move    x:(r0)+,x0
+        move    x:(r1),a
+        mac     y0,x0,a
+        move    a,x:(r1)+
+tmrv:
+        nop
+tmrz:
+        move    x:(r6),a
+        tst     a
+        beq     tmms
+        move    #>$900,r0
+        move    #>$980,r1
+        do      #16,tmmo
+        move    x:(r0)+,a
+        move    x:(r0)+,x0
+        add     x0,a
+        asr     a
+        move    a,x:(r1)+
+        move    a,x:(r1)+
+tmmo:
+        nop
+tmms:
+        move    #>$900,r0
+        move    x:(r6),a
+        move    #>$1,x0
+        and     x0,a
+        beq     tmsa
+        move    #>$980,r0
+tmsa:
         move    x:(r5+$5),y0
         move    x:(r5+$6),y1
-        move    #>$900,r0
         move    #>$9a0,r1
         do      #16,tmmn
         move    x:(r0)+,x0
@@ -1196,10 +1301,16 @@ tmmn:
         move    x:(r5+$8),x0
         add     x0,a
         tst     a
-        beq     tmend
+        beq     tmcx
+        move    #>$900,r0
+        move    x:(r6),a
+        move    #>$2,x0
+        and     x0,a
+        beq     tmsb
+        move    #>$980,r0
+tmsb:
         move    x:(r5+$7),y0
         move    x:(r5+$8),y1
-        move    #>$900,r0
         move    #>$9c0,r1
         do      #16,tmcu
         move    x:(r0)+,x0
@@ -1211,6 +1322,33 @@ tmmn:
         mac     x0,y1,a
         move    a,x:(r1)+
 tmcu:
+        nop
+tmcx:
+        move    x:(r6+$3),a
+        move    x:(r6+$4),x0
+        add     x0,a
+        tst     a
+        beq     tmend
+        move    #>$900,r0
+        move    x:(r6),a
+        move    #>$4,x0
+        and     x0,a
+        beq     tmsc
+        move    #>$980,r0
+tmsc:
+        move    x:(r6+$3),y0
+        move    x:(r6+$4),y1
+        move    #>$8ad0,r1
+        do      #16,tmph
+        move    x:(r0)+,x0
+        move    x:(r1),a
+        mac     y0,x0,a
+        move    a,x:(r1)+
+        move    x:(r0)+,x0
+        move    x:(r1),a
+        mac     x0,y1,a
+        move    a,x:(r1)+
+tmph:
         nop
 tmend:
         rts

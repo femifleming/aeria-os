@@ -31,8 +31,10 @@ def stereo(l, r):
 
 
 def standard(rep, asm, key, manifest, dear, guard=True, cost_limit=200, tail_lsb=0, tail_blocks=3000,
-             build_note='', minute=True, minute_peak=1.0, x_effect=False):
-    """-> (mod, names, defaults, mems, init, proc, (mean, worst))."""
+             build_note='', minute=True, minute_peak=1.0, x_effect=False, parallel=False, words_limit=2048):
+    """-> (mod, names, defaults, mems, init, proc, (mean, worst)). parallel=True (AURORA's half-rate build, 13 Nov
+    2026): parallel moves allowed (the halfbands, as PT2399's; dsp_asm encodes them since 4 Oct 2026 and the
+    round-trip compares every operand field)."""
     mod = A.registry._load_one(Path(manifest))
     names = [p.name.decode() if p.name else '' for p in mod.params]
     defaults = [p.default or 0 for p in mod.params]
@@ -43,11 +45,12 @@ def standard(rep, asm, key, manifest, dear, guard=True, cost_limit=200, tail_lsb
     bad, dup = A.label_prefix_check(asm)
     rep.check('no label is a prefix of another, no duplicates', not bad and not dup, bad or dup or '')
     src = Path(asm).read_text()
-    back = backward_branches(src)
-    rep.check('no rep, no parallel move, no backward branch, r7 displacements 0..63',
+    back = backward_branches(src, parallel)
+    rep.check('no rep, ' + ('parallel moves allowed (the halfbands, as PT2399; round-trip audited)' if parallel else
+              'no parallel move') + ', no backward branch, r7 displacements 0..63',
               A.no_rep(asm) and not back, back or '')
     mems, words, init, proc = A.assemble(asm, key)
-    rep.check('assembles; disassembler round-trip + mpysu audit clean; <= 2,048 words', len(words) <= 2048,
+    rep.check(f'assembles; disassembler round-trip + mpysu audit clean; <= {words_limit:,} words', len(words) <= words_limit,
               f'{len(words)} words' + (f' ({build_note})' if build_note else ''))
     g = guard
     nul = A.null_cost()
@@ -110,7 +113,7 @@ def standard(rep, asm, key, manifest, dear, guard=True, cost_limit=200, tail_lsb
     return mod, names, defaults, mems, init, proc, (mean, worst)
 
 
-def backward_branches(src):
+def backward_branches(src, parallel=False):
     """Branches whose target label is above them (dsp_asm mis-sizes them), parallel moves."""
     lines = src.splitlines()
     at = {}
@@ -125,7 +128,8 @@ def backward_branches(src):
         m = re.match(r'\s+(b[a-z]{2}|bra|bsr|jmp|jsr)\s+>?([A-Za-z_][A-Za-z0-9_]*)\s*$', code)
         if m and m[2] in at and at[m[2]] < i:
             bad.append(f'{m[1]} {m[2]} (line {i + 1})')
-        if re.match(r'\s+\w+\s+\S+\s+\S+:\S+,\S+\s*$', code) or re.match(r'\s+\w+\s+\S+\s+\S+,\S+:\S+\s*$', code):
+        if not parallel and (re.match(r'\s+\w+\s+\S+\s+\S+:\S+,\S+\s*$', code)
+                             or re.match(r'\s+\w+\s+\S+\s+\S+,\S+:\S+\s*$', code)):
             bad.append(f'parallel move (line {i + 1})')
         m = re.search(r'\(r7\+\$([0-9a-f]+)\)', code)
         if m and int(m[1], 16) > 63:

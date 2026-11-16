@@ -12,6 +12,41 @@ The full request-by-request log is in [LOG.md](LOG.md).
 
 ## Release builds
 
+### AERIA OS Nov 15 2026 23:49:58
+
+- Tested on the unit: yes (key sweeps of both faces, MIDI tracks over the DIN loopback, project round trip; flashed 15 Nov)
+- Eight MIDI tracks in the sequencer (MIDI key: AUDIO / MIDI bank; M1-M8 each on its own channel: CHAN NOTE VEL GATE CHRD PROG, OCT CC1 CC1V CC2 CC2V FREE; one lock a step; saved with projects). An audio track's own MIDI page is FUNC+LFO; SYNC PCCH NIN on PTN's second set; FREE on GEN's second set. Long card reads no longer run the stream dry (the pump never saw the engine's progress); a project load keeps the sequencer's stream and says LOADING then LOADED. Plus everything of 23:11:36: phones = main mix, navigation (NO backs out, pages stay, page key again = second set, BANK = shelf, TEMPO taps), crossfader modes (FUNC+SCENE A/B, XF line, SCENE lamps), Dutch (SYSTEM second set, LANG), shelf refusals at once, SMPL skips empty slots, floating balloons heard.
+
+### AERIA OS Nov 15 2026 23:11:36
+
+- Tested on the unit: yes (RAM-booted, state and keys checked; flashed 15 Nov)
+- Phones fixed (a DSP multiply read the sample as unsigned: garbage on the headphones in both faces; now a copy of the main mix, L/R in order); pages stay up until NO hides them; NO backs out one level everywhere; a page key again = its second knob set; YES on the chain always opens the shelf, day/night only on SKY; FUNC+NO new sky (no dark screen); BANK = shelf from any page; TEMPO taps (held + LEVEL = BPM); crossfader has ONE job (XMOD: SCENES / FREEZE / DJ FILTER / WET / MOD), FUNC+SCENE A = scenes, FUNC+SCENE B = freeze, shown on the bottom line and the SCENE lamps; a refused effect says NO ROOM at once; the sequencer's SMPL knob skips empty slots; a floating balloon turns the BALLOONS source on; Dutch: SYSTEM, second knob set, LANG
+
+### AERIA OS Nov 15 2026 13:31:12
+
+- Tested on the unit: no
+- Sequencer: PLAY/STOP work while the KIT browser is open; a TRACK key leaves the browser and picks that track
+
+### AERIA OS Nov 15 2026 10:15:09
+
+- Tested on the unit: no
+- Fixes: TAPE back on the sky's shelf; a save with RAIN plus a removed weather now shows RAIN (or FOG). Plus the reverb bus and OUT EACH from 06:18. Emulator-tested only.
+
+### AERIA OS Nov 15 2026 06:18:03
+
+- Tested on the unit: no
+- Sequencer reverb bus (FUNC+FX2: BUS on/off, DECY, TONE, MOD, LEVL; per-track RVB send; off = not loaded) + OUT EACH per-output routing (MAIN / CUE / PHNS). Emulator-tested only.
+
+### AERIA OS Nov 15 2026 06:10:05
+
+- Tested on the unit: no
+- Sequencer OUT EACH: per-track MAIN / CUE / PHNS each OFF, L, R, L+R (mono) or ST; phones are their own mix in the sequencer; bass mono stands back for one-sided tracks. Emulator-tested only.
+
+### AERIA OS Nov 13 2026 17:08:41
+
+- Tested on the unit: no
+- Weather trimmed to RAIN, FOG, AURORA (+ HELIUM); WX OFF knob; master EQ removed; core 0 engine share 420 -> 260 (filters reserved only while on); SMEAR hop 512 (1165 -> 641, smearier), VERB half rate (1145 -> 736), AURORA half rate (216 -> 165); sky waits while the sequencer is up; FUNC+PROJ: INIT / RESET ALL. Emulator-tested only.
+
 ### AERIA OS Nov 13 2026 09:26:48
 
 - Tested on the unit: yes

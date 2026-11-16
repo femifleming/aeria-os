@@ -16,10 +16,28 @@ static uint8_t fake_old_store[0x2400] __attribute__((aligned(4)));  /* the older
 /* 12 Nov 2026: more battery RAM the UI reads at fixed addresses; manual_shots.sh points each at one of these in its copy */
 static uint8_t fake_proj[16 * 0x8000] __attribute__((aligned(4)));   /* PROJ_BASE 0x10040000: sixteen projects of 32 KB */
 static uint8_t fake_seq[0x6400] __attribute__((aligned(4)));         /* SEQ_BASE 0x100C0000: the sequencer's head and steps */
+static uint8_t fake_mt[0x4400] __attribute__((aligned(4)));          /* MT_BASE 0x100C8000: the MIDI tracks' head and steps (15 Nov 2026) */
+static uint8_t fake_proj_midi[16 * 0x4000] __attribute__((aligned(4)));   /* PROJ_MIDI_BASE: each project's MIDI steps */
 static uint8_t fake_scenes[0x1000] __attribute__((aligned(4)));      /* SCENE_STORE 0x100E8000 */
 static uint8_t fake_loaded[0x300] __attribute__((aligned(4)));       /* LOADED_AT 0x100FBA00 */
+static uint8_t fake_mods[0x100] __attribute__((aligned(4)));         /* MODS 0x100EC000: the MOD matrix */
+static int8_t fake_sqsc[16 * 8 * 48] __attribute__((aligned(4)));    /* SQSC: the sequencer's scenes */
+static uint8_t fake_sqsc_head[16] __attribute__((aligned(4)));
 #include "aeria_manual_ui.c"
 void aos_route(int s, int on, const uint32_t g[4]) { (void)s; (void)on; (void)g; }
+void aos_lorenz(int l, int r) { (void)l; (void)r; }
+void aos_wipe_all(void) {}
+void aos_seq_refresh(void) {}
+void aos_loop_restart(void) {}
+void aos_resample(int slot, int steps) { (void)slot; (void)steps; }
+int aos_resampling(void) { return 0; }
+int aos_seq_ca(int t, int n) { (void)t; (void)n; return -1; }
+int aos_verb_row(void) { return 0; }
+int aos_restoring(void) { return 0; }
+int16_t aos_mod_tp[8][48], aos_mod_fxk[8][6];
+void aos_mt_defaults(void) { memset(fake_mt, 0, sizeof fake_mt); fake_mt[0] = 'A'; fake_mt[1] = 'E'; fake_mt[2] = 'M'; fake_mt[3] = 'T'; fake_mt[4] = 1; for (int p = 0; p < 4; p++) for (int t = 0; t < 8; t++) fake_mt[8 + p * 8 + t] = 16; for (int t = 0; t < 8; t++) { fake_mt[40 + t * 16 + 0] = (uint8_t)(t + 1); fake_mt[40 + t * 16 + 1] = 60; fake_mt[40 + t * 16 + 2] = 100; fake_mt[40 + t * 16 + 3] = 4; fake_mt[40 + t * 16 + 6] = 3; fake_mt[168 + t * 16 + 2] = 127; fake_mt[168 + t * 16 + 7] = 5; fake_mt[168 + t * 16 + 8] = 64; } }
+void aos_mt_hit(int t, int vel, int rec) { (void)t; (void)vel; (void)rec; }
+int aos_mt_active(int t) { (void)t; return 0; }
 void aos_cue_chain(int on) { (void)on; }
 void aos_grain_window(const uint32_t w[65]) { (void)w; }
 int aos_midi_out(unsigned st, unsigned a, unsigned b) { (void)st; (void)a; (void)b; return 1; }
@@ -249,7 +267,13 @@ int main(int argc, char **argv)
     /* MASTER (the MIX key): the freeze delay */
     key(K_MIX); enc(5, 80); run(90); shot("master"); key(5); run(4); shot("master_time"); key(3);
     run(90); down(K_FUNC); run(2); shot("master_func"); enc(0, 30); run(4); shot("master_tempo"); enc(0, -30); up(K_FUNC);
-    run(90); preview_xfade = 127; run(4); shot("master_freeze"); preview_xfade = 0; run(4); enc(5, -127); run(90);   /* the crossfader at B */
+    down(K_FUNC); key(KEY_SCENEB); up(K_FUNC); run(4); shot("master_xmod_popup");                                   /* FUNC + SCENE B: the crossfader is the freeze (15 Nov 2026) */
+    run(90); preview_xfade = 127; run(4); shot("master_freeze"); run(90); shot("master_frozen"); preview_xfade = 0; run(4); enc(5, -127); run(90);   /* the crossfader at B */
+    down(K_FUNC); run(2); shot("master_xmod"); up(K_FUNC); run(2);
+    down(K_FUNC); key(KEY_SCENEA); up(K_FUNC); run(90); shot("master_xf_scenes");                                     /* FUNC + SCENE A: the scenes again; the bottom line says so */
+    key(K_SRC); key(0); run(90); shot("sky_xf_line"); key(K_YES); run(4); shot("chain_shelf_full"); key(K_NO); run(90);   /* YES on a full slot: the shelf */
+    key(K_FX2); run(90); key(K_FX2); run(4); shot("system_lang"); enc(0, 1); run(4); shot("system_lang_nl"); run(90); shot("system_nl"); key(K_NO); key(K_AMP); run(90); shot("sky_page_nl");
+    key(K_FX2); key(K_FX2); enc(0, -1); key(K_NO); key(K_NO); run(90);
     key(K_FX1); enc(0, -24); run(100);
     /* OUT */
     key(K_CUE); key(2); enc(0, 2); run(2); key(1); enc(0, 3); enc(3, 2); enc(5, 30); run(95); shot("out");

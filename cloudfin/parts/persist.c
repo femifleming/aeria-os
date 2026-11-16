@@ -7,6 +7,9 @@
  * Only in AERIA OS: the Modwerk module build has no battery RAM of its own to keep this in. */
 #if defined(AERIAOS)
 static uint8_t led_want[16];   /* ui12.c's (a tentative definition: the same object) */
+int aos_restoring(void);
+static uint8_t proj_loading;             /* a project's samples are still coming back from the card: LOADED is said when they are (15 Nov 2026) */
+static char proj_loading_name[13];
 #define SNAP_MAGIC 0x41455338u   /* 'AES8': saved since the weather leaves MIX alone (the dry start holds) */
 #define SNAP_MAGIC_V7 0x41455337u   /* 'AES7': a page more (MASTER); kept in the bigger store */
 #define SNAP_MAGIC_V6 0x41455336u   /* 'AES6': AES4's layout; saved since untouched effects start dry (slot_gentle) */
@@ -120,8 +123,10 @@ static void snap_apply(const Snap *s)
     if (s->magic != SNAP_MAGIC) for (int i = 0; i < N_SLOTS; i++) slot_gentle(i);   /* saved before effects started dry (or while a weather change still undid it) */
 #endif
     weather = clamp(s->weather, 0, N_WEATHER - 1); auto_weather = s->auto_weather != 0; wx_on = (uint8_t)((s->xf_right & 0x100) ? (s->xf_right & 0x7e) : (weather == CLEAR ? 0 : 1u << weather));
-    xw_on = (uint8_t)((s->xf_right & 0x100) ? (s->xf_right >> 9) & 7 : 0);   /* WIND, HAIL, AURORA (12 Nov 2026) */
-    if (WON(SNOW) && WON(HEAT)) wx_on &= (uint8_t)~(1u << HEAT);
+    xw_on = (uint8_t)((s->xf_right & 0x100) ? (s->xf_right >> 9) & 4 : 0);   /* (WIND, HAIL,) AURORA: only the aurora is left (13 Nov 2026) */
+    wx_on &= (uint8_t)WX_KEEP;   /* the weathers that are gone (13 Nov 2026) */
+    if (!wx_on) weather = CLEAR;
+    else if (weather == CLEAR || !wx_kept(weather) || !((wx_on >> weather) & 1u)) weather = (wx_on >> FOG) & 1u ? FOG : RAIN;   /* RAIN + a gone one: the name follows what is on (15 Nov 2026) */
     night = s->night != 0; src_loop = s->src_loop != 0; src_stars = s->src_stars != 0; src_balloons = s->src_balloons != 0;
     planet_mask = s->planet_mask; slot_bypass = s->slot_bypass;
     /* the FUNC-layer knobs: a snapshot from before they were saved gets each slot's effect's own defaults */
@@ -185,8 +190,11 @@ static Snap state_loaded;
 static int state_had;
 static int state_restored;
 static void scenes_load(void);
+static Snap snap_factory;   /* the sound as the OS is built (taken before the saved state goes on): INIT (13 Nov 2026) */
+static uint8_t factory_ok;
 void aeria_state_restore(void)
 {
+    snap_take(&snap_factory); factory_ok = 1;
     snap_bring_over();
     scenes_load();
     if (snap_valid(snap_slot(0))) { snap_fetch(0, &state_loaded); snap_apply(&state_loaded); state_sum = state_loaded.sum; state_had = 1; }
@@ -230,6 +238,7 @@ static void scenes_save(void)
 }
 void aeria_state_tick(void)
 {
+    if (proj_loading && !aos_restoring()) { proj_loading = 0; say("LOADED", proj_loading_name); }   /* the samples are back */
     if (scene_dirty) { scene_dirty = 0; scene_dirty_at = ticks | 1u; }
     if (scene_dirty_at && ticks - scene_dirty_at > 120u) { scene_dirty_at = 0; scenes_save(); }
     if (!state_restored || (ticks % 30u) != 0) return;
@@ -255,8 +264,13 @@ static int preset_mode, preset_cur = -1;
  * first, a second press at once the other --, 14 the digits (press again: the next), 15 space - _, 16 rubs out.
  * Any knob turns the letter under the cursor through them all; LEFT and RIGHT move the cursor; YES saves, NO gives up.
  * A new letter starts where the last one ended as soon as another trig is pressed or a moment has passed. */
+#ifndef PROJ_BASE
 #define PROJ_BASE 0x10040000u
+#endif
 #define PROJ_STRIDE 0x8000u
+#ifndef PROJ_MIDI_BASE
+#define PROJ_MIDI_BASE 0x10000000u   /* (15 Nov 2026) each project's MIDI tracks' steps: 16 KB a project, in the battery RAM below the projects */
+#endif
 #define PROJ_MAGIC 0x4145504Au   /* 'AEPJ' */
 #define N_PROJ 16
 #define LOADED_AT 0x100FBA00u    /* aeria-os sampler.c: which samples are loaded */
@@ -284,6 +298,11 @@ static void proj_save(int i, const char *name)
       for (unsigned k = 0; k < SEQ_HEAD_SIZE; k++) b[0x1C00 + k] = q[k];
       for (unsigned k = 0; k < SEQ_STEPS_SIZE; k++) { b[0x2000 + k] = q[SEQ_HEAD_SIZE + k]; if (!(k & 255)) aos_breathe(); } }
     b[7] = 1;
+    { const volatile uint8_t *q = (const volatile uint8_t *)MT_BASE;       /* the MIDI tracks (15 Nov 2026): their head here, their steps below the projects */
+      volatile uint8_t *ms = (volatile uint8_t *)(PROJ_MIDI_BASE + (unsigned)i * MT_STEPS_SIZE);
+      for (unsigned k = 0; k < MT_HEAD_SIZE; k++) b[0xB00 + k] = q[k];
+      for (unsigned k = 0; k < MT_STEPS_SIZE; k++) { ms[k] = q[MT_HEAD_SIZE + k]; if (!(k & 255)) aos_breathe(); } }
+    b[0x21] = 1;
 #endif
     b[4] = 1; b[5] = (uint8_t)(SCENE_IDS >> 8); b[6] = (uint8_t)SCENE_IDS; b[1] = 'E'; b[2] = 'P'; b[3] = 'J'; b[0] = 'A';
     proj_cur = i;
@@ -309,10 +328,49 @@ static void proj_load(int i)
         aos_seq_play(0);
         for (unsigned k = 0; k < SEQ_HEAD_SIZE; k++) q[k] = b[0x1C00 + k];
         for (unsigned k = 0; k < SEQ_STEPS_SIZE; k++) { q[SEQ_HEAD_SIZE + k] = b[0x2000 + k]; if (!(k & 255)) aos_breathe(); }
-        seq_on = SQH->mode == 1; aos_seq_mode(0); if (seq_on) aos_seq_mode(1);
+        { int want = SQH->mode == 1;                                  /* (15 Nov 2026) the same face: set up again without leaving it (no gap in the stream) */
+          if (want == (seq_on != 0)) { if (want) aos_seq_refresh(); } else { seq_on = (uint8_t)want; aos_seq_mode(want); } }
     }
+    if (b[0x21] == 1 && b[0xB00] == 'A' && b[0xB01] == 'E' && b[0xB02] == 'M' && b[0xB03] == 'T') {   /* the MIDI tracks (15 Nov 2026) */
+        volatile uint8_t *q = (volatile uint8_t *)MT_BASE;
+        const volatile uint8_t *ms = (const volatile uint8_t *)(PROJ_MIDI_BASE + (unsigned)i * MT_STEPS_SIZE);
+        for (unsigned k = 0; k < MT_HEAD_SIZE; k++) q[k] = b[0xB00 + k];
+        for (unsigned k = 0; k < MT_STEPS_SIZE; k++) { q[MT_HEAD_SIZE + k] = ms[k]; if (!(k & 255)) aos_breathe(); }
+    } else aos_mt_defaults();                                        /* a project from before them: fresh MIDI tracks */
 #endif
     proj_cur = i;
+}
+/* ---- INIT and RESET ALL (13 Nov 2026): a blank start that is always there ---------------------------------------
+ * FUNC + PROJ (on any page of the sky or the sequencer) asks; then YES = INIT: the sound as the OS is built -- every knob at its default, the
+ * chain empty, scenes empty, a clear sky (AUTO off), the sky's MOD routes cleared (the sequencer's stay), sources off.
+ * FUNC + YES = RESET ALL: INIT, and every buffer and sample emptied too (the loop, the stars' and the sequencer's
+ * samples, the balloons, the master delay; aeria-os seq.c aos_wipe_all). The sequences are never touched; NO goes back. */
+void aos_wipe_all(void);
+static int init_ask;
+static void aeria_init_sound(void)
+{
+    if (!factory_ok) return;
+    snap_factory.slot_bypass = 0;
+    for (int i = 0; i < 16; i++) snap_factory.live_fx[i] = 0;
+    for (int i = 0; i < N_SLOTS; i++) for (int k = 0; k < 6; k++) snap_factory.slot_user[i][k] = -1;
+    snap_factory.src_loop = snap_factory.src_stars = snap_factory.src_balloons = 0;
+    snap_factory.weather = CLEAR; snap_factory.auto_weather = 0; snap_factory.xf_right = 0x100;
+    snap_apply(&snap_factory);
+    for (int i = 0; i < N_SLOTS; i++) { slots[i].pending = -1; slot_refresh(i); }
+    picking = -1;
+    for (int sc = 0; sc < N_SCENES; sc++) for (int q = 0; q < SCENE_IDS; q++) scene_val[sc][q] = -1;
+    scene_dirty = 1;
+    { volatile ModStore *m = MODS; mod_init();
+      for (int r = 0; r < N_ROUTES; r++) { int k = m->r[r].dest >> 12; if (k == MK_PAGE || k == MK_SLOT) { m->r[r].src = 0; m->r[r].depth = 0; m->r[r].dest = 0; } } }
+    xw_on = 0; set_weather(CLEAR); auto_weather = 0;
+    state_loaded = snap_factory; state_had = 1;
+    proj_cur = -1;
+}
+static void aeria_reset_all(void)
+{
+    aeria_init_sound();
+    for (int b = 0; b < 3; b++) { balloon[b].state = B_EMPTY; balloon[b].size = 0; }
+    aos_wipe_all();
 }
 /* the presets of before (snapshots 1..16) become projects once, named PRESET n */
 static void proj_from_presets(void)
@@ -370,8 +428,14 @@ static int preset_key(int code, int pressed)
         }
         return code != KEY_FUNC;
     }
-    if (code == KEY_PROJ) { preset_mode = !preset_mode; if (preset_mode) { proj_from_presets(); if (proj_cur >= 0) proj_sel = proj_cur; } say(preset_mode ? "PROJECTS" : page_name[page], 0); return 1; }
+    if (code == KEY_PROJ && func_held) { preset_mode = 1; naming = 0; init_ask = 1; say("BLANK START", "YES / FUNC+YES"); return 1; }
+    if (code == KEY_PROJ) { init_ask = 0; preset_mode = !preset_mode; if (preset_mode) { proj_from_presets(); if (proj_cur >= 0) proj_sel = proj_cur; } say(preset_mode ? "PROJECTS" : page_name[page], 0); return 1; }
     if (!preset_mode) return 0;
+    if (init_ask) {
+        if (code == KEY_YES) { init_ask = 0; preset_mode = 0; if (func_held) { aeria_reset_all(); say("RESET ALL", "DONE"); } else { aeria_init_sound(); say("INIT", "BLANK SOUND"); } return 1; }
+        if (code == KEY_NO) { init_ask = 0; preset_mode = 0; say(page_name[page], 0); return 1; }
+        return code != KEY_FUNC;
+    }
     if (code == KEY_NO) { preset_mode = 0; say(page_name[page], 0); return 1; }
     if (code >= KEY_TRIG0 && code < KEY_TRIG0 + N_PROJ) { proj_sel = code - KEY_TRIG0; return 1; }
     if (code == KEY_YES && func_held) {                              /* save here: its name first */
@@ -380,7 +444,7 @@ static int preset_key(int code, int pressed)
         name_at = 0; while (name_at < 11 && name_buf[name_at]) name_at++;
         name_last = -1; name_taps = 0; naming = 1; return 1;
     }
-    if (code == KEY_YES) { if (proj_saved(proj_sel)) { char n[13]; proj_name(proj_sel, n); proj_load(proj_sel); say("LOADED", n); preset_mode = 0; } else say("EMPTY", "FUNC+YES SAVES"); return 1; }
+    if (code == KEY_YES) { if (proj_saved(proj_sel)) { proj_name(proj_sel, proj_loading_name); proj_load(proj_sel); proj_loading = 1; say("LOADING", proj_loading_name); preset_mode = 0; } else say("EMPTY", "FUNC+YES SAVES"); return 1; }
     return code != KEY_FUNC;   /* the page holds every other key while it is open */
 }
 static int preset_enc(int d) { if (naming) { name_turn(d); return 1; } return preset_mode; }
@@ -402,7 +466,17 @@ static void preset_draw(void)
         text(8, 52, "KNOB: ANY LETTER", 1);
         return;
     }
+    if (init_ask) {
+        text(8, 9, "BLANK START", 1);
+        text(8, 21, "YES       INIT: SOUND ONLY", 1);
+        text(8, 29, "FUNC+YES  RESET ALL: SOUND,", 1);
+        text(8, 37, "  BUFFERS AND SAMPLES", 1);
+        text(8, 45, "SEQUENCES ARE KEPT", 1);
+        text(8, 53, "NO        BACK", 1);
+        return;
+    }
     text(8, 9, "PROJECTS", 1);
+    text(W - 8 - text_w("FUNC+PROJ INIT"), 9, "FUNC+PROJ INIT", 1);
     for (int i = 0; i < N_PROJ; i++) {
         int bx = 10 + (i % 8) * 14, by = 17 + (i / 8) * 12;
         for (int x = bx; x < bx + 12; x++) { px(x, by); px(x, by + 9); }

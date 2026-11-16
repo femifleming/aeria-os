@@ -92,11 +92,31 @@ static void extra_shots(void)
     key(0x13); sqp(K_ARR, 0); run(90); shot("seq_gen"); enc(1, 1); run(4); shot("seq_gen_dir"); enc(1, -1); run(90);
     key(0x12); sqp(K_ARR, 0); run(90); enc(3, 2); run(4); shot("seq_gen_warp"); enc(3, -2); run(90);
     key(0x11); enc(4, 1); run(4); shot("seq_gen_rate"); enc(4, -1); run(90);
-    /* MIDI (the MIDI key): notes, chords, programs; its second set: SYNC and PCCH */
-    key(0x16); sqp(K_MIDI, 0); run(90); shot("seq_midi"); enc(2, 1); run(4); shot("seq_midi_chord"); enc(2, -1); run(90);
-    sqp(K_MIDI, 1); run(90); shot("seq_midi2"); enc(0, 2); run(4); shot("seq_midi_sync"); run(90);
+    /* an audio track's own MIDI page (15 Nov 2026: FUNC + LFO): notes, chords, programs; SYNC PCCH NIN are on PTN's second set */
+    key(0x16); down(K_FUNC); key(K_LFO); up(K_FUNC); run(90); shot("seq_midi"); enc(2, 1); run(4); shot("seq_midi_chord"); enc(2, -1); run(90);
+    sqp(KEY_PAGE, 1); run(90); shot("seq_midi2"); enc(3, 2); run(4); shot("seq_midi_sync"); run(90);
     key(0x12); sqp(K_SRC, 0); key(K_PLAY); h_at = 2; h_ext = 1; run(90); shot("seq_ext"); h_ext = 0; key(K_STOP);
-    sqp(K_MIDI, 1); enc(0, -2); sqp(K_MIDI, 0); run(4);
+    sqp(KEY_PAGE, 1); enc(3, -2); sqp(KEY_PAGE, 0); run(4);
+    /* GEN's second set: FREE (15 Nov 2026) */
+    key(0x17); sqp(K_ARR, 1); run(90); shot("seq_gen_func"); sqp(K_ARR, 0); run(90);
+    /* the MIDI tracks (15 Nov 2026): the MIDI key goes to the other bank; M1 a bass line with NOTE locks, M2 chords on channel 9 */
+    { aos_mt_defaults(); MtHead *m = MTH; MtStep *q;                     /* the unit's defaults (ch 1..8, note 60, vel 100, gate 4/8), then the example */
+      static const uint8_t bass[8] = {0, 3, 6, 7, 8, 11, 14, 15}, bn[8] = {48, 48, 51, 48, 55, 48, 53, 51};
+      for (int i = 0; i < 8; i++) { q = MT_STEP(0, 0, bass[i]); q->flags = SF_ON; q->vel = (uint8_t)(i & 1 ? 90 : 110); if (bn[i] != 48) { q->lp = MP_NOTE + 1; q->lv = bn[i]; } }
+      q = MT_STEP(0, 0, 11); q->ratch = 3;
+      for (int n = 0; n < 16; n += 4) { q = MT_STEP(0, 1, n); q->flags = SF_ON; q->vel = 100; }
+      q = MT_STEP(0, 1, 12); q->prob = 60;
+      m->trk[0][MP_NOTE] = 48; m->trk[0][MP_GATE] = 3; m->trk[0][MP_CC1] = 74; m->trk[0][MP_CC1V] = 60;
+      m->trk[1][MP_CH] = 9; m->trk[1][MP_CHRD] = 4; m->trk[1][MP_GATE] = 12; m->trk[1][MP_PROG] = 12;
+      m->trk[2][MP_CH] = 0; m->len[0][1] = 32; }
+    key(K_MIDI); run(4); shot("seq_mtracks_popup"); run(90); key(0x10); sqp(K_SRC, 0); run(90); shot("seq_mtracks");
+    key(K_PLAY); h_at = 3; run(90); shot("seq_mtracks_play"); key(K_STOP); run(90);
+    key(0x11); run(90); shot("seq_mtracks_src"); enc(0, 1); run(4); shot("seq_mtracks_chan"); enc(0, -1); run(90);
+    sqp(K_SRC, 1); run(90); shot("seq_mtracks_src2"); sqp(K_SRC, 0); run(90);
+    key(0x10); down(3); run(92); shot("seq_mtracks_step"); key(K_SRC); enc(1, 2); run(4); shot("seq_mtracks_lock"); key(K_NO); up(3); run(90);
+    sqp(K_ARR, 0); run(90); shot("seq_mtracks_gen"); sqp(K_SRC, 0); run(90);
+    key(K_BANK); run(90); shot("seq_mtracks_mixer"); key(K_BANK); run(90);
+    key(K_MIDI); run(4); shot("seq_atracks_popup"); run(90); key(0x12); sqp(K_SRC, 0); run(90);
     /* MOD with the envelope follower; FLT; AMP */
     key(0x12); sqp(K_LFO, 0); run(90); shot("seq_mod2"); enc(0, -1); run(4); shot("seq_mod_wave"); enc(0, 1); run(90);
     enc(1, 5); run(4); shot("seq_mod_dest"); enc(1, -5); run(90);

@@ -5817,3 +5817,149 @@ The half-rate BBD and PT2399 are still being worked on. I'll test and flash them
 Manual rebuilt: BBD's page is gone, and the counts and costs are updated. Now removing the BBD source (to the Trash) and updating GitHub.
 
 ---
+
+---
+
+### 241. 11:10
+
+**Ask:**
+
+> for aeria, the only weather i want is rain fog and aurora, i dont need snow because smear should hace a freeze option for the spectral stuff. is weather always happening in the background, filling up my cpu/mem ? if i have the option to turn weather off could i free up cpu to add more effects? whata re things i can do to have more dsp space for effects in the main aeria mode. also, sequencer effects should not run in the background either, i am only ever going to use just aeria mode alone or just the sequencer mode alone. there alse needs to be a preset thats just blank always so i can reset everything, or a reset button that clears all buffers and samples. let me know your ideas before you starrt working on it
+
+**What was done / reported:**
+
+Ideas only, no changes. Weather mostly costs the DSP nothing when idle; the engine's share of core 0 was held at its worst case (420) at all times; the sequencer already renders nothing in the sky, but the sky's background work kept running in the sequencer. Proposed: trim the weather, a WX OFF switch, an engine share that follows what is on, cheaper SMEAR, half-rate reverbs, a blank start.
+
+---
+
+### 242. 11:15
+
+**Ask:**
+
+> dont add the freeze latch, if smearier sound cuts the word cost in half them make it as smeary as possible, thats the point anyway. keep helium, rain should filter and move knobs, reset should not wipe sewunecer patters, i dont want smear light, just change the original smear. test in emulator, do a lighter test, not a 60min + test.
+
+**What was done / reported:**
+
+- Weather: only RAIN, FOG and AURORA (+ HELIUM); CLOUDY, STORM, SNOW, HEAT, WIND, HAIL, TWISTER gone (rows kept so old projects load). SKY page knob WX: OFF stops all of it.
+- Core 0's engine share counted from what is on (filters reserved only while they run; "DSP FULL" when there is no room).
+- The sky's background work waits while the sequencer is up (MOD, master delay, DJ filter stay).
+- FUNC + PROJ: YES = INIT (blank sound), FUNC + YES = RESET ALL (also every buffer and sample; sequences kept).
+- SMEAR: hop 512, Vorbis window, 1,165 -> 641, decays twice as long (SMR 127 about 110 min). VERB half rate 1,145 -> 736. AURORA half rate 216 -> 165. TAPE was already half rate.
+- Short tests only: each effect's gate (seconds-long renders), a new host test of the UI changes (preview/trim_test.sh), a 5-minute fuzz.
+
+---
+
+### 243. 11:40
+
+**Ask:**
+
+> remove the 4 band eq completely
+
+**What was done / reported:**
+
+The master EQ is gone: GAIN's FUNC-layer knobs, the ColdFire's sender, the engine's code. Core 0's engine share is 260 with the filters off.
+
+---
+
+### 244. 12:10
+
+**Asks:**
+
+> what filter options do i have currently on the octatrack?
+
+> the master filters are off unless i want them to be on right? so i can free up cpu if i dont use helium or the dj filter or rain?
+
+> is the latest firmware loaded in the flasher?
+
+> whats the background work youre doing
+
+**What was done / reported:**
+
+Listed the filters (FILT, VOWL, RESO, FOG's DARK, SMEAR's TILT, the TONE knobs, the DJ filter, RAIN, HELIUM, the master delay's HPF/LPF, the sequencer's per-track HP/LP). Yes: rain, helium and the DJ filter only take core 0 while filtering. Release AERIA OS Nov 13 2026 17:08:41 made for AERIA Flasher (emulator-tested only, not yet on the unit).
+
+---
+
+### 245. Nov 15
+
+**Asks:**
+
+> for tracs in the sequencer mode of the octa, can i route them to indivisual outs if i want to ? i want to be able to route them to main l or r or l+r or lr stereo, same for cue lr and same for headphones out.
+
+> for aeria os, of corse
+
+**What was done / reported:**
+
+OUT has a fifth place, EACH: MAIN, CUE and PHNS (FLT's second set) each OFF / L / R / L+R (mono) / ST (stereo, by PAN); turning one of them chooses EACH. The engine gained a phones bus and per-track phones gains (X:$8a80 blocks, $8ad0 bus) and a mono sum for pairs set to L, R or L+R; in the sequencer the phones are their own mix (master level and limiter gain on them). Bass mono stands back while a track is on one side of the main pair. Emulator: 10 of 10 routing checks of trkmix pass; host UI test passes. Not on the unit yet.
+
+---
+
+### 246. Nov 15
+
+**Asks:**
+
+> for the reverb in sequencer mode, could i just have a send to a reverb bus instead of per track reverb. and i can turn off the send bus if i want to free up dsp space.
+
+> make the new firmware and add it to the flasher
+
+**What was done / reported:**
+
+A reverb bus in the sequencer: FUNC+FX2 opens the RVB page (BUS on/off, DECY, TONE, MOD, LEVL); each track's RVB send is on FLT's second set. One VERB on core 1's new ninth entry (knobs X:$33D00, buffers $33D40/$33D60) through a bus slot on core 0 (X:$8a60, return levels $8a68-$8a6a); sends gathered at X:$8b00 by trkmix; returns into main and phones. Off, VERB is not loaded. Emulator: 7 of 7 bus checks, 10 of 10 routing checks; host UI test passes. Release AERIA OS Nov 15 2026 06:18:03 for AERIA Flasher (with OUT EACH). Not on the unit yet.
+
+---
+
+### 247. Nov 15
+
+**Asks:**
+
+> i cleaned up space if you need it, aslo you can make the 1 hour version now instead.
+
+> but also keep the 30 min version as well
+
+> (manual weather rewrite) yes
+
+> (fix the TAPE shelf and restore bugs) yes
+
+**What was done / reported:**
+
+A long edition of the tutorial (script_long, 15 chapters incl. "Outputs and the reverb bus", ~11,300 words, 67 min) in the faltung look; the 30-minute version kept. The manual (body.html / quick.html) brought to the firmware: weather = CLEAR, RAIN, FOG, AURORA (trigs 3, 7, 11), AUTO, WX, master EQ / DIST / BBD / WIND / HAIL / TWISTER removed, INIT / RESET ALL, OUT EACH and the reverb bus in the source. Firmware fixes: TAPE was hidden from the sky's shelf by the "AERIA TAP" prefix test; a save with RAIN plus a removed weather restored with the name CLEAR. Release AERIA OS Nov 15 2026 10:15:09. Not on the unit yet.
+
+---
+
+### 248. Nov 15
+
+**Asks:**
+
+> the sequencer is not running when i press play on aeria
+
+> also when im selecting samples, i should be able to get out of the sample browser by pressing a track
+
+**What was done / reported:**
+
+While the KIT browser (FUNC+YES on SRC) was open it took every key, PLAY and STOP too, so the sequencer would not start. Now PLAY and STOP run the transport with the browser open (it stays open), and a TRACK key leaves the browser and picks that track. The sky's browsers are unchanged. Host test cloudfin/preview/br_test.sh: 7 of 7. Release AERIA OS Nov 15 2026 13:31:12. Not on the unit yet.
+
+---
+
+### 249. 15 Nov (evening)
+
+**Asks:**
+
+> Aeria has a lot of bugs, test every single thing on the os and fix all bugs. by default i need sound out of the headphone out to be a copy of the main out. just fix things that make sense for the os and a groovebox. getting in and out of menus should be easier. there are places where audio doesnt come out or sequenecrs dont play. fix all of this. the octatrack is on and connected. headpnone out is patched into C D and main out L R is patched into A B. fix this and fix the manual and videos if you make changes. dont ask me if you need to make a change, or suggest anything, you have permission to just make changes on your own. i need the os to work seamlessly, test all features. midi out is also patched into midi in. fix all bugs in depth.
+
+> i want switcing between the freeze delay mode and scene mode for the crossfader more clear and easier as well
+
+> make all the button combos and menue diving more streamlined and easier to navigate as well
+
+> also allow me in the settings of the os to change the language to dutch if i want to
+
+> in addition to the 8 tracs of audio in sequencer mode i also want to be able to send 8 tracks of midi where i can set each midi track to a different midi channel and it has all midi params, simultanioulsy from using the sample sequencer.
+
+**What was done / reported:**
+
+- The headphones carried garbage (the sample read as unsigned, never negative, far too loud, the same level whatever the volume) in both faces: a multiply in the DSP engine was written with its operands in an order the assembler silently turns into the signed-by-unsigned form. Fixed; the build now refuses that form. The phones are a copy of the main mix (sky: main plus anything routed back; sequencer: the tracks' PHNS mix), left then right.
+- Every feature exercised on the unit by key sweeps of both faces, captures of all four outputs over the cable loop, and the DIN MIDI loop; what failed was fixed; the sweeps are kept as tools.
+- Navigation: pages stay until NO hides them; NO backs out one level everywhere; a page key again opens its second set of knobs; YES on the chain opens the shelf, day/night only on SKY; FUNC+NO = new sky (no dark screen); BANK = the shelf from any page; PTN only on STARS; TEMPO taps (held: LEVEL = BPM); LEFT/RIGHT step the MIDI modules; a refused effect says NO ROOM at once; the SMPL knob stops only on loaded samples; a balloon that floats is heard.
+- Crossfader: one job (XMOD: SCENES, DJ FILTER, EFFECTS WET, MOD DEPTH, FREEZE); FUNC+SCENE A = scenes, FUNC+SCENE B = freeze; shown on the bottom line and the SCENE lamps.
+- Dutch: SYSTEM, second knob set, LANG.
+- Eight MIDI tracks beside the audio tracks (the MIDI key switches banks), each on its own channel with note, velocity, gate, chord, program, octave, two CCs, free run, one lock a step; saved with projects.
+- Long card reads no longer run the stream dry (the pump never read the engine's progress); a project load keeps the sequencer's stream and says LOADING, then LOADED when its samples are back.
+- Releases AERIA OS Nov 15 2026 23:11:36 and 23:49:58, both tested on the unit and flashed. Manual, quick guide and both tutorial videos brought up to date.

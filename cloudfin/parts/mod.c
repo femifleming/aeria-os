@@ -161,10 +161,11 @@ static void mod_tick(void)
  * goes into that scene (the same scene numbers as the sky's); the crossfader blends between them. Kept at battery
  * RAM 0x100ED000 (not in projects). */
 #ifdef SEQ_UI
+#define SQSC_HEAD ((volatile uint8_t *)0x100ED000u)                /* its header: 'AESC', TP_ALL */
 #define SQSC ((volatile int8_t *)0x100ED010u)                     /* [16][8 x TP_ALL], -1: not held */
 static void sqsc_init(void)
 {
-    volatile uint8_t *h = (volatile uint8_t *)0x100ED000u;
+    volatile uint8_t *h = SQSC_HEAD;
     if (h[0] == 'A' && h[1] == 'E' && h[2] == 'S' && h[3] == 'C' && h[4] == TP_ALL) return;
     for (int i = 0; i < N_SCENES * SQ_TRACKS * TP_ALL; i++) SQSC[i] = -1;
     h[0] = 'A'; h[1] = 'E'; h[2] = 'S'; h[3] = 'C'; h[4] = TP_ALL;

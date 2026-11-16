@@ -9,24 +9,29 @@
 ;  knob 0 AMT   the weather's fade 0..127 = 0..1 into the reverb (glided here with the plugin's 1.2 s)
 ;  knob 1 TIME  decay: T60 = 9 s x 2^((v - 64)/32)     (64 = the plugin's 9 s; 2.25 .. 35 s)
 ;  knob 2 TONE  damping in the loop, as the plugin's lowpass: 6 kHz x 2^((v - 64)/24) (64 = the plugin). The loop's
-;               own lowpass sits 1.545 x higher (9.27 kHz at 64, held to 18 kHz): the lines are 0.3855 x as long
+;               own lowpass (22.05 kHz) is 7883 Hz x 2^((v - 64)/29.77), held to 13459 Hz (fitted to lose a turn 0.3851 x what the plugin's loses, 2 .. 11.65 kHz): the lines are 0.3851 x as long
 ;  knob 3 SHFT  0 UNIS, 1 +12 (the plugin's octave), 2 +19, 3 +24: the read runs 1 x .. 4 x the write
 ;               13 Nov 2026: (L + R) is low-passed first (order 3, elliptic-type, per SHFT; none at UNIS), so the
-;               faster read does not fold the top of the sound back down (aliases landing under 16 kHz >= 37 dB down)
+;               faster read does not fold the top of the sound back down (aliases landing under 8 kHz >= 37 dB down)
+;
+; HALF RATE (13 Nov 2026): a halfband (polyphase IIR, 5 allpasses) decimates (L + R)/4 to 22.05 kHz; the aurora
+; runs a core frame every second frame; a halfband interpolates the curtains back up. Only the halfbands and the
+; dry + wet sum run at 44.1 kHz. The wet ends at ~10.5 kHz. Halfband coefficients (A0 | A1): 0.093604 0.557527 0.922692 | 0.315306 0.759827
 ;
 ; AMT 0, the glide at 0 and the curtains under 1e-5 for half a second: REST (returns at once,
-; output = input bit for bit). Coming up from rest the ring is cleared over 32 dry calls.
+; output = input bit for bit). Coming up from rest the ring is cleared over 17 dry calls.
 ; Each call one of the four curtains is looked at in turn (brightness, pan levels, line gain).
 ; The taps move by whole frames, so nothing is interpolated: exact.
 ; The lines run at 1/4 of the plugin's level; a rider on what goes into them keeps a long tail of loud sound out of their limit.
 ;
-; X ring: 8192 words, base a multiple of 8192: the word X:$213 points to (an X address on this effect)
-; One pointer falls a word a frame; from it: +0 the window (2208 words), then the lines
-;   line 0: written at +2208, read at +3247 (1039 frames, 23.6 ms)
-;   line 1: written at +3247, read at +4608 (1361 frames, 30.9 ms)
-;   line 2: written at +4608, read at +6259 (1651 frames, 37.4 ms)
-;   line 3: written at +6259, read at +8190 (1931 frames, 43.8 ms)
-; (the plugin's 2703 3523 4282 5014 frames x 0.3854; gains set for the same decay time)
+; X region: 8192 words, base a multiple of 8192: the word X:$213 points to (an X address on this effect)
+; The ring is its first 4096 words; the halfbands' block (parity, coefficients, states) is at +$1000.
+; One pointer falls a word a core frame; from it: +0 the window (1106 words), then the lines
+;   line 0: written at +1106, read at +1627 (521 core frames, 23.6 ms)
+;   line 1: written at +1627, read at +2304 (677 core frames, 30.7 ms)
+;   line 2: written at +2304, read at +3130 (826 core frames, 37.5 ms)
+;   line 3: written at +3130, read at +4095 (965 core frames, 43.8 ms)
+; (the plugin's 2703 3523 4282 5014 frames x 0.3851; gains set for the same decay time)
 ; r7: 00 ST 01 XB 02 RP 03 AMH 04 AML 05 RNG 06 C 07 STEP 08 WW 09 DW 0a SVL 0b SVB 0c INJ 0d WL 0e WR 0f LP0 10 LP1 11 LP2 12 LP3 13 G0 14 G1 15 G2 16 G3 17 CL0 18 CL1 19 CL2 1a CL3 1b CR0 1c CR1 1d CR2 1e CR3 1f CH0 20 CH1 21 CH2 22 CH3 23 CO0 24 CO1 25 CO2 26 CO3 27 CT0 28 CT1 29 CT2 2a CT3 2b CF0 2c CF1 2d CF2 2e CF3 2f QT 30 BLK 31 DAMP 32 RT 33 TLAST 34 OLAST 35 RIDE 36 AR 37 FB 38 FA1 39 FA2 3a FC 3b FP 3c FK 3d FW1 3e FW2 3f FV1
 
 init:
@@ -88,16 +93,16 @@ auwz:
         move    a,x:(r7+$04)
         move    x:(r7+$01),a
         move    a,x:(r7+$02)
-        move    #>$00044e,a
+        move    #>$000227,a
         move    a,x:(r7+$06)
         move    #>$000003,a             ; the first running call looks at TIME and curtain 0
         move    a,x:(r7+$30)
-        move    #>$000020,a
+        move    #>$000011,a
         move    a,x:(r7+$00)
         rts
 auawake:
         blt     aurun
-; ---- clearing: call n (32 .. 1) clears words (n - 1) * 256 ..
+; ---- clearing: call n (17 .. 1) clears words (n - 1) * 256 ..
         sub     #>$1,a
         move    a,x:(r7+$00)
         asl     #$8,a,a
@@ -115,6 +120,25 @@ auclr:
         bne     aukeep
         move    #>$ffffff,a             ; cleared: RUN from the next call
         move    a,x:(r7+$00)
+; the halfbands' coefficients (their states and the parity are cleared): A1 x 3 at +$1001, A0 x 3 after
+        move    x:(r7+$01),a
+        add     #>$001001,a
+        move    a1,r4
+        move    #>$ffffff,m5
+        lua     (r4+$06),r5
+        do      #3,>auhbc
+        move    #>$285bf3,x0
+        move    x0,x:(r4)+
+        move    #>$614205,x0
+        move    x0,x:(r4)+
+        move    #>$0bfb37,x0
+        move    x0,x:(r5)+
+        move    #>$475d10,x0
+        move    x0,x:(r5)+
+        move    #>$761ac4,x0
+        move    x0,x:(r5)+
+auhbc:
+        nop
 aukeep:
         rts
 aurun:
@@ -166,22 +190,22 @@ auon:
         move    x:(r7+$07),a
         tst     a
         bne     aumove
-        move    #>$00044e,a
+        move    #>$000227,a
         move    a,x:(r7+$06)
 aumove:
 ; ---- the window's weight at the END of this call, ramped to over its 16 frames
         move    x:(r7+$07),a
-        asl     #$4,a,a
+        asl     #$3,a,a                 ; 8 core frames a call
         move    a1,x0
         move    x:(r7+$06),a
         sub     x0,a
         bge     auwin
-        add     #>$00089c,a
+        add     #>$00044e,a
         tst     a
         bge     auwin
-        add     #>$00089c,a
+        add     #>$00044e,a
 auwin:
-        asl     #$b,a,a
+        asl     #$c,a,a
         move    a,x0
         move    #>$76f0ab,y0
         mpy     y0,x0,a
@@ -196,7 +220,7 @@ auwin:
         add     #>$400000,a             ; sin^2(pi phase)
         move    x:(r7+$08),b
         sub     b,a
-        asr     #$4,a,a
+        asr     #$3,a,a
         move    a,x:(r7+$09)
 ; ---- one job a call: curtain BLK & 3 (and, with curtain 0 / 1, the TIME / TONE knob if it moved)
         move    x:(r7+$30),a
@@ -227,13 +251,13 @@ aunot0:
         move    #>$7f0000,b
         sub     a,b
         move    b,x0
-        move    #>$155555,y0
+        move    #>$113358,y0
         mpy     y0,x0,a                 ; ((127 - v)/24)/32
         bsr     auexp
         move    b,x0
-        move    #>$2f0479,y0
+        move    #>$383537,y0
         mpy     y0,x0,a                 ; w / (32 ln 2)
-        move    #>$0eccaf,x0
+        move    #>$1621d2,x0
         cmp     x0,a
         tgt     x0,a
         bsr     auexp
@@ -246,206 +270,160 @@ aunot1:
         beq     aucur2
         bra     aucur3
 aucur0:
-; curtain 0: its brightness wanders to a new place every 2 .. 7 s
-        move    x:(r7+$2b),a
-        sub     #>$1,a
-        move    a,x:(r7+$2b)
-        bgt     auheld0
-        bsr     aurand
-        move    #>$000d75,y0
-        mpy     y0,x0,a
-        add     #>$000562,a
-        move    a,x:(r7+$2b)
-        bsr     aurand
-        move    x0,x:(r7+$27)
-auheld0:
-        move    x:(r7+$27),a
-        move    x:(r7+$1f),x0
-        sub     x0,a
-        move    a,x0
-        move    #>$001fb0,y0
-        mpy     y0,x0,a
-        move    x:(r7+$1f),b
-        move    x:(r7+$23),b0
-        add     a,b
-        move    b1,x:(r7+$1f)
-        move    b0,x:(r7+$23)
-; its level on each side: 0.45 (0.2 + 0.8 brightness) x the pan
-        move    b1,x0
-        move    #>$2e147b,y0
-        mpy     y0,x0,a
-        add     #>$0b851f,a
-        move    a,x0
-        move    #>$561a3f,y0
-        mpy     y0,x0,a
-        asl     a
-        move    a,x:(r7+$17)
-        move    #>$1be628,y0
-        mpy     y0,x0,a
-        asl     a
-        move    a,x:(r7+$1b)
-; its line's gain for the decay time: 2^-(K len / T60)
-        move    x:(r7+$32),x0
-        move    #>$006adc,y0
-        mpy     y0,x0,a
-        bsr     auexp
-        move    b,x0
-        move    x0,x:(r7+$13)
-        bra     aucurd
+        lua     (r7+$0),r4           ; curtain 0
+        move    #>$561a3f,x1
+        move    #>$1be628,y1
+        move    #>$006b2b,n4
+        bra     aucurc
 aucur1:
-; curtain 1: its brightness wanders to a new place every 2 .. 7 s
-        move    x:(r7+$2c),a
-        sub     #>$1,a
-        move    a,x:(r7+$2c)
-        bgt     auheld1
-        bsr     aurand
-        move    #>$000d75,y0
-        mpy     y0,x0,a
-        add     #>$000562,a
-        move    a,x:(r7+$2c)
-        bsr     aurand
-        move    x0,x:(r7+$28)
-auheld1:
-        move    x:(r7+$28),a
-        move    x:(r7+$20),x0
-        sub     x0,a
-        move    a,x0
-        move    #>$001fb0,y0
-        mpy     y0,x0,a
-        move    x:(r7+$20),b
-        move    x:(r7+$24),b0
-        add     a,b
-        move    b1,x:(r7+$20)
-        move    b0,x:(r7+$24)
-; its level on each side: 0.45 (0.2 + 0.8 brightness) x the pan
-        move    b1,x0
-        move    #>$2e147b,y0
-        mpy     y0,x0,a
-        add     #>$0b851f,a
-        move    a,x0
-        move    #>$49ba34,y0
-        mpy     y0,x0,a
-        asl     a
-        move    a,x:(r7+$18)
-        move    #>$348010,y0
-        mpy     y0,x0,a
-        asl     a
-        move    a,x:(r7+$1c)
-; its line's gain for the decay time: 2^-(K len / T60)
-        move    x:(r7+$32),x0
-        move    #>$008bf9,y0
-        mpy     y0,x0,a
-        bsr     auexp
-        move    b,x0
-        move    x0,x:(r7+$14)
-        bra     aucurd
+        lua     (r7+$1),r4           ; curtain 1
+        move    #>$49ba34,x1
+        move    #>$348010,y1
+        move    #>$008b41,n4
+        bra     aucurc
 aucur2:
-; curtain 2: its brightness wanders to a new place every 2 .. 7 s
-        move    x:(r7+$2d),a
-        sub     #>$1,a
-        move    a,x:(r7+$2d)
-        bgt     auheld2
-        bsr     aurand
-        move    #>$000d75,y0
-        mpy     y0,x0,a
-        add     #>$000562,a
-        move    a,x:(r7+$2d)
-        bsr     aurand
-        move    x0,x:(r7+$29)
-auheld2:
-        move    x:(r7+$29),a
-        move    x:(r7+$21),x0
-        sub     x0,a
-        move    a,x0
-        move    #>$001fb0,y0
-        mpy     y0,x0,a
-        move    x:(r7+$21),b
-        move    x:(r7+$25),b0
-        add     a,b
-        move    b1,x:(r7+$21)
-        move    b0,x:(r7+$25)
-; its level on each side: 0.45 (0.2 + 0.8 brightness) x the pan
-        move    b1,x0
-        move    #>$2e147b,y0
-        mpy     y0,x0,a
-        add     #>$0b851f,a
-        move    a,x0
-        move    #>$348010,y0
-        mpy     y0,x0,a
-        asl     a
-        move    a,x:(r7+$19)
-        move    #>$49ba34,y0
-        mpy     y0,x0,a
-        asl     a
-        move    a,x:(r7+$1d)
-; its line's gain for the decay time: 2^-(K len / T60)
-        move    x:(r7+$32),x0
-        move    #>$00a9cd,y0
-        mpy     y0,x0,a
-        bsr     auexp
-        move    b,x0
-        move    x0,x:(r7+$15)
-        bra     aucurd
+        lua     (r7+$2),r4           ; curtain 2
+        move    #>$348010,x1
+        move    #>$49ba34,y1
+        move    #>$00a9e7,n4
+        bra     aucurc
 aucur3:
-; curtain 3: its brightness wanders to a new place every 2 .. 7 s
-        move    x:(r7+$2e),a
+        lua     (r7+$3),r4           ; curtain 3
+        move    #>$1be628,x1
+        move    #>$561a3f,y1
+        move    #>$00c67e,n4
+aucurc:
+; the curtain (r4 = r7 + its number; x1 y1 = its pan levels / 2, n4 its decay constant): its brightness wanders
+; to a new place every 2 .. 7 s
+        move    #>$ffffff,m4
+        move    x:(r4+$2b),a
         sub     #>$1,a
-        move    a,x:(r7+$2e)
-        bgt     auheld3
+        move    a,x:(r4+$2b)
+        bgt     auheld
         bsr     aurand
         move    #>$000d75,y0
         mpy     y0,x0,a
         add     #>$000562,a
-        move    a,x:(r7+$2e)
+        move    a,x:(r4+$2b)
         bsr     aurand
-        move    x0,x:(r7+$2a)
-auheld3:
-        move    x:(r7+$2a),a
-        move    x:(r7+$22),x0
+        move    x0,x:(r4+$27)
+auheld:
+        move    x:(r4+$27),a
+        move    x:(r4+$1f),x0
         sub     x0,a
         move    a,x0
         move    #>$001fb0,y0
         mpy     y0,x0,a
-        move    x:(r7+$22),b
-        move    x:(r7+$26),b0
+        move    x:(r4+$1f),b
+        move    x:(r4+$23),b0
         add     a,b
-        move    b1,x:(r7+$22)
-        move    b0,x:(r7+$26)
-; its level on each side: 0.45 (0.2 + 0.8 brightness) x the pan
+        move    b1,x:(r4+$1f)
+        move    b0,x:(r4+$23)
+; its level on each side, halved (the curtain sums go to the interpolator at half): 0.45 (0.2 + 0.8 brightness) x the pan / 2
         move    b1,x0
         move    #>$2e147b,y0
         mpy     y0,x0,a
         add     #>$0b851f,a
         move    a,x0
-        move    #>$1be628,y0
-        mpy     y0,x0,a
-        asl     a
-        move    a,x:(r7+$1a)
-        move    #>$561a3f,y0
-        mpy     y0,x0,a
-        asl     a
-        move    a,x:(r7+$1e)
+        mpy     x1,x0,a
+        move    a,x:(r4+$17)
+        mpy     x0,y1,a
+        move    a,x:(r4+$1b)
 ; its line's gain for the decay time: 2^-(K len / T60)
         move    x:(r7+$32),x0
-        move    #>$00c699,y0
+        move    n4,y0
         mpy     y0,x0,a
         bsr     auexp
         move    b,x0
-        move    x0,x:(r7+$16)
-        bra     aucurd
+        move    x0,x:(r4+$13)
 aucurd:
-; ======== the frames ========
-        move    #>$001fff,m1
+; ======== the frames (44.1 kHz): the halfbands around a 22.05 kHz core frame every odd frame ========
+        move    #>$000fff,m1
         move    x:(r7+$02),r1
         move    #>$1,n0
+        move    x:(r7+$01),a
+        add     #>$001000,a
+        move    a1,r2  ; the halfbands' block
+        move    #>$ffffff,m2
+        move    #>$ffffff,m3
+        move    #>$ffffff,m5
+        move    #>$12,n2  ; x:(r2+n2): the decimator's A1 output
+        lua     (r2+$07),r5  ; (an odd first frame: the pointers where an even frame leaves them)
+        lua     (r2+$19),r3
         do      n7,>auframes
-; anti-alias low-pass on L + R (per SHFT; UNIS: B = 1/4, the rest 0 = (L + R)/4 exactly): the window holds y/2
-; w = B (L + R) + 2 A1H w1 + A2 w2;  u = w + 2 CH w1 + K w2;  v = u + P v1;  y/2 = v + K v1
-        move    x:(r7+$37),y0
-        move    x:(r0),x0
-        mpy     y0,x0,a
+        bchg    #0,x:(r2)  ; the pair's parity (C = it before the change): 0 = the first (even) frame, 1 = the second (the core runs)
+        bcs     auodd
+; even: the decimator's A1 path takes this frame; out: the interpolator's A1 paths on the last core frame
+        lua     (r2+$01),r5
+        lua     (r2+$10),r3
         move    x:(r0+n0),x0
-        mac     y0,x0,a
+        move    x:(r0),a
+        add     x0,a x:(r5)+,y0  ; L + R; the first coefficient
+        asr     a x:(r3),b  ; the first state
+        asr     a
+        move    a,x0  ; (L + R)/4
+        mac     y0,x0,b x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,b x:(r5)+,y0
+        tfr     x1,a b,x0
+        mac     y0,x0,a x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,a x:(r5)+,y0  ; its output; the interpolator's first coefficient
+        move    a,x:(r3)+  ; s[K]: the output (the odd frame reads it)
+        move    x:(r3),b  ; the interpolator's first state
+        move    x:(r7+$0d),x0
+        mac     y0,x0,b x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,b x:(r5)+,y0
+        tfr     x1,a b,x0
+        mac     y0,x0,a x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,a x:(r0),x0  ; its output; x0 = the dry
+        move    a,x:(r3)+  ; s[K]
+        asl     #$3,a,a  ; x 4 (the lines' scale) x 2 (the halved levels)
+        add     x0,a x:(r5)+,y0  ; the next path's first coefficient
+        move    a,x:(r0)+  ; dry + wet
+        move    x:(r3),b  ; the next path's first state
+        move    x:(r7+$0e),x0
+        mac     y0,x0,b x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,b x:(r5)+,y0
+        tfr     x1,a b,x0
+        mac     y0,x0,a x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,a x:(r0),x0  ; its output; x0 = the dry
+        move    a,x:(r3)+  ; s[K]
+        asl     #$3,a,a  ; x 4 (the lines' scale) x 2 (the halved levels)
+        add     x0,a
+        move    a,x:(r0)+  ; dry + wet
+        bra     aufnx
+auodd:
+; odd (r5, r3 where the even frame left them): the decimator's A0 path; d = (A0 + A1)/2; the core frame; out: the interpolator's A0 paths
+        move    x:(r0+n0),x0
+        move    x:(r0),a
+        add     x0,a x:(r5)+,y0  ; L + R; the first coefficient
+        asr     a x:(r3),b  ; the first state
+        asr     a
+        move    a,x0  ; (L + R)/4
+        mac     y0,x0,b x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,b x:(r5)+,y0
+        tfr     x1,a b,x0
+        mac     y0,x0,a x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,a x:(r5)+,y0
+        tfr     x1,b a,x0
+        mac     y0,x0,b x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,b x:(r2+n2),x0  ; its output; x0 = the A1 path's (the even frame)
+        move    b,x:(r3)+
+        add     x0,b
+        asr     b
+        move    b,x0  ; d: the decimated (L + R)/4
+; anti-alias low-pass on d (per SHFT; UNIS: B = 1, the rest 0 = d): the window holds y/2
+; w = B d + 2 A1H w1 + A2 w2;  u = w + 2 CH w1 + K w2;  v = u + P v1;  y/2 = v + K v1
+        move    x:(r7+$37),y0
+        mpy     y0,x0,a
         move    x:(r7+$3d),x1
         move    x:(r7+$38),y0
         mac     x1,y0,a
@@ -466,21 +444,21 @@ aucurd:
         move    a,x:(r7+$3f)
         macr    y1,x1,a
         move    a,x:(r1)
-; the taps: c frames (+ 2) back and half a window further round; c falls STEP a frame
+; the taps: c core frames (+ 2) back and half a window further round; c falls STEP a core frame
         move    x:(r7+$06),a
         move    x:(r7+$07),x0
         sub     x0,a
         bge     autapc
-        add     #>$00089c,a
+        add     #>$00044e,a
 autapc:
         move    a1,x:(r7+$06)
         add     #>$000002,a
         move    a1,n1
-        add     #>$00044e,a
+        add     #>$000227,a
         move    x:(r1+n1),x0
-        cmp     #>$00089e,a
+        cmp     #>$000450,a
         blt     autaph
-        sub     #>$00089c,a
+        sub     #>$00044e,a
 autaph:
         move    a1,n1
         move    x:(r7+$08),b
@@ -500,7 +478,7 @@ autaph:
         add     b,a
 ; 500 Hz highpass (state variable, on y/4): lp += f bp; hp = x - lp - q bp; bp += f hp
         move    x:(r7+$0b),x0
-        move    #>$091dd5,y0
+        move    #>$1238b3,y0
         move    x:(r7+$0a),b
         macr    y0,x0,b
         move    b,x:(r7+$0a)
@@ -521,56 +499,56 @@ autaph:
 ; the curtains: each line's output to its place
         clr     a
         clr     b
-        move    #>$000caf,n1
+        move    #>$00065b,n1
         move    x:(r7+$17),y0
         move    x:(r1+n1),x0
         mac     y0,x0,a
         move    x:(r7+$1b),y0
         mac     y0,x0,b
-        move    #>$001200,n1
+        move    #>$000900,n1
         move    x:(r7+$18),y0
         move    x:(r1+n1),x0
         mac     y0,x0,a
         move    x:(r7+$1c),y0
         mac     y0,x0,b
-        move    #>$001873,n1
+        move    #>$000c3a,n1
         move    x:(r7+$19),y0
         move    x:(r1+n1),x0
         mac     y0,x0,a
         move    x:(r7+$1d),y0
         mac     y0,x0,b
-        move    #>$001ffe,n1
+        move    #>$000fff,n1
         move    x:(r7+$1a),y0
         move    x:(r1+n1),x0
         mac     y0,x0,a
         move    x:(r7+$1e),y0
         mac     y0,x0,b
-        move    a,x:(r7+$0d)
+        move    a,x:(r7+$0d)                  ; (the curtains' levels are halved: WL, WR = the sums / 2)
         move    b,x:(r7+$0e)
 ; the highs damped as they go round
         move    x:(r7+$31),y1
-        move    #>$000caf,n1
+        move    #>$00065b,n1
         move    x:(r7+$0f),b
         move    x:(r1+n1),a
         sub     b,a
         move    a,x1
         macr    y1,x1,b
         move    b,x:(r7+$0f)
-        move    #>$001200,n1
+        move    #>$000900,n1
         move    x:(r7+$10),b
         move    x:(r1+n1),a
         sub     b,a
         move    a,x1
         macr    y1,x1,b
         move    b,x:(r7+$10)
-        move    #>$001873,n1
+        move    #>$000c3a,n1
         move    x:(r7+$11),b
         move    x:(r1+n1),a
         sub     b,a
         move    a,x1
         macr    y1,x1,b
         move    b,x:(r7+$11)
-        move    #>$001ffe,n1
+        move    #>$000fff,n1
         move    x:(r7+$12),b
         move    x:(r1+n1),a
         sub     b,a
@@ -609,14 +587,14 @@ autaph:
         mpyr    x1,x0,a
         move    x:(r7+$0c),x0
         add     x0,a
-        move    #>$0008a0,n1
+        move    #>$000452,n1
         move    a,x:(r1+n1)
         move    b,x1
         move    x:(r7+$15),x0
         mpyr    x1,x0,a
         move    x:(r7+$0c),x0
         add     x0,a
-        move    #>$001200,n1
+        move    #>$000900,n1
         move    a,x:(r1+n1)
         move    y1,a
         add     y0,a                    ; h1
@@ -627,27 +605,54 @@ autaph:
         mpyr    x1,x0,a
         move    x:(r7+$0c),x0
         sub     x0,a
-        move    #>$000caf,n1
+        move    #>$00065b,n1
         move    a,x:(r1+n1)
         move    b,x1
         move    x:(r7+$16),x0
         mpyr    x1,x0,a
         move    x:(r7+$0c),x0
         sub     x0,a
-        move    #>$001873,n1
+        move    #>$000c3a,n1
         move    a,x:(r1+n1)
-; out = dry + curtains
-        move    x:(r7+$0d),a
-        asl     #$2,a,a
-        move    x:(r0),x0
-        add     x0,a
-        move    a,x:(r0)+
-        move    x:(r7+$0e),b
-        asl     #$2,b,b
-        move    x:(r0),x0
-        add     x0,b
-        move    b,x:(r0)+
         move    (r1)-
+; out: the interpolator's A0 paths on this core frame's curtains
+        move    x:(r7+$0d),x0
+        move    x:(r5)+,y0
+        move    x:(r3),b
+        mac     y0,x0,b x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,b x:(r5)+,y0
+        tfr     x1,a b,x0
+        mac     y0,x0,a x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,a x:(r5)+,y0
+        tfr     x1,b a,x0
+        mac     y0,x0,b x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,b x:(r0),x0  ; its output; x0 = the dry
+        move    b,x:(r3)+  ; s[K]
+        asl     #$3,b,b  ; x 4 (the lines' scale) x 2 (the halved levels)
+        add     x0,b x:(r5)+,y0  ; the next path's first coefficient
+        move    b,x:(r0)+  ; dry + wet
+        move    x:(r3),b  ; the next path's first state
+        move    x:(r7+$0e),x0
+        mac     y0,x0,b x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,b x:(r5)+,y0
+        tfr     x1,a b,x0
+        mac     y0,x0,a x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,a x:(r5)+,y0
+        tfr     x1,b a,x0
+        mac     y0,x0,b x0,x:(r3)+
+        move    x:(r3),x1
+        mac     -x1,y0,b x:(r0),x0  ; its output; x0 = the dry
+        move    b,x:(r3)+  ; s[K]
+        asl     #$3,b,b  ; x 4 (the lines' scale) x 2 (the halved levels)
+        add     x0,b
+        move    b,x:(r0)+  ; dry + wet
+aufnx:
+        nop       ; (the loop's last instruction)
 auframes:
         nop
         move    r1,x:(r7+$02)
@@ -693,7 +698,7 @@ aurset:
         move    x:(r7+$0e),b
         abs     b
         add     b,a
-        asl     #$2,a,a
+        asl     #$3,a,a
         cmp     #>$000200,a
         ble     auquiet
         clr     a
@@ -713,7 +718,7 @@ auzaa:
         move    x:(r7+$07),a
         cmp     #>$000000,a
         bne     auzb12
-        move    #>$200000,x0
+        move    #>$7fffff,x0
         move    x0,x:(r7+$37)
         move    #>$000000,x0
         move    x0,x:(r7+$38)
@@ -729,7 +734,7 @@ auzaa:
 auzb12:
         cmp     #>$000001,a
         bne     auzb19
-        move    #>$02714c,x0
+        move    #>$09c530,x0
         move    x0,x:(r7+$37)
         move    #>$2e6b8f,x0
         move    x0,x:(r7+$38)
@@ -745,7 +750,7 @@ auzb12:
 auzb19:
         cmp     #>$000002,a
         bne     auzb24
-        move    #>$013451,x0
+        move    #>$04d145,x0
         move    x0,x:(r7+$37)
         move    #>$5624ba,x0
         move    x0,x:(r7+$38)
@@ -759,7 +764,7 @@ auzb19:
         move    x0,x:(r7+$3c)
         rts
 auzb24:
-        move    #>$00b668,x0
+        move    #>$02d9a1,x0
         move    x0,x:(r7+$37)
         move    #>$66bd9b,x0
         move    x0,x:(r7+$38)

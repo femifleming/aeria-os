@@ -1,11 +1,17 @@
 """VERB gate: tools/run.sh python3 /aeria/verb/test.py
 
-The standard gate runs on the TEST-size build (verb_test.asm: every delay
-length x 0.5, 15,870-word ring at the stock FX2 base). The FULL-size build
-(verb.asm: 32,768-word ring, m = $7fff) is rendered too, on allocator slot 5
-(Y:0x30000, 32K-aligned, in the shared window) with -guard 32768 and
--guard-shared. Both are compared against a floating-point model of the
-plugin (FDNReverb.h) written out below.
+13 Nov 2026: the HALF-RATE build (the FDN at 22.05 kHz between a halfband
+decimator and interpolator; the full-rate gate is test.py.prehalf). The lengths
+halve in samples, so the TEST build (verb_test.asm, 15,870-word ring at the
+stock FX2 base) now holds the real lengths and differs from the FULL build
+(verb.asm: 32,768-word ring, m = $7fff, on allocator slot 5, Y:0x30000, with
+-guard 32768 and -guard-shared) only in its ring. Both are compared against a
+floating-point model of the plugin (FDNReverb.h) written out below, run at
+22.05 kHz between the same halfbands (float). The standard gate, the model
+matches, the LFOs and the half-rate checks (images, aliasing, band limit, the
+old full-rate build beside the new) run on the TEST build; the behaviour suite
+runs once, on the FULL build (the prehalf gate ran it on both). Renders are
+short: at most a few seconds of audio each.
 """
 import math
 import sys
@@ -13,8 +19,10 @@ sys.path.insert(0, '/aeria/tools')
 sys.path.insert(0, '/aeria/verb')
 import aeria as A
 import gen
+import halfband as HB
 
 fs = 44100
+FSH = 22050       # the core's rate
 FS = A.FS
 GT = gen.build('test')
 GF = gen.build('full')
@@ -23,7 +31,7 @@ FULLX = ['-alloc', '5', '-guard-shared']       # full build: base Y:0x30000
 
 # ---- floating-point model of the plugin (same structure as FDNReverb.h) ----
 class Biquad:
-    def __init__(self, kind, f, qf):
+    def __init__(self, kind, f, qf, fs=fs):
         w = 2 * math.pi * min(f, fs * 0.49) / fs
         c, al = math.cos(w), math.sin(w) / (2 * qf)
         if kind == 'lp':
@@ -52,13 +60,19 @@ def knob_tone(k):
 
 def reference(G, decy, tone, modk, xl, xr):
     """Wet L, R of the plugin's algorithm for float inputs xl, xr (it starts
-    with the first sample given). The LFO rates are the 24-bit-quantised ones
-    the DSP uses (lfo_hz), everything else is the plugin's arithmetic."""
+    with the first sample given), run at 22.05 kHz between the float halfbands
+    (the DSP's pairing: its first sample is a pair's first; its output is the
+    interpolator's one sample later). The LFO rates are the 24-bit-quantised
+    ones the DSP uses (lfo_hz), everything else is the plugin's arithmetic."""
+    n_out = len(xl)
+    pad = [0.0] * (len(xl) % 2)
+    xl, xr = HB.decimate(list(xl) + pad), HB.decimate(list(xr) + pad)
+    fs = FSH
     t60, t = knob_t60(decy), knob_tone(tone)
     hpf = 500.0 * 10 ** t
     lpf = min(20000.0 * 10 ** (1.82 * t) if t < 0 else 20000.0, fs * 0.45)
-    filt = [[Biquad('hp', hpf, 0.54119610), Biquad('hp', hpf, 1.30656296),
-             Biquad('lp', lpf, 0.54119610), Biquad('lp', lpf, 1.30656296)] for _ in range(2)]
+    filt = [[Biquad('hp', hpf, 0.54119610, fs), Biquad('hp', hpf, 1.30656296, fs),
+             Biquad('lp', lpf, 0.54119610, fs), Biquad('lp', lpf, 1.30656296, fs)] for _ in range(2)]
     apl = G['apl']
     apb = [[[0.0] * apl[c][a] for a in range(4)] for c in range(2)]
     api = [[0] * 4 for _ in range(2)]
@@ -119,7 +133,8 @@ def reference(G, decy, tone, modk, xl, xr):
         for i in range(8):
             buf[i][w] = y[i] * nrm + ins_[i & 1] * 0.5
         w = (w + 1) & mask
-    return outl, outr
+    outl, outr = HB.interpolate(outl), HB.interpolate(outr)
+    return [0.0] + outl[:n_out - 1], [0.0] + outr[:n_out - 1]
 
 
 def knobs(decy=64, tone=64, modk=64, mixk=127):
@@ -180,7 +195,7 @@ def edc_rt60(x, t0, lo=-5.0, hi=-25.0):
 
 def lowpass(x, f):
     """4th-order Butterworth low-pass (float), for band-limited decay fits."""
-    f1_, f2_ = Biquad('lp', f, 0.54119610), Biquad('lp', f, 1.30656296)
+    f1_, f2_ = Biquad('lp', f, 0.54119610, 44100), Biquad('lp', f, 1.30656296, 44100)
     return [f2_.run(f1_.run(v)) for v in x]
 
 
@@ -208,7 +223,7 @@ def suite(rep, tag, G, mems, init, proc, extra, guard):
         lv.append(A.rms(L[st + fs: st + fs + 4410] + R[st + fs: st + fs + 4410]))
     rep.check(f'{tag}: DECY lengthens the decay (wet rms 1.0 s after an impulse, DECY 0 / 64 / 127)',
               lv[0] < lv[1] < lv[2], ' / '.join(f'{A.db(v):.1f}' for v in lv) + ' dBFS')
-    for k, secs in ((33, 2.2), (64, 5.0)):
+    for k, secs in ((33, 2.2), (64, 3.0)):
         blocks = int(secs * fs / 16)
         n = blocks * 16
         L, R, _ = A.render(f'vb_{tag}_rt', mems, init, proc, knobs(k, 64, 64), A.impulse(n, at=st, amp=0.9),
@@ -257,15 +272,15 @@ def suite(rep, tag, G, mems, init, proc, extra, guard):
         L, R, _ = A.render(f'vb_{tag}_tone', mems, init, proc, knobs(50, tone, 64), A.noise(n, 0.25, 9), blocks,
                            extra=extra)
         seg = L[-32768:]
-        bands[tone] = (band_db(seg, 80, 300), band_db(seg, 700, 2000), band_db(seg, 5000, 12000))
+        bands[tone] = (band_db(seg, 80, 300), band_db(seg, 700, 2000), band_db(seg, 5000, 9000))
     lo0, mid0, hi0 = bands[0]
     lo6, mid6, hi6 = bands[64]
     lo1, mid1, hi1 = bands[127]
-    rep.check(f'{tag}: TONE 0 is darker than centre (5-12 kHz vs 80-300 Hz tilt at least 30 dB lower; '
+    rep.check(f'{tag}: TONE 0 is darker than centre (5-9 kHz (half rate: was 5-12) vs 80-300 Hz tilt at least 30 dB lower; '
               'lows up at least 10 dB)', (hi0 - lo0) < (hi6 - lo6) - 30 and lo0 > lo6 + 10,
               f'TONE 0 lo/mid/hi {lo0:.1f}/{mid0:.1f}/{hi0:.1f} dB, TONE 64 {lo6:.1f}/{mid6:.1f}/{hi6:.1f} dB')
     rep.check(f'{tag}: TONE 127 is thinner than centre (0.7-2 kHz at least 15 dB down, 80-300 Hz at least '
-              '20 dB down, 5-12 kHz within 6 dB)', mid1 < mid6 - 15 and lo1 < lo6 - 20 and abs(hi1 - hi6) < 6,
+              '20 dB down, 5-9 kHz (was 5-12) within 6 dB)', mid1 < mid6 - 15 and lo1 < lo6 - 20 and abs(hi1 - hi6) < 6,
               f'TONE 127 lo/mid/hi {lo1:.1f}/{mid1:.1f}/{hi1:.1f} dB')
     # --- DC: none builds up, even from an input that carries DC ---
     blocks = int(3 * fs / 16)
@@ -280,7 +295,7 @@ def suite(rep, tag, G, mems, init, proc, extra, guard):
               'of wet < 1e-3 FS)', worstdc < 1e-3, f'{worstdc:.2e} FS')
     # --- silence after the tail: exact zeros ---
     res = []
-    for k, tone, secs in ((0, 64, 4.0), (40, 0, 9.0)):
+    for k, tone, secs in ((0, 64, 2.5), (40, 0, 4.0)):
         blocks = int(secs * fs / 16)
         n = blocks * 16
         nb = int(0.5 * fs)
@@ -302,7 +317,8 @@ DEAR = {'DECY': 127, 'TONE': 64, 'MOD': 127, 'MIX': 127}
 mod, names, d, mems, init, proc, cost = A.standard(
     rep, '/aeria/verb/verb_test.asm', 'AERIA VERB', '/aeria/verb/manifest.py', DEAR)
 rep.note('cost (test size)', f'static {cost[0]} cycles/sample; dsp_host mean {cost[2]:.1f}, worst block {cost[1]:.1f} '
-                             'instr/sample (the standard gate\'s mean < 320 line is expected to FAIL for this effect)')
+                             'instr/sample (the standard gate\'s mean < 320 line is expected to FAIL for this effect; the static figure is '
+                             'the odd sample, where the FDN runs: the even one costs about 60)')
 CASES = ((64, 64, 0, 0), (64, 64, 127, 1), (100, 0, 64, 0), (30, 127, 64, 1), (64, 30, 64, 0), (64, 100, 64, 1))
 model_match(rep, 'test size', GT, mems, init, proc, (), CASES)
 # LFO: the tracked sine state of lines 0 and 7 against 0.5 sin(2 pi f t + 0.77 i)
@@ -322,7 +338,85 @@ for r_ in rows:
         worst = max(worst, abs(v - 0.5 * math.sin(2 * math.pi * GT['lfo_hz'][i] * ns / fs + 0.77 * i)))
 rep.check('LFOs: line 0 (0.07 Hz) and line 7 (0.441 Hz) sine states track 0.5 sin(2 pi f t + 0.77 i) over 4 s',
           len(rows) > 1000 and worst < 0.002, f'max |err| {worst:.5f} of 0.5 ({len(rows)} blocks)')
-suite(rep, 'test size', GT, mems, init, proc, (), True)
+
+# ---------------- half rate: the halfbands through the effect (MOD 0: the reverb is linear and time-invariant) ----
+hb_pass = [A.db(HB.response(f)) for f in (5000, 9000, 10000, 10500, 11025)]
+hb_stop = min(-A.db(HB.response(12050 + k * 10)) for k in range(1001))
+rep.note('halfband (decimator = interpolator), polyphase IIR, %d allpasses, coefficients A0 %s | A1 %s' % (
+    HB.N_COEF, ' '.join('%.6f' % c for c in HB.A0), ' '.join('%.6f' % c for c in HB.A1)),
+    'design: %s dB at 5 / 9 / 10 / 10.5 / 11.025 kHz; at least %.1f dB down from 12.05 to 22.05 kHz' % (
+        ' / '.join('%+.2f' % v for v in hb_pass), hb_stop))
+SEGN = 16384
+LTI = knobs(30, 64, 0, 127)             # T60 0.89 s, MOD 0
+
+
+def tone_out(tag, f, amp=0.3, secs=1.0):
+    blocks = int(secs * fs / 16)
+    L, R, _ = A.render(tag, mems, init, proc, LTI, A.sine(f, amp, blocks * 16), blocks)
+    return L[-SEGN:], R[-SEGN:]
+
+
+rows, ok = [], True
+for f in (1000, 3000, 5000, 7000, 9000):
+    yl, yr = tone_out('vb_hbimg', f)
+    worst = -999.0
+    for y in (yl, yr):
+        want = A.db(A.goertzel(y, f) / 0.3)
+        img = A.db(max(A.goertzel(y, 22050 - f), 1e-12) / 0.3)
+        worst = max(worst, img - want)
+    ok &= worst < -60
+    rows.append(f'{f} Hz: wet L {want:+.1f} dB re input, image at {22050 - f} Hz {worst:+.1f} dB re the wet')
+rep.check('half rate: interpolator images (DECY 30 TONE 64 MOD 0 MIX 127, -10 dBFS sines, the last 16,384 samples of '
+          '1 s): every image (22.05 kHz - f) at least 60 dB under the wet at f, both sides', ok, '; '.join(rows))
+rows, ok = [], True
+for g in (12100, 13000, 15000, 18000, 21000):
+    fa = 22050 - g
+    al = di = -999.0
+    for y in tone_out('vb_hbali', g):
+        al = max(al, A.db(max(A.goertzel(y, fa), 1e-12) / 0.3))
+    for y in tone_out('vb_hbdir', fa):
+        di = max(di, A.db(max(A.goertzel(y, fa), 1e-12) / 0.3))
+    ok &= al < di - 60
+    rows.append(f'{g} Hz in: {al:+.1f} dB at {fa} Hz (a {fa} Hz input: {di:+.1f} dB)')
+rep.check('half rate: decimator aliasing (same settings, -10 dBFS sines from 12.1 to 21 kHz): what folds to 22.05 kHz - f '
+          'at least 60 dB under that frequency\'s own response', ok, '; '.join(rows))
+blocks = int(2 * fs / 16)
+L, R, _ = A.render('vb_band', mems, init, proc, knobs(50, 64, 64, 127), A.noise(blocks * 16, 0.25, 9), blocks)
+bl = {k: max(band_db(L[-32768:], *k, nf=40), band_db(R[-32768:], *k, nf=40)) for k in
+      ((1000, 5000), (9000, 10500), (11500, 12500), (13000, 21000))}
+ref_ = min(band_db(L[-32768:], 1000, 5000, nf=40), band_db(R[-32768:], 1000, 5000, nf=40))
+rep.check('half rate: the wet is band-limited (white noise, DECY 50 TONE 64 MOD 64, MIX 127, 2 s): 13-21 kHz at least '
+          '60 dB under 1-5 kHz', bl[(13000, 21000)] < ref_ - 60,
+          '1-5 kHz %.1f, 9-10.5 kHz %+.1f, 11.5-12.5 kHz %+.1f, 13-21 kHz %+.1f dB re 1-5 kHz' % (
+              ref_, bl[(9000, 10500)] - ref_, bl[(11500, 12500)] - ref_, bl[(13000, 21000)] - ref_))
+# the old full-rate build (verb.asm.prehalf, the same lengths, full rate) beside the new
+om, ow, oi, op = A.assemble('/aeria/verb/verb.asm.prehalf', 'AERIA VERB OLD')
+nm, nw, ni, np_ = A.assemble('/aeria/verb/verb.asm', 'AERIA VERB NEW')
+blocks = int(2 * fs / 16)
+lv = {}
+for tag, (mm, ii, pp) in (('old', (om, oi, op)), ('new', (nm, ni, np_))):
+    L, R, _ = A.render(f'vb_cmp_{tag}', mm, ii, pp, knobs(50, 64, 64, 127), A.noise(blocks * 16, 0.25, 9), blocks,
+                       extra=FULLX)
+    a = L[-32768:] + R[-32768:]
+    lv[tag] = (A.db(A.rms(lowpass(a, 8000.0))),
+               [band_db(L[-32768:], f0, f1, nf=24) for f0, f1 in ((100, 400), (400, 1600), (1600, 5000), (5000, 9000),
+                                                                   (9000, 12000), (12000, 20000))])
+dlo = lv['new'][0] - lv['old'][0]
+rep.check('half rate against the old full-rate build (verb.asm.prehalf, FULL, slot 5; white noise, DECY 50 TONE 64 '
+          'MOD 64, MIX 127, 2 s): wet level below 8 kHz within 1.5 dB', abs(dlo) < 1.5,
+          f'{dlo:+.2f} dB; bands 0.1-0.4/0.4-1.6/1.6-5/5-9/9-12/12-20 kHz, new - old: '
+          + ' / '.join(f'{a - b:+.1f}' for a, b in zip(lv['new'][1], lv['old'][1])) + ' dB')
+rts = {}
+st = GF['nclr'] * 16 + 480
+blocks = int(2.2 * fs / 16)
+for tag, (mm, ii, pp) in (('old', (om, oi, op)), ('new', (nm, ni, np_))):
+    L, R, _ = A.render(f'vb_cmprt_{tag}', mm, ii, pp, knobs(33, 64, 64), A.impulse(blocks * 16, at=st, amp=0.9),
+                       blocks, extra=FULLX)
+    rts[tag] = (edc_rt60(lowpass(L, 1500.0), st + 2205), edc_rt60(L, st + 2205))
+rep.check('half rate against the old full-rate build: RT60 at DECY 33 below 1.5 kHz within 5%, broadband within 10% '
+          '(same Schroeder fit)', abs(rts['new'][0] / rts['old'][0] - 1) < 0.05 and abs(rts['new'][1] / rts['old'][1] - 1) < 0.10,
+          f"below 1.5 kHz new {rts['new'][0]:.3f} s, old {rts['old'][0]:.3f} s; broadband new {rts['new'][1]:.3f} s, "
+          f"old {rts['old'][1]:.3f} s")
 
 # ---------------- full-size build ----------------
 fmems, fwords, finit, fproc = A.assemble('/aeria/verb/verb.asm', 'AERIA VERB FULL')
@@ -380,8 +474,17 @@ def wrun(xx, bl):
     return A.render('vb_full_w', fmems, finit, fproc, knobs(64, 64, 64), xx, bl, extra=FULLX)[:2]
 
 
-A.stereo_report(rep, 'FULL: defaults (DECY 64, TONE 64, MOD 64), MIX 127', wrun, True, secs=4.0, info=True)
+A.stereo_report(rep, 'FULL: defaults (DECY 64, TONE 64, MOD 64), MIX 127', wrun, True, secs=3.0, info=True)
+_, _, mo = A.render('vb_oldcost', om, oi, op, dp, A.noise(n, 0.5), 1500, extra=FULLX)
+_, _, mo7 = A.render('vb_oldcost7', om, oi, op, dp, A.noise(n, 0.5), 1500, split=7, extra=FULLX)
+_, _, mn7 = A.render('vb_newcost7', fmems, finit, fproc, dp, A.noise(n, 0.5), 1500, split=7, extra=FULLX)
+rep.note('cost, FULL, the old full-rate build beside the new (dearest settings, 0.5 FS noise, slot 5)',
+         f"old: mean {mo['mean_per_frame'] - nul['mean_per_frame']:.1f}, worst block "
+         f"{mo['max_per_frame'] - nul['max_per_frame']:.1f}, split 7 worst block "
+         f"{mo7['max_per_frame'] - nul['max_per_frame']:.1f}, P {len(ow)} words; new: split 7 worst block "
+         f"{mn7['max_per_frame'] - nul['max_per_frame']:.1f}, P {len(fwords)} words")
 rep.note('not tested', 'hardware; core 1 placement (renders ran on core 0); the real 32K buffer base and its '
                        'allocator word; -dirty garbage fill does not reach Y:0x30000 (pokes used instead); '
-                       'aliasing / fx:audit; parameter locks and LFO-driven knobs on the unit')
+                       'fx:audit; parameter locks and LFO-driven knobs on the unit; the behaviour suite on the TEST '
+                       'build (it differs from FULL only in its ring)')
 rep.save('/aeria/verb/test_results.md')

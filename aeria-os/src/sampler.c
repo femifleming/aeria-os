@@ -44,10 +44,12 @@ static uint8_t wav_head[1024] __attribute__((aligned(4)));
 static uint32_t div_u(uint32_t n, uint32_t d) { uint32_t q = 0, r = 0; for (int i = 31; i >= 0; i--) { r = r << 1 | ((n >> i) & 1); if (r >= d) { r -= d; q |= 1u << i; } } return q; }
 /* path -> s, into [dst, dst+room): 1 if loaded (cut to fit if it is longer) */
 /* raw frames -> the sampler's 24-bit stereo pairs */
+static void stream_pump(void);
 static void wav_widen(const uint8_t *src, int32_t *o, uint32_t frames, uint32_t fsz, uint32_t bps, uint32_t ch, uint32_t bits, uint32_t fmt)
 {
     for (uint32_t i = 0; i < frames; i++) {
         int32_t v[2];
+        if ((i & 1023u) == 0) stream_pump();   /* (15 Nov 2026) a long file: the stream keeps going meanwhile (a project's loop coming back ran it dry) */
         for (uint32_t c = 0; c < ch; c++) {
             const uint8_t *p = src + i * fsz + c * bps;
             int32_t x;
@@ -95,7 +97,9 @@ static int wav_load(const char *path, Smp *s, uint8_t *dst, uint32_t room)
     *(volatile uint32_t *)0x100FBFF0u = 0x70;
     uint32_t cl, size; uint8_t attr;
     s->status = 2; s->frames = 0; s->d = (int32_t *)dst;
+    { volatile uint32_t *dg = (volatile uint32_t *)0x100FBE80u; dg[2] = now(); }
     if (!fat_find(path, &cl, &size, &attr) || (attr & 0x10) || size < 44) { s->status = 3; return 0; }
+    { volatile uint32_t *dg = (volatile uint32_t *)0x100FBE80u; dg[3] = now(); }
     uint32_t got = fat_read_at(cl, 0, wav_head, sizeof wav_head);
     if (got < 44 || rd32(wav_head) != 0x46464952u || rd32(wav_head + 8) != 0x45564157u) { s->status = 3; return 0; }
     uint32_t fmt = 0, ch = 0, rate = 0, bits = 0, data_at = 0, data_len = 0;
@@ -129,9 +133,12 @@ static int wav_load(const char *path, Smp *s, uint8_t *dst, uint32_t room)
     /* read the raw frames to the end of the space they will fill, then widen them forwards (never overtaking) */
     uint32_t raw = frames * fsz, out = frames * 8;
     uint8_t *src = dst + (out - raw);
+    { volatile uint32_t *dg = (volatile uint32_t *)0x100FBE80u; dg[4] = now(); }
     if (fat_read_at(cl, data_at, src, raw) != raw) { s->status = 3; return 0; }
+    { volatile uint32_t *dg = (volatile uint32_t *)0x100FBE80u; dg[5] = now(); }
     int32_t *o = (int32_t *)dst;
     wav_widen(src, o, frames, fsz, bps, ch, bits, fmt);
+    { volatile uint32_t *dg = (volatile uint32_t *)0x100FBE80u; dg[6] = now(); }
     s->d = o; s->frames = frames;
     s->step = div_u(rate, 44100u) << 16 | (div_u((rate % 44100u) << 16, 44100u) & 0xFFFF);
     s->status = 0;
@@ -640,8 +647,11 @@ static void stream_pump_in(void)
         }
     }
 }
-/* the card is slow: keep the stream going between sectors while something loads */
-static void card_idle(void) { stream_pump(); }
+/* the card is slow: keep the stream going between sectors while something loads. (15 Nov 2026: the engine's reports
+ * must be read as well -- without dsp_poll the pump never saw the stream being taken, thought its cushion was full
+ * and let the engine run dry for the length of every long file: a project's loop coming back lost 0.26 s of sound) */
+static void dsp_poll(void);
+static void card_idle(void) { if (dsp_running) dsp_poll(); stream_pump(); }
 
 /* ---- what was loaded, kept in battery RAM 0x100FBA00 (768 bytes): the loop's path, and each star bank's folder
  * with the seed that dealt it (the deal is the same shuffle again, so the same 16 samples come back) ---- */
@@ -757,6 +767,7 @@ int aos_list(const char *path, void (*each)(const char *name, int dir))
 
 /* at start: the loop, then each bank's 16 stars again, one file a tick (the UI keeps moving between them) */
 static int restore_at = -1;          /* -1 not begun, 0 the loop, 1 + bank*16 + k a star, 129 done */
+int aos_restoring(void) { return restore_at >= 0 && restore_at < 129 && card_ok; }   /* samples still coming back from the card (a project just loaded, or the start) */
 /* a project was loaded: the samples its list names are read from the card again (restore_tick, a little at a time) */
 void aos_samples_reload(void) { for (int i = 0; i < N_VOICES; i++) if (voice[i].bus != BUS_BALLOON) voice[i].on = 0; loop_v = 0; flex_smp.status = 1; flex_smp.frames = 0; restore_at = 0; }
 static char rs_names[16][144];
@@ -791,7 +802,9 @@ static void restore_tick(void)
     if (restore_at < 0) restore_at = 0;
     if (restore_at == 0) {
         char p[124]; vread(p, LOADED->loop, 124);
+        { volatile uint32_t *dg = (volatile uint32_t *)0x100FBE80u; dg[0] = now(); }   /* bring-up: how long the loop's return takes */
         if (p[0]) wav_load(p, &flex_smp, (uint8_t *)POOL_LOOP, SZ_LOOP);
+        { volatile uint32_t *dg = (volatile uint32_t *)0x100FBE80u; dg[1] = now(); }
         restore_at = 1; return;
     }
     int bank = (restore_at - 1) / 16, k = (restore_at - 1) % 16;

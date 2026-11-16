@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates spectral.asm (AERIA SMEAR: a real STFT spectral processor, N = 1024, hop 256).
+"""Generates spectral.asm (AERIA SMEAR: a real STFT spectral processor, N = 1024, hop 512).
 
 Runs on the host (no dependencies): python3 spectral/gen.py
 Importing this module (test.py does) only builds the constants and the source text; nothing is written.
@@ -9,18 +9,25 @@ import re
 from pathlib import Path
 
 FS = 44100.0
-N, HOP = 1024, 256
-LATENCY = N + HOP                  # the job of one hop is spread over the 16 calls of the next: 1,024 + 256
+N, HOP = 1024, 512
+LATENCY = N + HOP                  # the job of one hop is spread over the 32 calls of the next: 1,024 + 512
+assert HOP == N // 2                # the windowed units assume 50 % overlap (one window half per unit set)
 
 # ---------------------------------------------------------------- memory map (offsets from the Y base)
-TW, RP, WK, IR, OR_, HH, END = 0x0000, 0x0400, 0x0800, 0x1000, 0x1800, 0x2000, 0x2400
+TW, RP, WT, WK, IR, OR_, HH, END = 0x0000, 0x0400, 0x0600, 0x0800, 0x1000, 0x1800, 0x2000, 0x2400
+NPH = 256                          # random phasors (RP is modulo 512 words)
+PH_SKEW = 77                       # the last block of pairs (256 of the 511) walks the phasors from this many
+                                   # entries further on: an odd stride walks all 256 in 256 pairs, so position
+                                   # p + 256 would get p's phasor again, and p, p + 256 are neighbouring bins
+                                   # (bit-reversed order): equal phases a hop would beat at a fixed point of
+                                   # every frame, a line at the hop rate in a frozen wash
 MEM_WORDS = END
 
 # ---------------------------------------------------------------- r7 slots
 _names = ('BASE RPB WKB IRB ORB HHB WKE UADDR BUDG PHASE READY R0S R6S IRP ORP RNG '
           'P0 H2 TSN J TWP UIN UOUT SK SK2 JL TSW '
           'BP BQ BREM BS BH BDONE R5P N5 R6P N6 '
-          'EDEC THR GL GL8 DITH FS WTHR TAUT TAUS YN MIXS CD CG CB MODE STL STR OJ OP OW OT OCNT XT').split()
+          'EDEC THR GL GL8 DITH FS WTHR TAUT TAUS YN MIXS CD CG CB MODE STL STR OJ OP OW OT OCNT XT CIP').split()
 S = {n: i for i, n in enumerate(_names)}
 assert len(S) <= 0x40, len(S)
 USED_X = len(S)
@@ -35,33 +42,56 @@ def q(x):
 
 
 UNIT = 64                          # butterflies a unit
-R4G = 32                           # radix-4 groups a unit
-BPAIR = 16                         # bin pairs a unit
-OLP = 128                          # overlap-add points a unit
+R4G = 16                           # radix-4 groups a unit
+BPAIR = 8                          # bin pairs a unit
+OLP = 64                           # windowed points a unit (copy-in, last half, overlap-add)
 LCG = 0x343FD5                     # x -> x * LCG mod 2^24 (odd seed), top bits used
 SEED = 0x2F6E2B
-SMR_T0, SMR_T1 = 0.1, 20.0         # (nominal) decay times at the ends of the knob
-E0 = 0.4                           # 1 - d at SMR 1 .. E0 / 200 at SMR 127
+E0 = 0.4                           # 1 - d (per hop) = E0 2^-y(v): y = log2(200) v / 127 up to SMR_KNEE, then
+SMR_KNEE, Y_TOP = 100, 15.0        # steeper, to y = Y_TOP at 127 (2^-15: e keeps ~8 significant bits in 24)
 KSMR = math.log2(200) * 128 / 127 / 32
+Y_EXTRA = (Y_TOP - math.log2(200)) / (127 - SMR_KNEE)          # added a step above the knee
+KSMR2 = Y_EXTRA * 128 / 32 / 2     # on 2 (v - knee) / 128
 GATE_TOP_DB, GATE_RANGE_DB = -20.0, 60.0
 KGATE = (GATE_RANGE_DB / (20 * math.log10(2))) / 126 * 128 / 32
-SLOT_FS = 1 / 4                    # a full-scale bin-centred sine reads 1/4 in a slot
-# bin magnitude: max(max + MB0 min, MA1 max + MB1 min) of |re|, |im| (two-segment alpha-max-beta-min,
-# within -1.2 % .. +1.2 % of the true magnitude; it was max + 0.375 min, -2.8 % .. +6.8 %, whose ripple
-# with the phase the hold kept as a wash on steady tones). Quality pass 12 Nov 2026.
-MB0, MA1, MB1 = 5 / 32, 27 / 32, 71 / 128
-EST = 1.0041                       # mean of the estimate over phase (was 1.03 for max + 0.375 min)
+
+
+def win(n):
+    """the window (analysis and synthesis): Vorbis power-complementary, w(n)^2 + w(n + N/2)^2 = 1, w(N-1-n) = w(n)."""
+    return math.sin(math.pi / 2 * math.sin(math.pi * (n + 0.5) / N) ** 2)
+
+
+SLOT_FS = sum(win(n) for n in range(N)) / N / 2   # a full-scale bin-centred sine in a slot (analysis w / 2)
+# bin magnitude: max(max + MB0 min, MA1 max + MB1 min, MA2 max + MB2 min) of |re|, |im| (three-segment
+# alpha-max-beta-min, within -0.5 % .. +0.5 % of the true magnitude: its ripple with the phase is what the
+# hold keeps as a wash on steady tones, and at hop 512 the hold lasts twice as long). It was two segments
+# (+-1.2 %) at hop 256, max + 0.375 min (-2.8 % .. +6.8 %) before the quality pass of 12 Nov 2026.
+MB0, MA1, MB1, MA2, MB2 = 0.0998698, 0.93279802, 0.37396844, 0.79206601, 0.61854065
+
+
+def est_ratio(t):
+    mx, mn = math.cos(t), math.sin(t)
+    return max(mx + MB0 * mn, MA1 * mx + MB1 * mn, MA2 * mx + MB2 * mn)
+
+
+EST = sum(est_ratio(math.pi / 4 * (i + 0.5) / 1000) for i in range(1000)) / 1000   # mean of the estimate over phase
 TMAX = 10 ** (GATE_TOP_DB / 20) * SLOT_FS * EST
-HR = 8 / 3                         # the overlap ring holds wet / HR
+HR = 4                             # the overlap ring holds wet / HR
+XSH = 1                            # wet gain: mix x HR / 2^(2 + XSH) (< 1), then x 2^(5 + XSH) (FIR) / 2^(2 + XSH) (IIR) x YN
+PHS = math.sqrt(0.5)               # the random phasors' magnitude: the wash is sqrt 2 x the magnitude it replaces
 F_PIVOT = 1000.0
 KAPPA2 = 2 * (1 - math.cos(2 * math.pi * F_PIVOT / FS))
 F_TILT_LO = 100.0                  # the tilt's zero / pole goes down to here
 CMIN = 1 - math.exp(-2 * math.pi * F_TILT_LO / FS)
 
 
+def smr_y(v):
+    return math.log2(200) * v / 127 + max(0, v - SMR_KNEE) * Y_EXTRA
+
+
 def smr_e(v):
     """1 - d (per hop) of SMR knob v."""
-    return 1.0 if v == 0 else E0 * 200 ** (-v / 127)
+    return 1.0 if v == 0 else E0 * 2 ** -smr_y(v)
 
 
 def smr_t60(v):
@@ -280,6 +310,12 @@ SIDE = body(R('''
         mac     y1,y0,a
         cmp     a,b
         tlt     a,b
+        move    MA2Q,y1
+        mpy     y1,x1,a
+        move    MB2Q,y1
+        mac     y1,y0,a
+        cmp     a,b
+        tlt     a,b
         move    {THR},x0
         cmp     x0,b
         move    #0,x1
@@ -300,7 +336,7 @@ SIDE = body(R('''
         mac     -x1,y0,a
         asr     #2,a,a
         move    a,x0
-''').replace('MB0Q', q(MB0)).replace('MA1Q', q(MA1)).replace('MB1Q', q(MB1)))
+''').replace('MB0Q', q(MB0)).replace('MA1Q', q(MA1)).replace('MB1Q', q(MB1)).replace('MA2Q', q(MA2)).replace('MB2Q', q(MB2)))
 PAIR = body('''
         move    y:(r1)+,a
         move    y:(r2),x0
@@ -351,11 +387,11 @@ PAIR = body('''
 ''')
 
 
-def cin(sign):
+# the windowed loops: one point a pass, the window from the table (r3: up for the first half, down for the second)
+def CIN(d):                        # copy-in: WK = input x w / 2
     return body(f'''
-        move    y:(r3)+n3,x1
-        move    y1,a
-        mac     {sign}y1,x1,a
+        move    y:(r3){d},a
+        asr     a
         move    a,y0
         move    y:(r4)+,x0
         mpyr    y0,x0,a
@@ -366,33 +402,30 @@ def cin(sign):
 ''')
 
 
-def ola(sign):
-    return body(f'''
-        move    y:(r3)+n3,y0
+OLA = body('''
+        move    y:(r3)+,y0
         move    y:(r2)+,x0
         move    y:(r5),a
-        mac     {sign}y0,x0,a
-        add     x0,a
+        mac     y0,x0,a
+        macr    y0,x0,a
         move    a,y:(r5)+
         move    y:(r2)+,x0
         move    y:(r5),a
-        mac     {sign}y0,x0,a
-        add     x0,a
+        mac     y0,x0,a
+        macr    y0,x0,a
         move    a,y:(r5)+
-''')
-
-
+''')                                # overlap ring += WK x 2 w (first half)
 LASTQ = body('''
-        move    y:(r3)+n3,y0
+        move    y:(r3)-,y0
         move    y:(r2)+,x0
         mpy     y0,x0,a
-        add     x0,a
+        macr    y0,x0,a
         move    a,y:(r5)+
         move    y:(r2)+,x0
         mpy     y0,x0,a
-        add     x0,a
+        macr    y0,x0,a
         move    a,y:(r5)+
-''')
+''')                                # overlap ring = WK x 2 w (the previous frame's second half)
 FIR = body(R('''
         move    x:(r0),x0
         move    x0,y:(r4)+n4
@@ -403,10 +436,10 @@ FIR = body(R('''
         move    {CB},y1
         mac     -y1,x1,a
         move    x0,x1
-        asl     #5,a,a
+        asl     #FSH,a,a
         add     b,a
         move    a,x:(r0)+n0
-'''))
+'''.replace('FSH', str(5 + XSH))))
 IIR = body(R('''
         move    x:(r0),x0
         move    x0,y:(r4)+n4
@@ -414,13 +447,13 @@ IIR = body(R('''
         mpy     x0,y1,b
         move    y:(r5)+n5,x0
         mpy     y0,x0,a
-        asl     #2,a,a
+        asl     #ISH,a,a
         move    {CB},y1
         mac     y1,x1,a
         move    a,x1
         add     b,a
         move    a,x:(r0)+n0
-'''))
+'''.replace('ISH', str(2 + XSH))))
 
 # ---------------------------------------------------------------- the schedule's weights (instructions)
 W_FWD = UNIT * (ninstr(DIF) + 2) + 40
@@ -432,15 +465,18 @@ W_FR4 = R4G * ninstr(FR4) + 25
 W_IR4 = R4G * ninstr(IR4) + 25
 W_PAIR = ninstr(PAIR)
 W_BOV = 60
-W_OLA = OLP * ninstr(ola('-')) + 35
-W_MAND = 256 * ninstr(LASTQ) + N * ninstr(cin('-')) + 330
+W_OLA = OLP * ninstr(OLA) + 40
+W_LQ = OLP * ninstr(LASTQ) + 40
+W_CIN = OLP * ninstr(CIN('+')) + 40
+W_MAND = W_CIN + 330               # the knobs, the set-up and the first copy-in unit (the oldest input)
 PASSES = 8                         # h = 512 .. 4 (h = 2, 1 are the radix-4 stage)
-UNITS = ([('fwd', W_FWD)] * (3 * (N // 2) // UNIT) + [('fwa', W_FWA)] * (PA * (N // 2) // UNIT) + [('fwd', W_FWD)] * ((N // 2) // UNIT)
+UNITS = ([('cin', W_CIN)] * (N // 2 // OLP - 1) + [('lq', W_LQ)] * (HOP // OLP) + [('cin', W_CIN)] * (N // 2 // OLP)
+         + [('fwd', W_FWD)] * (3 * (N // 2) // UNIT) + [('fwa', W_FWA)] * (PA * (N // 2) // UNIT) + [('fwd', W_FWD)] * ((N // 2) // UNIT)
          + [('fr4', W_FR4)] * (N // 4 // R4G)
          + [('bin', W_BOV + n * W_PAIR) for n in (1, 2, 4, 8)] + [('bin', W_BOV + BPAIR * W_PAIR)] * ((511 - 15) // BPAIR)
          + [('ir4', W_IR4)] * (N // 4 // R4G) + [('inv', W_INV)] * ((N // 2) // UNIT) + [('ina', W_INA)] * (PA * (N // 2) // UNIT)
          + [('inv', W_INV)] * (3 * (N // 2) // UNIT)
-         + [('ola', W_OLA)] * (768 // OLP))
+         + [('ola', W_OLA)] * ((N - HOP) // OLP))
 BIAS = 700
 TOTAL = W_MAND + sum(w for _, w in UNITS)
 BF = -(-(TOTAL + BIAS) // HOP)     # budget granted a frame
@@ -485,7 +521,11 @@ def build():
 
     hdr = f'''; AERIA SMEAR -- STFT spectral smear / freeze / gate (generated by spectral/gen.py: edit that).
 ;
-; N = 1024, hop 256 (4x), Hann analysis x Hann synthesis (sum 1.5), true stereo through ONE complex
+; N = 1024, hop 512 (2x), the Vorbis window w(n) = sin(pi/2 sin^2(pi (n + 1/2) / N)) on both sides
+; (analysis w / 2, synthesis 2 w; a 512-entry table): w(n)^2 + w(n + 512)^2 = 1, so the overlap-add is
+; constant and the random-phase wash (synthesis window only) keeps constant power. Its leakage falls off
+; fast, unlike the plain sine window's (whose far bins wobble with the phase of a steady tone, and the
+; hold turns the wobble into a wash). True stereo through ONE complex
 ; FFT each way: z = L + jR; bins k and N-k give X_L = (Z[k] + conj Z[N-k]) / 2 and
 ; X_R = (Z[k] - conj Z[N-k]) / 2j; each side is processed on its own, Z'[k] = A + jB,
 ; Z'[N-k] = conj A + j conj B, and one inverse FFT returns L in the real part and R in the imaginary.
@@ -499,44 +539,52 @@ def build():
 ; loaded once for its column of butterflies, the work buffer addressed modulo 2048), the others
 ; butterfly by butterfly (twiddle pointer modulo 1024).
 ;
-; Per side and bin: m = max(max + 5/32 min, 27/32 max + 71/128 min) of |re|, |im| (within 1.2 %); gate: m < THR -> the bin is out (m = 0, live
+; Per side and bin: m = max(max + {MB0:.4f} min, {MA1:.4f} max + {MB1:.4f} min, {MA2:.4f} max + {MB2:.4f} min) of |re|, |im|
+; (within 0.5 %); gate: m < THR -> the bin is out (m = 0, live
 ; gain 0); H = max(m, floor(H - e H + r)) (e = 1 - decay, from SMR; r in [0, 1) LSB is new every hop:
-; the decay is exponential on average down to the last LSB, reaches 0, and holds exactly at e = 0); out = (gl x bin + 2 (H - gl m) x random unit phasor) / 8.
-; gl = 1 - FRZ. The wash is twice the magnitude it replaces: frames with fresh random phases add in
-; power, 6 dB under the same frames in phase. Full FRZ: gl = 0, e = 0, THR = max: H is not touched.
-; Random phasors: a table of 512 (random entries of the twiddle table, random sign), walked every hop
+; the decay is exponential on average down to the last LSB, reaches 0, and holds exactly at e = 0); out = (gl x bin + 2 (H - gl m) x random phasor) / 8.
+; gl = 1 - FRZ. The phasors have magnitude 1 / sqrt 2: the wash is sqrt 2 x the magnitude it
+; replaces, which holds the level of a frozen sine (for any power-complementary window: the frozen
+; bins' power is mean(w)^2 x mean(w^2) / mean(w)^2 = 1/2 of the live tone's). e = E0 2^-y per hop,
+; y = log2(200) v / 127 up to SMR {SMR_KNEE}, then steeper to y = {Y_TOP:g} at 127 (T60 {smr_t60(1):.2f} s .. {smr_t60(SMR_KNEE):.0f} s .. {smr_t60(127) / 60:.0f} min).
+; Full FRZ: gl = 0, e = 0, THR = max: H is not touched.
+; Random phasors: a table of {NPH} (random entries of the twiddle table x 1 / sqrt 2, random sign), walked every hop
 ; from a new random start with a new random odd stride; the right side walks the same entries (WIDE 0)
 ; or its own (WIDE 127); in between the first WIDE/127 of the pairs (bit-reversed order: spread over
 ; the spectrum) have their own.
 ; TILT is a first-order filter on the wet output: one zero (treble up) or one pole (bass up) sliding
 ; from Nyquist down to {F_TILT_LO:g} Hz, gain held at 1 at {F_PIVOT:g} Hz (a Newton step a call on 1/sqrt).
 ;
-; WORK IS SPREAD: one hop's job is cut into units of about 1.3-1.7 k instructions; every call is
+; WORK IS SPREAD: one hop's job is cut into units of about 0.7-1.5 k instructions; every call is
 ; granted {BF} instructions a frame and runs units while its budget is not negative. Only the start of a
-; job is fixed to one call (the first of the hop): the last quarter of the previous frame into the
-; overlap ring (its slots were being played until now), and the windowed copy-in (the input ring is
-; exactly 1,024 frames, so it is read before this call's input goes in). Then: 8 forward passes
-; (64 units), radix-4 (8), bins (35), radix-4 (8), 8 inverse passes (64), overlap-add of the first
-; three quarters (6), idle. Latency {LATENCY} samples (N + one hop of work). After init the first 3 calls
+; job is fixed to the first call of the hop: the knobs and the first copy-in unit (the input ring is
+; exactly 1,024 frames: the oldest points are read before this call's input goes over them; the
+; copy-in units come first and run far ahead of the input). Units: copy-in of the first half (8, the
+; first in that call), the previous frame's last half written into the overlap ring at OJ = ORP + 1,024
+; words (those slots played during the last hop; they play from the next) (8), copy-in of the second half
+; (8; it overwrites that half of the work buffer), 8 forward passes (64), radix-4 (16), bins (66),
+; radix-4 (16), 8 inverse passes (64), overlap-add of the first half at OJ (8), idle.
+; Latency {LATENCY} samples (N + one hop of work). After init the first 5 calls
 ; clear the buffers and fill the tables (the shared window is not zero at boot); the audio passes dry.
 ; The unit to run next is an address in the r7 block (jsr (r1)); a unit returns its weight in x0.
 ; Calls of other than 16 frames are granted in proportion (the stock dispatcher splits blocks).
 ;
 ; Per call, after the work: MIX slews 1/128 a call (0 = the block is not touched); the tilt's
 ; coefficients follow the knob (1/32 of the way a call); then each side's 16 frames: input into the
-; ring, wet from the overlap ring through the tilt, x 8/3, + dry x (1 - mix), saturating.
+; ring, wet from the overlap ring through the tilt, x {HR:g}, + dry x (1 - mix), saturating.
 ; Uses r0-r6, n0-n6, m0-m6 (left linear), up to 3 levels of the hardware stack below its caller's
 ; (jsr unit, bsr, do / nested do). An interrupt taken inside finds m0-m6 possibly modulo.
 ;
 ; Y memory, {MEM_WORDS} words from the base (X:$213 -> word -> base; must be a multiple of $800), Y only:
-;   +$0000 twiddles: 512 x (cos, sin)(pi k / 512), also the Hann window (w = (1 - cos) / 2)
-;   +$0400 random unit phasors, 512 x (re, im)          (modulo 1024)
+;   +$0000 twiddles: 512 x (cos, sin)(pi k / 512)
+;   +$0400 random phasors / sqrt 2, {NPH} x (re, im)     (modulo {2 * NPH})
+;   +$0600 window, w(0..511) (the second half read backwards)
 ;   +$0800 FFT work, 1024 x (re = L, im = R)
 ;   +$1000 input ring, 1024 x (L, R)                    (modulo 2048)
-;   +$1800 overlap ring, 1024 x (L, R), wet x 3/8        (modulo 2048)
+;   +$1800 overlap ring, 1024 x (L, R), wet / {HR:g}           (modulo 2048)
 ;   +$2000 H, 512 x (left, right) in pair order
-; Scale: copy-in is x w / 2, the forward FFT / 1024, a slot is 2 X / 1024 (full-scale sine: 1/4);
-; the bins leave at 1/8 of that (18 dB of room for the wash in the inverse FFT and the overlap ring).
+; Scale: copy-in is x w / 2, the forward FFT / 1024, a slot is 2 X / 1024 (full-scale sine: {SLOT_FS:.4f});
+; the bins leave at 1/8 of that (about 16 dB of room for the wash in the inverse FFT and the overlap ring).
 ;
 ; r7: {' '.join(f'{i:02x} {n}' for n, i in S.items())}
 '''
@@ -700,7 +748,7 @@ sqwet:
         move    #>$7fffff,a
         sub     x0,a
         move    a1,{{CD}}
-        move    {q(2 / 3)},x1
+        move    {q(HR / 2 ** (2 + XSH))},x1
         mpy     x1,x0,a
         move    a,x0
         move    {{TAUS}},a
@@ -776,58 +824,30 @@ sqchj:
         rts
 ''')
     # ---------------------------------------------------------------- the start of a hop's job
-    T('''
+    T(f'''
 sqjob:
         bsr     >sqhop
         move    #>2047,m5
-        move    {ORP},r5
-        move    #>512,n5
-        move    {WKB},r2
-        move    (r5)-n5
-        move    #>1536,n2
-        move    {BASE},r3
-        move    (r2)+n2
-        move    #>512,n3
-        nop
-        move    (r3)+n3
-        move    #2,n3
-        do      #>$100,>sqjlq
-''')
-    L.extend(LASTQ)
-    T('''
-sqjlq:
-        move    {ORP},r5
+        move    {{ORP}},r5
+        move    #>{2 * HOP},n5
         nop
         move    (r5)+n5
-        move    r5,{OJ}
+        move    r5,{{OJ}}
         move    #>$ffffff,m5
-        move    #>2047,m4
-        move    {IRP},r4
-        move    {WKB},r2
-        move    {BASE},r3
-        move    #>$200000,y1
-        do      #>$200,>sqjca
-''')
-    L.extend(cin('-'))
-    T('''
-sqjca:
-        move    {BASE},r3
-        do      #>$200,>sqjcb
-''')
-    L.extend(cin(''))
-    T(f'''
-sqjcb:
-        move    #>$ffffff,m4
-        move    #>1024,x0
-        move    #>2,x1
-        move    x0,{{H2}}
-        move    x1,{{TSW}}
-        bsr     >sqpset
-        move    #>sqfwu,r1
+        move    {{IRP}},a
+        move    a1,{{CIP}}
+        move    {{WKB}},a
+        move    a1,{{OW}}
+        move    {{BASE}},a
+        add     #>{WT},a
+        move    a1,{{OT}}
+        move    #>{N // 2 // OLP},a
+        move    a1,{{OCNT}}
+        move    #>sqcau,r1
         move    r1,{{UADDR}}
         move    #>{-(W_MAND + BIAS) & 0xffffff},a
         move    a1,{{BUDG}}
-        rts
+        bra     >sqcau
 ''')
     # ---------------------------------------------------------------- the knobs, once a hop
     T(f'''
@@ -865,6 +885,14 @@ sqhpa:
         beq     >sqhpb
         move    {q(KSMR)},y0
         mpy     y0,x0,a
+        move    x0,b
+        sub     #>${SMR_KNEE << 16:06x},b
+        blt     >sqhpe
+        asl     b
+        move    b,x1
+        move    {q(KSMR2)},y0
+        mac     x1,y0,a
+sqhpe:
         bsr     >sqexp
         move    b,x0
         move    {q(E0)},y0
@@ -916,7 +944,7 @@ sqhpd:
         move    a0,x0
         move    x0,a
         lsr     #13,a
-        and     #>$3fe,a
+        and     #>$1fe,a
         move    {{RPB}},x1
         add     x1,a
         move    a1,{{R5P}}
@@ -925,7 +953,7 @@ sqhpd:
         move    a0,x0
         move    x0,a
         lsr     #13,a
-        and     #>$3fc,a
+        and     #>$1fc,a
         add     #>1,a
         move    a1,{{N5}}
         mpy     y0,x0,a
@@ -933,7 +961,7 @@ sqhpd:
         move    a0,x0
         move    x0,a
         lsr     #13,a
-        and     #>$3fe,a
+        and     #>$1fe,a
         add     x1,a
         add     #>1,a
         move    a1,{{R6P}}
@@ -942,7 +970,7 @@ sqhpd:
         move    a0,x0
         move    x0,a
         lsr     #13,a
-        and     #>$3fc,a
+        and     #>$1fc,a
         add     #>3,a
         move    a1,{{N6}}
         mpy     y0,x0,a
@@ -1162,10 +1190,10 @@ sqbnj:
         move    r1,{UADDR}
         rts
 sqbin:
-        move    #>1023,m5
-        move    #>1023,m6
+        move    #>NPHM,m5
+        move    #>NPHM,m6
         move    {BREM},a
-        move    #>16,x0
+        move    #>BPAIRQ,x0
         cmp     x0,a
         tgt     x0,a
         move    a1,r4
@@ -1189,7 +1217,7 @@ sqbnm:
         move    a1,n6
 sqbng:
         do      r4,>sqbnz
-''')
+'''.replace('BPAIRQ', str(BPAIR)).replace('NPHM', str(2 * NPH - 1)))
     L.extend(PAIR)
     T(f'''
 sqbnz:
@@ -1230,6 +1258,22 @@ sqbnx:
         move    x1,a
         asr     #2,a,a
         move    a1,{{BREM}}
+        move    x1,a
+        cmp     #>{N},a
+        bne     >sqbnw
+        move    {{RPB}},y1
+        move    {{R5P}},a
+        sub     y1,a
+        add     #>{2 * PH_SKEW},a
+        and     #>{2 * NPH - 1},a
+        add     y1,a
+        move    a1,{{R5P}}
+        move    {{R6P}},a
+        sub     y1,a
+        add     #>{2 * PH_SKEW},a
+        and     #>{2 * NPH - 1},a
+        add     y1,a
+        move    a1,{{R6P}}
 sqbnw:
         move    #>{W_PAIR},y0
         mpy     y0,x0,a
@@ -1255,31 +1299,32 @@ sqini:
 ''')
     fftunit('sqiv', DIT, W_INV, 'sqinx')
     fftunita('sqia', DIT, W_INA, 'sqinx')
-    T('''
+    T(f'''
 sqinx:
-        move    {H2},a
+        move    {{H2}},a
         asl     a
         move    a1,x0
         move    x0,a
         cmp     #>1025,a
         blt     >sqiny
-        move    {OJ},a
-        move    a1,{OP}
-        move    {WKB},a
-        move    a1,{OW}
-        move    {BASE},a
-        move    a1,{OT}
-        move    #>4,a
-        move    a1,{OCNT}
+        move    {{OJ}},a
+        move    a1,{{OP}}
+        move    {{WKB}},a
+        move    a1,{{OW}}
+        move    {{BASE}},a
+        add     #>{WT},a
+        move    a1,{{OT}}
+        move    #>{(N - HOP) // OLP},a
+        move    a1,{{OCNT}}
         move    #>sqoau,r1
-        move    r1,{UADDR}
+        move    r1,{{UADDR}}
         rts
 sqiny:
-        move    x0,{H2}
-        move    {TSW},a
+        move    x0,{{H2}}
+        move    {{TSW}},a
         asr     a
         move    a1,x1
-        move    x1,{TSW}
+        move    x1,{{TSW}}
         bsr     >sqpset
         move    #>sqivu,r1
         move    #>sqiau,r2
@@ -1287,8 +1332,75 @@ sqiny:
         beq     >sqinz
         move    r2,r1
 sqinz:
-        move    r1,{UADDR}
+        move    r1,{{UADDR}}
         rts
+''')
+    # ---------------------------------------------------------------- windowed units: 64 pairs of points each
+    # copy-in (input ring -> WK, x w / 2), the previous frame's last half (WK -> overlap ring, x 2 w, written),
+    # overlap-add of the new frame's first half (WK -> overlap ring, x 2 w, added)
+
+    def wunit(name, pair, ring, ptr, weight, after):
+        T(f'''
+{name}u:
+        move    #>2047,m{ring}
+        move    {{{ptr}}},r{ring}
+        move    {{OW}},r2
+        move    {{OT}},r3
+        do      #>{OLP},>{name}z
+''')
+        L.extend(pair)
+        T(f'''
+{name}z:
+        move    #>$ffffff,m{ring}
+        move    r{ring},{{{ptr}}}
+        move    r2,{{OW}}
+        move    r3,{{OT}}
+        move    {{OCNT}},a
+        sub     #>1,a
+        move    a1,{{OCNT}}
+        tst     a
+        bne     >{name}b
+''')
+        T(after)
+        T(f'''
+{name}b:
+        move    #>{weight},x0
+        rts
+''')
+
+    # the second halves read the window table down from its last entry: w(N/2 + m) = w(N/2 - 1 - m)
+    second_half = f'''
+        move    {{WKB}},a
+        add     #>{N},a
+        move    a1,{{OW}}
+        move    {{BASE}},a
+        add     #>{WT + N // 2 - 1},a
+        move    a1,{{OT}}
+        move    #>{N // 2 // OLP},a
+        move    a1,{{OCNT}}
+'''
+    wunit('sqca', CIN('+'), 4, 'CIP', W_CIN, second_half + '''
+        move    {OJ},a
+        move    a1,{OP}
+        move    #>sqlqu,r1
+        move    r1,{UADDR}
+''')
+    wunit('sqlq', LASTQ, 5, 'OP', W_LQ, second_half + '''
+        move    #>sqcbu,r1
+        move    r1,{UADDR}
+''')
+    wunit('sqcb', CIN('-'), 4, 'CIP', W_CIN, f'''
+        move    #>{N},x0
+        move    #>2,x1
+        move    x0,{{H2}}
+        move    x1,{{TSW}}
+        bsr     >sqpset
+        move    #>sqfwu,r1
+        move    r1,{{UADDR}}
+''')
+    wunit('sqoa', OLA, 5, 'OP', W_OLA, '''
+        move    #>sqidl,r1
+        move    r1,{UADDR}
 ''')
     # ---------------------------------------------------------------- pass set-up: x0 = 2h (words), x1 = twiddle step (words)
     T('''
@@ -1351,50 +1463,6 @@ sqpsc:
         rts
 ''')
 
-    # ---------------------------------------------------------------- overlap-add, first three quarters
-
-    def olaunit(name, sign, after):
-        T(f'''
-{name}u:
-        move    #>2047,m5
-        move    {{OP}},r5
-        move    {{OW}},r2
-        move    {{OT}},r3
-        move    #2,n3
-        do      #>{OLP},>{name}z
-''')
-        L.extend(ola(sign))
-        T(f'''
-{name}z:
-        move    #>$ffffff,m5
-        move    r5,{{OP}}
-        move    r2,{{OW}}
-        move    r3,{{OT}}
-        move    {{OCNT}},a
-        sub     #>1,a
-        move    a1,{{OCNT}}
-        tst     a
-        bne     >{name}b
-''')
-        T(after)
-        T(f'''
-{name}b:
-        move    #>{W_OLA},x0
-        rts
-''')
-
-    olaunit('sqoa', '-', '''
-        move    {BASE},a
-        move    a1,{OT}
-        move    #>2,a
-        move    a1,{OCNT}
-        move    #>sqobu,r1
-        move    r1,{UADDR}
-''')
-    olaunit('sqob', '', '''
-        move    #>sqidl,r1
-        move    r1,{UADDR}
-''')
     # ---------------------------------------------------------------- boot: clear, twiddles, random phasors
     T(f'''
 sqbta:
@@ -1449,7 +1517,8 @@ sqbtc:
         lua     (r1+$1),r2
         move    {{RNG}},x0
         move    #>${LCG:06x},y0
-        do      #>$200,>sqbcz
+        move    {q(PHS)},y1
+        do      #>{NPH},>sqbcz
         mpy     y0,x0,a
         asr     a
         move    a0,x0
@@ -1458,12 +1527,14 @@ sqbtc:
         and     #>$3fe,a
         move    a1,n1
         move    a1,n2
-        move    y:(r1+n1),a
+        move    y:(r1+n1),x1
+        mpyr    y1,x1,a
         jclr    #23,x0,>sqbcp
         neg     a
 sqbcp:
         move    a,y:(r3)+
-        move    y:(r2+n2),a
+        move    y:(r2+n2),x1
+        mpyr    y1,x1,a
         jclr    #23,x0,>sqbcq
         neg     a
 sqbcq:
@@ -1472,6 +1543,24 @@ sqbcq:
         nop
 sqbcz:
         move    x0,{{RNG}}
+        move    #>sqbtd,r1
+        move    r1,{{UADDR}}
+        bra     >sqidl
+sqbtd:
+        move    {{BASE}},r1
+        move    {{BASE}},a
+        add     #>{WT},a
+        move    a1,r4
+        bsr     >sqwin
+        move    r1,{{OW}}
+        move    r4,{{OT}}
+        move    #>sqbte,r1
+        move    r1,{{UADDR}}
+        bra     >sqidl
+sqbte:
+        move    {{OW}},r1
+        move    {{OT}},r4
+        bsr     >sqwin
         move    #>1,a
         move    a1,{{READY}}
         move    #>{HOP},a
@@ -1486,6 +1575,43 @@ sqidl:
         move    {{BUDG}},a
         add     #>1,a
         move    a1,x0
+        rts
+''')
+    # the window table, half of it a call: w(n) = sin(pi/2 u), u = (1 - cos(pi (2n + 1) / N)) / 2 (the cosine
+    # from twiddle n turned by pi / N), the sine by its Taylor series in u to the 11th power (halved, then x 2)
+    d = math.pi / N
+    co = [(math.pi / 2) ** k / math.factorial(k) * (-1) ** (k // 2) / 2 for k in (1, 3, 5, 7, 9, 11)]
+
+    def addc(c):
+        return f'add     {q(c)},a' if c >= 0 else f'sub     {q(-c)},a'
+    T(f'''
+sqwin:
+        do      #>{N // 4},>sqwnz
+        move    {q(math.cos(d))},y0
+        move    {q(math.sin(d))},y1
+        move    y:(r1)+,x0
+        move    y:(r1)+,x1
+        mpy     y0,x0,a
+        macr    -y1,x1,a
+        asr     a
+        neg     a
+        add     #>$400000,a
+        move    a,x0
+        mpy     x0,x0,a
+        move    a,y0
+        move    {q(co[5])},x1
+''')
+    for c in reversed(co[:5]):
+        T(f'''
+        mpy     x1,y0,a
+        {addc(c)}
+        move    a,x1
+''')
+    T('''
+        mpy     x1,x0,a
+        asl     a
+        move    a,y:(r4)+
+sqwnz:
         rts
 ''')
     return L

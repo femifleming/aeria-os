@@ -1,7 +1,7 @@
 """SMEAR (spectral) gate: tools/run.sh python3 /aeria/spectral/test.py   [quick]
 
 Everything runs in dsp_host (the dsp56300 emulator) on the assembled effect; nothing here is hardware.
-`quick` skips the 120 s stability render.
+`quick` skips the 3 x 8 s stability render. Every render is a few seconds (the whole gate is light).
 """
 import array
 import cmath
@@ -121,6 +121,20 @@ def chord(n, amp=0.15, fr=(220.0, 277.18, 329.63, 440.0, 554.37)):
     return [round(FS * amp * sum(math.sin(2 * math.pi * f * i / SR + k) for k, f in enumerate(fr))) for i in range(n)]
 
 
+def fit_sine(x, f, a, b):
+    """least-squares sine at f over x[a:b] -> (its amplitude, rms of the rest), FS units."""
+    w = 2 * math.pi * f / SR
+    S = [math.sin(w * t) for t in range(a, b)]
+    C = [math.cos(w * t) for t in range(a, b)]
+    y = [v / FS for v in x[a:b]]
+    ss, cc, sc = sum(u * u for u in S), sum(u * u for u in C), sum(u * v for u, v in zip(S, C))
+    ys, yc = sum(u * v for u, v in zip(y, S)), sum(u * v for u, v in zip(y, C))
+    det = ss * cc - sc * sc
+    ka, kb = (ys * cc - yc * sc) / det, (yc * ss - ys * sc) / det
+    res = sum((v - ka * u - kb * c) ** 2 for v, u, c in zip(y, S, C)) / len(y)
+    return math.hypot(ka, kb), math.sqrt(res)
+
+
 def goertzel(x, f):
     return A.goertzel(x, f)
 
@@ -214,16 +228,23 @@ w24 = [(v - (1 << 24) if v & 0x800000 else v) / 2 ** 23 for v in (struct.unpack_
                                                                  for i in range(G.WK))]
 twe = max(max(abs(w24[2 * k] - math.cos(math.pi * k / 512)), abs(w24[2 * k + 1] - math.sin(math.pi * k / 512)))
           for k in range(512))
-rp = [(w24[G.RP + 2 * k], w24[G.RP + 2 * k + 1]) for k in range(512)]
+rp = [(w24[G.RP + 2 * k], w24[G.RP + 2 * k + 1]) for k in range(G.NPH)]
+wt = w24[G.WT:G.WT + G.N // 2]
+wte = max(abs(wt[n] - G.win(n)) for n in range(G.N // 2))
+cola = max(abs(wt[n] ** 2 + wt[G.N // 2 - 1 - n] ** 2 - 1) for n in range(G.N // 2))
 mag = [math.hypot(*p) for p in rp]
 quad = collections.Counter(int((math.atan2(p[1], p[0]) + math.pi) / (math.pi / 2)) % 4 for p in rp)
 rep.check('twiddle table (filled at boot by angle addition from 9 constants): max error < 2e-6',
           twe < 2e-6, f'{twe:.2e} (cos and sin of pi k / 512, k = 0..511)')
-rep.check('random phasor table: unit magnitude, all four quadrants, mean vector small',
-          0.9999 < min(mag) and max(mag) < 1.0001 and min(quad.values()) > 90
-          and math.hypot(sum(p[0] for p in rp), sum(p[1] for p in rp)) / 512 < 0.12,
+rep.check('window table (Vorbis, filled at boot from the twiddles and a Taylor series): max error < 2e-6, and '
+          'power-complementary (w(n)^2 + w(n + 512)^2 = 1 within 4e-6: the overlap-add is constant)',
+          wte < 2e-6 and cola < 4e-6, f'error {wte:.2e}, |w(n)^2 + w(n + 512)^2 - 1| <= {cola:.2e} (512 entries, n = 0..511)')
+rep.check(f'random phasor table: {G.NPH} entries of magnitude {G.PHS:.6f} (1 / sqrt 2: the wash is sqrt 2 x the magnitude '
+          'it replaces), all four quadrants, mean vector small',
+          0.9999 * G.PHS < min(mag) and max(mag) < 1.0001 * G.PHS and min(quad.values()) > G.NPH // 6
+          and math.hypot(sum(p[0] for p in rp), sum(p[1] for p in rp)) / G.NPH < 0.18 * G.PHS,
           f'|u| {min(mag):.6f}..{max(mag):.6f}, quadrants {[quad[i] for i in range(4)]}, '
-          f'|mean| {math.hypot(sum(p[0] for p in rp), sum(p[1] for p in rp)) / 512:.3f}')
+          f'|mean| {math.hypot(sum(p[0] for p in rp), sum(p[1] for p in rp)) / G.NPH / G.PHS:.3f} of it')
 
 # ======================================================================= 2. pass-through
 if sec_on('2'):
@@ -256,38 +277,59 @@ if sec_on('2'):
     rep.check('DC (left) and Nyquist (right) pass (bins 0 and N/2 take the live gain only)',
               abs(L[-1] / (FS // 4) - 1) < 1e-3 and abs(abs(R[-1]) / (FS // 4) - 1) < 1e-3 and R[-1] * R[-2] < 0,
               f'{L[-1] / (FS // 4):.5f}, {abs(R[-1]) / (FS // 4):.5f} of the input')
+    # the sine window (analysis x synthesis = sin^2, 50 % overlap) is constant overlap-add: a steady sine comes back at
+    # its level with no ripple at the hop rate. Gain of each 64-sample block (least squares against the delayed
+    # input), over 2 s; grouped by the block's position in the hop.
+    n = (3 * SR + 64) // 16 * 16
+    for f, amp in ((997.0, 0.5), (151.3, 0.7)):
+        x = A.sine(f, amp, n)
+        L, R, m = run('sp_cola', P(), x)
+        gs = []
+        for b0 in range(SR, n - 64, 64):
+            num = sum(L[i] * x[i - D] for i in range(b0, b0 + 64))
+            den = sum(x[i - D] ** 2 for i in range(b0, b0 + 64))
+            gs.append((b0 % G.HOP // 64, num / den))
+        by = [[g for k, g in gs if k == j] for j in range(G.HOP // 64)]
+        pos = [sum(v) / len(v) for v in by]
+        rip = db(max(g for _, g in gs)) - db(min(g for _, g in gs))
+        lvl = db(sum(g for _, g in gs) / len(gs))
+        rep.check(f'COLA: a steady {f:g} Hz sine ({amp} FS) at MIX 127, SMR 0, FRZ 0 comes back at its level with no ripple at '
+                  f'the hop rate (gain against the delayed input of each 64-sample block over 2 s: level within 0.01 dB, '
+                  f'spread under 0.005 dB; Hann x Hann at this 50 % overlap would swing 6 dB)', abs(lvl) < 0.01 and rip < 0.005,
+                  f'level {lvl:+.5f} dB, block gains spread {rip:.5f} dB; mean by position in the hop '
+                  + ' '.join(f'{db(v):+.5f}' for v in pos) + ' dB')
 
 # ======================================================================= 3. freeze
 if sec_on('3'):
-    T = 12.5
+    T = 7.5
     n = int(T * SR) // 16 * 16
-    t_off, t_rel = int(1.5 * SR), int(11.5 * SR) // 16
+    t_off, t_rel = int(1.5 * SR), int(6.5 * SR) // 16
     x = chord(n)
     xs = [v if i < t_off else 0 for i, v in enumerate(x)]
     ev = [(0, P()), (t_frz, P(FRZ=127)), (t_rel, P())]
     L, R, m = run('sp_fz', P(), xs, events=ev)
-    lv = [db(rms(L[k * SR:(k + 1) * SR])) for k in range(2, 11)]
+    lv = [db(rms(L[k * SR:(k + 1) * SR])) for k in range(2, 6)]
     live = db(rms(L[SR // 2:SR]))
     hop = SR / G.HOP
-    near = [f for f in (120, 128, 136, 144, 152, 160, 184, 192, 200, 208, 216, 224)]
-    am = am_lines(L[2 * SR:10 * SR], [hop] + near)
-    am2 = am_lines(L[2 * SR:10 * SR], [2 * hop])
+    near = [round(hop * r) for r in (0.62, 0.66, 0.7, 0.74, 0.78, 0.82, 1.18, 1.22, 1.26, 1.3, 1.34, 1.38)]
+    am = am_lines(L[2 * SR:6 * SR], [hop] + near)
+    am2 = am_lines(L[2 * SR:6 * SR], [2 * hop])
     nb = sorted(am[1:])[len(near) // 2]
-    rep.check('freeze: a chord (5 sines, -12.5 dBFS), FRZ 127 at 1 s, input silenced at 1.5 s: the output goes on for 10 s '
+    rep.check('freeze: a chord (5 sines, -12.5 dBFS), FRZ 127 at 1 s, input silenced at 1.5 s: the output goes on for 5 s '
               'at a steady level (1 s windows within 1 dB of each other, within 2 dB of the live level)',
               max(lv) - min(lv) < 1.0 and abs(sum(lv) / len(lv) - live) < 2.0,
               f'live {live:.2f} dBFS; frozen, each second from 2 s: ' + ' '.join(f'{v:.2f}' for v in lv)
               + f' (spread {max(lv) - min(lv):.2f} dB, first to last {lv[-1] - lv[0]:+.2f} dB)')
-    rep.check('freeze: no pulsing at the hop rate -- the envelope (rms of 32 samples, 8 s) has no line at 172.3 Hz above '
-              'its own random modulation at 120..224 Hz (+6 dB allowed)', am[0] < 2 * nb,
+    rep.check(f'freeze: no pulsing at the hop rate -- the envelope (rms of 32 samples, 4 s) has no line at {hop:.1f} Hz above '
+              f'its own random modulation at {near[0]}..{near[-1]} Hz (+6 dB allowed)', am[0] < 2 * nb,
               f'modulation depth at the hop rate {db(am[0]):.1f} dB (at twice the hop rate {db(am2[0]):.1f} dB); '
               f'median of 12 nearby frequencies {db(nb):.1f} dB, largest {db(max(am[1:])):.1f} dB')
     a0 = t_rel * 16
     st_frozen = maxstep(L, 2 * SR, a0)
     st_rel = maxstep(L, a0, n)
-    rep.check('freeze released into silence (FRZ 127 -> 0 at 11.5 s, SMR 0): no step larger than the frozen wash makes itself, '
+    rep.check('freeze released into silence (FRZ 127 -> 0 at 6.5 s, SMR 0): no step larger than the frozen wash makes itself, '
               'and the output ends at exactly 0', st_rel <= st_frozen * 1.05 and max(abs(v) for v in L[-2000:]) == 0,
-              f'largest step {st_rel:.4f} FS after the release, {st_frozen:.4f} FS in the 9.5 s frozen before it; '
+              f'largest step {st_rel:.4f} FS after the release, {st_frozen:.4f} FS in the 4.5 s frozen before it; '
               f'-60 dB reached {next((i for i in range(a0, n - 64) if max(abs(v) for v in L[i:i + 64]) < 1e-3 * FS), n) - a0} samples after the knob')
     ev = [(0, P()), (t_frz, P(FRZ=127)), (3 * SR // 16, P())]
     n4 = 5 * SR // 16 * 16
@@ -307,7 +349,7 @@ if sec_on('3'):
 # ======================================================================= 4. smear
 if sec_on('4'):
     rows, ok = [], True
-    for v, secs in ((60, 5), (80, 7), (100, 9), (127, 14)):
+    for v, secs in ((40, 4), (60, 5), (80, 6)):
         n = secs * SR // 16 * 16
         x = [0] * n
         for i in range(2000, SR, 4410):
@@ -326,30 +368,62 @@ if sec_on('4'):
         rows.append(f'SMR {v}: {t60:.2f} s (law {want:.2f} s, {pts[0][1]:.1f} dBFS at 1.25 s)')
     rep.check('smear: ten clicks (0.5 FS, 10 a second) then silence; the wash rings on and decays at the knob\'s time '
               '(-60 dB time from the slope of its level from 1.25 s down to -85 dBFS, within 10 % of the law)', ok, '; '.join(rows))
+    # the long times: the held magnitudes H themselves (dumped after the same input rendered to two lengths, a whole
+    # number of hops apart) decay by (1 - e) a hop; the sum over the bins gives e, so minutes are measured in seconds
+    hd = '/aeria/.build/sp_hd.dump'
+    n1 = (3 * SR // 2) // G.HOP * G.HOP
+    hops = 2 * SR // G.HOP
+    n2 = n1 + hops * G.HOP
+    xb = A.noise(n2, 0.5, 51)
+    xb = [v if i < SR // 2 else 0 for i, v in enumerate(xb)]
+    rows, ok = [], True
+
+    def hsum(v, nn):
+        run('sp_hd', P(SMR=v), xb[:nn], extra=['-dumpy', f'{0x4000 + G.HH:x},{0x4000 + G.END:x},{hd}'])
+        raw_ = Path(hd).read_bytes()
+        return [struct.unpack_from('<I', raw_, 4 * i)[0] & 0xffffff for i in range(1024)]
+
+    for v in (80, 100, 110, 120, 127):
+        h1, h2 = hsum(v, n1), hsum(v, n2)
+        sel = [i for i in range(1024) if h1[i] > 4096]
+        ratio = sum(h2[i] for i in sel) / sum(h1[i] for i in sel)
+        t60, want = -3 * G.HOP * hops / SR / math.log10(ratio), G.smr_t60(v)
+        ok &= abs(t60 / want - 1) < 0.03 and len(sel) > 500
+        rows.append(f'SMR {v}: {t60:.1f} s (law {want:.1f} s, {len(sel)} bins, H x {ratio:.6f} in {hops} hops)')
+    rep.check(f'smear, long times: the held magnitudes after 0.5 s of noise (0.5 FS), dumped {hops} hops apart in the silence, '
+              f'decay at the law within 3 % (log 1 - e = log2(200) v / 127 up to {G.SMR_KNEE}, then steeper to 2^-{G.Y_TOP:g} '
+              f'at 127)', ok, '; '.join(rows))
     n = 3 * SR // 16 * 16
     x = [0] * n
     for i in range(2000, SR, 4410):
         x[i] = FS // 2
     L, R, m = run('sp_sm0', P(SMR=0), x)
-    rep.check('SMR 0: no sustain (the clicks pass, nothing rings: silence 1,280 samples after the last one\'s frame ends)',
+    rep.check(f'SMR 0: no sustain (the clicks pass, nothing rings: silence {D:,} samples after the last one\'s frame ends)',
               max(abs(v) for v in L[SR + 4000:]) == 0, f'peak after 1.09 s: {max(abs(v) for v in L[SR + 4000:])} LSB')
-    n = 8 * SR // 16 * 16
+    n = 5 * SR // 16 * 16
     xn = A.noise(n, 0.1, 41)
     rows = []
     for v in (40, 80, 127):
         L, R, m = run('sp_smn', P(SMR=v), xn)
-        rows.append(f'SMR {v}: {db(rms(L[6 * SR:])) - db(rms(xn[6 * SR:])):+.1f} dB')
+        rows.append(f'SMR {v}: {db(rms(L[4 * SR:])) - db(rms(xn[4 * SR:])):+.1f} dB')
     rep.note('smear on steady white noise (0.1 FS): the hold keeps every bin\'s recent peak, so the wet is louder than the input',
-             ', '.join(rows) + ' after 6 s (a steady sine is not: see the next line)')
-    n = 4 * SR // 16 * 16
-    s440 = A.sine(440.0, 0.25, n)
-    L, R, m = run('sp_sm1', P(SMR=80), s440)
-    tone = goertzel(L[2 * SR:4 * SR], 440.0)
-    resid = math.sqrt(max(rms(L[2 * SR:4 * SR]) ** 2 - tone ** 2 / 2, 0))
-    rep.check('SMR 80 on a steady 440 Hz sine (0.25 FS): the tone passes within 0.1 dB and the wash it adds stays under -60 dB '
-              '(the two-segment magnitude estimate, within 1.2 %; with max + 0.375 min it was -31.8 dB)',
-              abs(db(tone / 0.25)) < 0.1 and db(resid / (0.25 / math.sqrt(2))) < -60,
-              f'tone {db(tone / 0.25):+.2f} dB, everything else {db(resid / (0.25 / math.sqrt(2))):.1f} dB re the tone')
+             ', '.join(rows) + ' after 4 s (a steady sine is not: see the next line)')
+    # a steady tone: faded in over 0.3 s (an abrupt start splashes over every bin, and at SMR 80 the hold keeps
+    # that for its 5.6 s), measured from 2 s; the hold must not turn the estimate's ripple with the phase, or
+    # the window's leakage (which wobbles with the phase of a steady tone), into a wash
+    n = 7 * SR // 2 // 16 * 16
+    rows, ok = [], True
+    for f, lim in ((440.0, -60), (1000.0, -60), (3000.0, -60), (150.0, None)):
+        x = [round(v * min(1.0, i / (0.3 * SR)) ** 2) for i, v in enumerate(A.sine(f, 0.25, n))]
+        L, R, m = run('sp_sm1', P(SMR=80), x)
+        tone, resid = fit_sine(L, f, 2 * SR, n)
+        wash = db(resid / (0.25 / math.sqrt(2)))
+        if lim is not None:
+            ok &= abs(db(tone / 0.25)) < 0.1 and wash < lim
+        rows.append(f'{f:g} Hz: tone {db(tone / 0.25):+.2f} dB, everything else {wash:.1f} dB re the tone' + ('' if lim else ' (info)'))
+    rep.check('SMR 80 on a steady sine (0.25 FS, faded in): the tone passes within 0.1 dB and the wash it adds stays under -60 dB '
+              'at 440 Hz, 1 kHz and 3 kHz (three-segment magnitude estimate within 0.5 %, Vorbis window; the 4x Hann SMEAR measured '
+              '-72 / -77 / -56 dB here, and -50 dB at 150 Hz, where the tone\'s mirror image beats in its low bins)', ok, '; '.join(rows))
 
 # ======================================================================= 5. gate
 if sec_on('5'):
@@ -379,14 +453,15 @@ if sec_on('5'):
     for lvl in (-30, -50):
         amp = 10 ** (lvl / 20)
         s = A.sine(20 * SR / 1024, amp, 2 * SR // 16 * 16)
+        cand = [gv for gv in range(1, 128) if lvl - 8 <= G.gate_db(gv) <= lvl + 8]
+        gone = lambda gv: rms(run('sp_gth', P(GATE=gv), s)[0][SR:]) < 0.05 * amp
         first = None
-        for gv in range(1, 128):
-            if G.gate_db(gv) < lvl - 8 or G.gate_db(gv) > lvl + 8:
-                continue
-            L, R, m = run('sp_gth', P(GATE=gv), s)
-            if rms(L[SR:]) < 0.05 * amp:
-                first = gv
-                break
+        if gone(cand[-1]) and not gone(cand[0]):          # bisect: the gate removes the sine from some knob on
+            lo, hi = cand[0], cand[-1]
+            while hi - lo > 1:
+                mid = (lo + hi) // 2
+                lo, hi = (lo, mid) if gone(mid) else (mid, hi)
+            first = hi
         ok &= first is not None and abs(G.gate_db(first) - lvl) < 3
         rows.append(f'a {lvl} dBFS sine (bin 20) is removed from GATE {first} = {G.gate_db(first):.1f} dBFS')
     rep.check('gate threshold law (log, 0.476 dB a step, 127 = -20 dBFS peak of a sine): the knob that first removes a sine '
@@ -481,7 +556,7 @@ if sec_on('standard'):
 
 # ======================================================================= 8. stability, knob moves
 if sec_on('8'):
-    n = 6 * SR // 16 * 16
+    n = 3 * SR // 16 * 16
     s440 = A.sine(440.0, 0.25, n)
     base = dict(SMR=80, FRZ=0, GATE=0, WIDE=100, TILT=64, MIX=127)
     ref = {}
@@ -496,7 +571,7 @@ if sec_on('8'):
         nb = n // 16
         for b in range(nb):
             t = b / nb
-            v = round(127 * (1 - abs(2 * t - 1)))               # 0 -> 127 -> 0 over 6 s
+            v = round(127 * (1 - abs(2 * t - 1)))               # 0 -> 127 -> 0 over 3 s
             evs.append((b, P(**{**base, k: v})))
         Ls, Rs, _ = run('sp_ksw', evs[0][1], s440, events=evs)
         sw = max(maxstep(Ls, SR // 2, n), maxstep(Rs, SR // 2, n))
@@ -508,11 +583,11 @@ if sec_on('8'):
         ok &= good
         rows.append(f'{k}: sweep {sw:.4f}, jumps {jp:.4f} (static at 0: {st[0]:.4f}, at 127: {st[127]:.4f})' + ('' if good else ' <<'))
     rep.check('knob moves on a 440 Hz sine (0.25 FS; its own largest step is %.4f FS), SMR 80: each knob swept 0 -> 127 -> 0 '
-              'over 6 s, then jumped 0 <-> 127 every 0.5 s: no step beyond 1.15 x the larger of the two static settings (6 s each) '
+              'over 3 s, then jumped 0 <-> 127 every 0.5 s: no step beyond 1.15 x the larger of the two static settings (3 s each) '
               '+ a fifth of the sine\'s' % sine_step, ok, '; '.join(rows) + ' FS')
 
     if not QUICK:
-        seg = 40 * SR
+        seg = 8 * SR
         n = 3 * seg // 16 * 16
         rnd = random.Random(99)
         big = array.array('i', bytes(4 * n))
@@ -523,28 +598,23 @@ if sec_on('8'):
             big[i] = FS if (i // half) & 1 else -FS
         params = P(SMR=127, FRZ=0, GATE=20, WIDE=127, TILT=64, MIX=127)
         L, R, m = run('sp_long', params, big, extra=['-dumpy', f'{0x4000 + G.HH:x},{0x4000 + G.END:x},/aeria/.build/sp_h.dump'])
-        lv = [db(rms(L[k * SR:(k + 1) * SR])) for k in range(120)]
+        lv = [db(rms(L[k * SR:(k + 1) * SR])) for k in range(24)]
         hraw = Path('/aeria/.build/sp_h.dump').read_bytes()
         hh = [struct.unpack_from('<I', hraw, 4 * i)[0] & 0xffffff for i in range(1024)]
-        sil = [v for v in lv[42:80] if v > -85]
-        mono = all(b <= a + 0.05 for a, b in zip(lv[42:80], lv[43:80]))
-        mt_ = (len(sil) - 1) / 2
-        t60 = -60 / (sum((i - mt_) * (v - sum(sil) / len(sil)) for i, v in enumerate(sil)) / sum((i - mt_) ** 2 for i in range(len(sil))))
-        gone = next((k for k in range(42, 80) if lv[k] < -200), None)
-        dc = [abs(sum(L[k * SR:(k + 1) * SR]) / SR / FS) for k in (20, 60, 100)]
-        rep.check('120 s at SMR 127, WIDE 127, MIX 127: 40 s of 0.95 FS noise, 40 s of silence, 40 s of a full-scale 220 Hz '
-                  'square: the level follows the input (no growth within a section), the silence decays monotonically at the '
-                  'knob\'s 20 s, H stays a magnitude (0 <= H < 1/2), guard clean',
-                  max(lv[5:40]) - min(lv[5:40]) < 1.0 and mono and abs(t60 / 20 - 1) < 0.15 and max(lv[85:]) - min(lv[85:]) < 1.0
-                  and max(hh) < 0x400000 and m['stray'] == 0,
-                  f'noise section {min(lv[5:40]):.2f}..{max(lv[5:40]):.2f} dBFS (input {db(0.95 / math.sqrt(3)):.2f}: the held wash '
-                  f'adds to it and the sum clips), silence {sil[0]:.1f} -> {sil[-1]:.1f} dBFS in {len(sil) - 1} s (slope: -60 dB in '
-                  f'{t60:.1f} s; exactly 0 from second {gone}: H under 4 LSB makes no output), square section '
-                  f'{min(lv[85:]):.2f}..{max(lv[85:]):.2f} dBFS (input 0.00); largest H {max(hh) / 2 ** 23:.4f}; '
-                  f'samples at the rail: noise {sum(1 for v in L[5 * SR:40 * SR] if abs(v) >= FS) / (35 * SR) * 100:.2f} %, square '
-                  f'{sum(1 for v in L[85 * SR:] if abs(v) >= FS) / (35 * SR) * 100:.2f} %; dc {max(dc):.5f} FS')
+        sil = lv[10:16]
+        dc = [abs(sum(L[k * SR:(k + 1) * SR]) / SR / FS) for k in (4, 12, 20)]
+        rep.check('3 x 8 s at SMR 127, WIDE 127, MIX 127: 0.95 FS noise, silence, a full-scale 220 Hz square: the level follows '
+                  'the input (no growth within a section), the silence holds the wash (T60 %.0f min at 127: within 1 dB, no '
+                  'growth), H stays a magnitude (0 <= H < 1/2), guard clean' % (G.smr_t60(127) / 60),
+                  max(lv[2:8]) - min(lv[2:8]) < 1.0 and max(sil) - min(sil) < 1.0 and sum(sil[3:]) <= sum(sil[:3]) + 0.6
+                  and max(lv[18:]) - min(lv[18:]) < 1.0 and max(hh) < 0x400000 and m['stray'] == 0,
+                  f'noise section {min(lv[2:8]):.2f}..{max(lv[2:8]):.2f} dBFS (input {db(0.95 / math.sqrt(3)):.2f}: the held wash '
+                  f'adds to it and the sum clips), silence ' + ' '.join(f'{v:.2f}' for v in sil) + ' dBFS, square section '
+                  f'{min(lv[18:]):.2f}..{max(lv[18:]):.2f} dBFS (input 0.00); largest H {max(hh) / 2 ** 23:.4f}; '
+                  f'samples at the rail: noise {sum(1 for v in L[2 * SR:8 * SR] if abs(v) >= FS) / (6 * SR) * 100:.2f} %, square '
+                  f'{sum(1 for v in L[18 * SR:] if abs(v) >= FS) / (6 * SR) * 100:.2f} %; dc {max(dc):.5f} FS')
         del L, R
-        n = 3 * 10 * SR // 16 * 16
+        n = 3 * 4 * SR // 16 * 16
         seg = n // 3
         small = array.array('i', bytes(4 * n))
         for i in range(seg):
@@ -554,15 +624,16 @@ if sec_on('8'):
         rnd = random.Random(8)
         ev = [(b, [rnd.randrange(128) for _ in range(6)] + [0] * 6) for b in range(0, n // 16, 5)]
         L, R, m = run('sp_long2', params, small, events=ev)
-        lv = [db(rms(L[k * SR:(k + 1) * SR])) for k in range(30)]
-        rep.check('30 s of the same three sections with every knob random every 5 blocks: bounded, guard clean, no section '
-                  'louder than +12 dB over its input', max(lv[:10]) < db(0.95 / math.sqrt(3)) + 12 and max(lv[20:]) <= 0.01 and m['stray'] == 0,
-                  f'loudest second: noise {max(lv[:10]):.2f}, silence {max(lv[11:20]):.2f}, square {max(lv[20:]):.2f} dBFS')
+        lv = [db(rms(L[k * SR // 2:(k + 1) * SR // 2])) for k in range(24)]
+        rep.check('3 x 4 s of the same three sections with every knob random every 5 blocks: bounded, guard clean, no section '
+                  'louder than +12 dB over its input', max(lv[:8]) < db(0.95 / math.sqrt(3)) + 12 and max(lv[16:]) <= 0.01 and m['stray'] == 0,
+                  f'loudest half second: noise {max(lv[:8]):.2f}, silence {max(lv[9:16]):.2f}, square {max(lv[16:]):.2f} dBFS')
 
 # ======================================================================= 9. cost
 if sec_on('9'):
-    n = 10 * SR // 16 * 16
+    n = 3 * SR // 16 * 16
     xn = A.noise(n, 0.5, 31)
+    COST_MEAN = 600                # half the 4x-overlap SMEAR's 1,150 (it measured 1,092 mean, 1,165 worst call)
     rows, ok, worst_all, mean_all = [], True, 0, 0
     for name, pr, sig in (('defaults (SMR 80, WIDE 100, MIX 127), 0.5 FS noise', defaults, xn),
                           ('dearest (SMR 127 FRZ 64 GATE 100 WIDE 127 TILT 127 MIX 64), noise', dear, xn),
@@ -571,24 +642,26 @@ if sec_on('9'):
                           ('defaults, silence', defaults, [0] * n),
                           ('MIX 0 (dry: the transform still runs)', P(SMR=80, MIX=0), xn)):
         L, R, m = run('sp_cost', pr, sig)
-        ok &= m['mean'] <= 1150 and m['worst'] <= 1.15 * m['mean']
+        ok &= m['mean'] <= COST_MEAN and m['worst'] <= 1.15 * m['mean']
         worst_all, mean_all = max(worst_all, m['worst']), max(mean_all, m['mean'])
         rows.append(f"{name}: mean {m['mean']:.1f}, worst call {m['worst']:.1f} (+{(m['worst'] / m['mean'] - 1) * 100:.1f} %), "
                     f"least {min(m['calls']) / 16:.1f}")
         if pr is defaults and sig is xn:
             calls = m['calls']
-    rep.check('cost, dsp_host instructions a sample over 10 s (27,562 calls of 16 frames; a null effect costs 0.06): '
-              'mean <= 1,150 and the worst call within 15 % of the mean', ok, '; '.join(rows))
+    rep.check(f'cost, dsp_host instructions a sample over 3 s ({len(calls):,} calls of 16 frames after the first 64; a null effect '
+              f'costs 0.06): mean <= {COST_MEAN:,} and the worst call within 15 % of the mean', ok, '; '.join(rows))
     hist = collections.Counter(c // 16 // 20 * 20 for c in calls)
-    slots = [(min(calls[k::16]) / 16, max(calls[k::16]) / 16) for k in range(16)]
+    cph = G.HOP // 16
+    slots = [(min(calls[k::cph]) / 16, max(calls[k::cph]) / 16) for k in range(cph)]
     rep.note('cost, distribution of the calls (defaults, noise): instructions a sample -> share of calls',
              ', '.join(f'{k}-{k + 19}: {v * 100 / len(calls):.1f} %' for k, v in sorted(hist.items())))
-    rep.note('cost by position in the hop (16 calls, the pattern repeats exactly): instructions a sample',
+    rep.note(f'cost by position in the hop ({cph} calls, the pattern repeats exactly): instructions a sample',
              ' '.join(f'{a:.0f}' if b - a < 1 else f'{a:.0f}-{b:.0f}' for a, b in slots))
     sch = G.schedule()
-    rep.note('the schedule', f'{len(G.UNITS)} units a hop + the fixed start ({G.W_MAND} instructions: last quarter of the previous '
-             f'frame, windowed copy-in, knobs); budget {G.BF} instructions a frame; weights: forward unit {G.W_FWD}/{G.W_FWA}, '
-             f'radix-4 {G.W_FR4}/{G.W_IR4}, 16 bin pairs {G.W_BOV + 16 * G.W_PAIR}, inverse {G.W_INV}/{G.W_INA}, overlap {G.W_OLA}')
+    rep.note('the schedule', f'{len(G.UNITS)} units a hop + the fixed start ({G.W_MAND} instructions: knobs, set-up and the first '
+             f'copy-in unit); budget {G.BF} instructions a frame; weights: copy-in {G.W_CIN}, last half of the previous frame {G.W_LQ}, '
+             f'forward unit {G.W_FWD}/{G.W_FWA}, radix-4 {G.W_FR4}/{G.W_IR4}, {G.BPAIR} bin pairs {G.W_BOV + G.BPAIR * G.W_PAIR}, '
+             f'inverse {G.W_INV}/{G.W_INA}, overlap {G.W_OLA}')
     L, R, m = run('sp_cost7', defaults, xn[:2 * SR // 16 * 16], split=7)
     rep.note('cost with blocks split 7 + 9 (not AERIA\'s engine)', f"mean {m['mean']:.1f}, worst block {m['worst']:.1f} instructions a sample")
 

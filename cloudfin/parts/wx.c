@@ -11,11 +11,22 @@ static int wx_lp = 127 << 8, wx_hp = 0, wx_roll;
 static int16_t lend_row[N_SLOTS];        /* what the lightning lent each slot (0: nothing) */
 static uint32_t lend_until[N_SLOTS], lend_at[N_SLOTS], roll_next;
 static uint8_t wx_struck;                /* a strike the lending has not answered yet (strike() sets it) */
+/* the filters to the engine (13 Nov 2026): they run only with their share of core 0 reserved (shelf.c), and give it
+ * back when both are open; no room: they stay off and it says so once */
+static void wx_send(int lp, int hp)
+{
+    static uint8_t full_said;
+    lp = lp >= 126 ? -1 : lp; hp = hp <= 1 ? -1 : hp;
+    if (lp < 0 && hp < 0) { wxf_reserve(0); full_said = 0; }
+    else if (!wxf_reserve(1)) { lp = hp = -1; if (!full_said) { say("DSP FULL", "FILTERS OFF"); full_said = 1; } }
+    aos_weather_filters(lp, hp);
+}
 static void wx_tick(void)
 {
     /* WSND off: no filters, no thunder in the sound -- but the lightning still lends (that is the chain, not the weather's own sound) */
     int xlp, xhp; xf_filters(&xlp, &xhp);                          /* the crossfader as a DJ filter (master.c) */
-    if (!pv(PG_MIX, 5)) { aos_weather_filters(xlp >= 126 ? -1 : xlp, xhp <= 1 ? -1 : xhp); wx_lp = 127 << 8; wx_hp = 0; goto lends; }
+    if (seq_on) { wx_send(xlp, xhp); return; }                     /* the sequencer: the DJ filter only (13 Nov 2026) */
+    if (!pv(PG_MIX, 5)) { wx_send(xlp, xhp); wx_lp = 127 << 8; wx_hp = 0; goto lends; }
     int rain = WON(RAIN) || WON(STORM);
     int lp_t = rain ? 105 : 127;                                   /* index 105: about 6 kHz */
     /* thunder: the strikes (thunder 200 falling) and, under clouds, rolls of their own */
@@ -29,7 +40,7 @@ static void wx_tick(void)
     int lp = wx_lp >> 8, hp = wx_hp >> 8;
     if (xlp < lp) lp = xlp;
     if (xhp > hp) hp = xhp;
-    { aos_weather_filters(lp >= 126 ? -1 : lp, hp <= 1 ? -1 : hp); }
+    wx_send(lp, hp);
 lends:
     /* lightning lends effects, as in Balloon Shop: every strike of a storm drops an effect the chain has not got
      * into an empty slot for 45 to 90 s, and it goes again when its time is up (unless the musician kept it by
@@ -83,6 +94,8 @@ static uint32_t tw_until, tw_roll;
 static int xf_same(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 static void xw_toggle(int w)
 {
+    if (w != XW_AURORA) return;                                        /* WIND and HAIL are gone (13 Nov 2026) */
+    if (pv_base(PG_SKY, 5)) { say("WEATHER", "OFF"); return; }
     xw_on ^= (uint8_t)(1u << w);
     int on = (xw_on >> w) & 1;
     if (on && w == XW_WIND && WON(FOG)) toggle_weather(FOG);          /* wind blows the fog away */
@@ -96,9 +109,7 @@ static void xw_auto(int w)
 {
     uint32_t r = rnd() % 100u;
     xw_on = 0;
-    if (w == CLEAR) { if (r < 15) xw_on = 1u << XW_WIND; else if (r < 27) xw_on = 1u << XW_AURORA; }
-    else if (w == CLOUDY || w == RAIN) { if (r < 12) xw_on = 1u << XW_WIND; }
-    else if (w == STORM) { if (r < 25) xw_on = 1u << XW_HAIL; else if (r < 45) xw_on = 1u << XW_WIND; }
+    if (w == CLEAR && r < 30) xw_on = 1u << XW_AURORA;                 /* 13 Nov 2026: the aurora is the only one left */
 }
 static void xw_twister(void) { if (ticks > tw_until) { tw_until = ticks + 61u * 24u; say("TWISTER", 0); } }
 static void xw_tick(void)
@@ -114,8 +125,8 @@ static void xw_tick(void)
     if (WON(FOG) && !fog_was) xw_on &= (uint8_t)~(1u << XW_WIND);     /* ... and fog stills the wind */
     fog_was = (uint8_t)WON(FOG);
     int sound = pv(PG_MIX, 5) != 0;                                    /* WSND: the weather's sound */
-    if (sound && (xw_on & 1) && WON(CLOUDY) && ticks > tw_roll) { tw_roll = ticks + 61u; if (rnd() % 150u == 0) xw_twister(); }
-    int want[XF_N] = {sound && (xw_on >> XW_WIND) & 1, sound && WON(FOG), sound && ticks < tw_until, sound && (xw_on >> XW_HAIL) & 1, sound && (xw_on >> XW_AURORA) & 1};
+    (void)tw_roll; (void)xw_twister;                                   /* WIND, HAIL and the TWISTER are gone (13 Nov 2026) */
+    int want[XF_N] = {0, sound && WON(FOG), 0, 0, sound && (xw_on >> XW_AURORA) & 1};
     for (int i = 0; i < XF_N; i++) {
         int s = xf_slot[i], row = xf_row[i];
         if (!row) continue;

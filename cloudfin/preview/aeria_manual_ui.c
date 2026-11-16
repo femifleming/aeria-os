@@ -236,8 +236,10 @@ static int glyph_of(char c)
     return -1;
 }
 static int text_w(const char *s) { int n = 0; while (s[n]) n++; return n * 4 - 1; }
+static const char *T(const char *s);   /* the language (params12.c): a string in Dutch when LANG says so, else itself */
 static void text(int x, int y, const char *s, int ink)
 {
+    s = T(s);
     for (; *s; s++, x += 4) {
         int g = glyph_of(*s);
         if (g < 0) continue;
@@ -261,12 +263,19 @@ static void num(char *out, int v)
 /* ---- weather ---------------------------------------------------------------------- */
 enum { CLEAR, CLOUDY, RAIN, STORM, SNOW, HEAT, FOG, N_WEATHER };
 static const char *const weather_name[N_WEATHER] = {"CLEAR", "CLOUDY", "RAIN", "STORM", "SNOW", "HEAT", "FOG"};
-static int weather = CLOUDY, auto_weather, xf_right = STORM, amount;
+static int weather = CLEAR, auto_weather, xf_right = STORM, amount;
 /* Several weathers at once (sadnoise, 12 Nov 2026): each of CLOUDY RAIN STORM SNOW HEAT FOG is on or off by itself --
  * only SNOW and HEAT never together; none on is CLEAR. wx_on is the set (bit = the weather's number); `weather` is
  * the one turned on last (the sky's main mood, the spells' clock). */
-static uint8_t wx_on = 1u << CLOUDY;
+static uint8_t seq_on;   /* the sequencer face is up (seqmode.c) */
+static uint8_t wx_on = 0;
 #define WON(w) ((wx_on >> (w)) & 1u)
+/* 13 Nov 2026: the owner keeps RAIN and FOG (and the AURORA, wx.c); CLOUDY, STORM, SNOW, HEAT, WIND, HAIL and the
+ * TWISTER are gone (SMEAR's own FRZ knob is the freeze the snow used to turn). Their numbers stay so saved projects
+ * still load; whatever they had on of those is dropped. */
+#define WX_KEEP ((1u << RAIN) | (1u << FOG))
+static int wx_kept(int w) { return w == CLEAR || (w > 0 && w < N_WEATHER && ((WX_KEEP >> w) & 1u)); }
+static int wx_step(int w, int d) { int n = w; do n += d; while (n > 0 && n < N_WEATHER && !wx_kept(n)); return n < 0 || n >= N_WEATHER ? w : n; }
 static uint32_t spell_left;
 static int flash, thunder, bolt_x, bolt_t, gust;
 static const uint16_t spell_s[N_WEATHER][2] = {{90, 300}, {60, 240}, {60, 200}, {30, 120}, {90, 300}, {120, 360}, {60, 180}};
@@ -274,13 +283,14 @@ static const uint8_t next_w[N_WEATHER][N_WEATHER] = {
     {4, 11, 0, 0, 0, 5, 0}, {7, 0, 7, 3, 3, 0, 0}, {4, 10, 0, 6, 0, 0, 0}, {0, 8, 12, 0, 0, 0, 0},
     {8, 12, 0, 0, 0, 0, 0}, {12, 3, 0, 5, 0, 0, 0}, {8, 8, 4, 0, 0, 0, 0}};
 
-static char toast[24];
+static char toast[32];
 static uint32_t toast_until;
 static void say(const char *a, const char *b)
 {
     int i = 0;
-    while (*a && i < 12) toast[i++] = *a++;
-    if (b) { toast[i++] = ' '; while (*b && i < 23) toast[i++] = *b++; }
+    a = T(a); b = T(b);
+    while (*a && i < 20) toast[i++] = *a++;
+    if (b) { toast[i++] = ' '; while (*b && i < 31) toast[i++] = *b++; }
     toast[i] = 0;
     toast_until = ticks + 80;
 }
@@ -306,7 +316,7 @@ static Param params[N_PAGES][12] = {
     {EMPTY},
     /* SKY */
     {{"WIND", OWN, 0, 18, 12, 12, 0}, {"CLDS", OWN, 0, 7, 5, 5, 0}, {"WAVE", OWN, 0, 6, 2, 2, 0},
-     {"WTHR", OWN, 0, N_WEATHER - 1, CLOUDY, CLOUDY, 0}, {"AUTO", OWN, 0, 1, 0, 0, 0}, EMPTY,   /* (XFAD and XF B, the crossfade between two weathers, are gone: the fader is the scenes' now) */
+     {"WTHR", OWN, 0, N_WEATHER - 1, CLEAR, CLEAR, 0}, {"AUTO", OWN, 0, 1, 0, 0, 0}, {"WX", OWN, 0, 1, 0, 0, 0},   /* WX (13 Nov 2026): 1 = the weather OFF altogether (0, as old projects hold, is on) */   /* (XFAD and XF B, the crossfade between two weathers, are gone: the fader is the scenes' now) */
      EMPTY, {"SPEL", OWN, 1, 8, 4, 4, 0}, {"DRFT", OWN, 0, 127, 20, 20, 0},
      {"RATE", OWN, 1, 127, 30, 30, 0}, {"NITE", OWN, 0, 1, 0, 0, 0}, {"LITE", OWN, 0, 1, 1, 1, 0}},
     /* SOURCE: a menu */
@@ -328,31 +338,29 @@ static Param params[N_PAGES][12] = {
      {"OCT", OWN, 1, 5, 3, 3, 0}, {"RNDO", OWN, 1, 127, 1, 1, 0}, {"FADE", OWN, 1, 127, 1, 1, 0},
      {"TUN1", OWN, 1, 49, 25, 25, 0}, {"TUN2", OWN, 1, 49, 25, 25, 0}, {"TUN3", OWN, 1, 49, 25, 25, 0}},
     /* MIX: HEAD (T3 FX1): main feedback, its tone, the sources' sends, input level, warmth; then routing */
-    {{"FDBK", OWN, 0, 127, 0, 0, 0}, {"FTON", OWN, 0, 127, 90, 90, 0}, EMPTY,
-     {"WARM", OWN, 0, 127, 20, 20, 0}, {"HELI", OWN, 0, 1, 0, 0, 0}, {"WSND", OWN, 0, 1, 1, 1, 0},
+    /* (12 Nov 2026: the main feedback, its tone and its soft clip, WARM, are gone at the owner's wish) */
+    {EMPTY, EMPTY, EMPTY,
+     EMPTY, {"HELI", OWN, 0, 1, 0, 0, 0}, {"WSND", OWN, 0, 1, 1, 1, 0},
      {"INAB", OWN, 0, 4, 1, 1, 0}, {"INCD", OWN, 0, 4, 1, 1, 0}, {"SCAL", OWN, 0, 41, 0, 0, 0},
      {"ROOT", OWN, 0, 11, 0, 0, 0}, {"LIMT", OWN, 1, 2, 2, 2, 0}, {"TIDE", OWN, 0, 127, 0, 0, 0}},   /* LIMT 2 on, 1 off (0: a preset from before it) */
     /* SYSTEM */
     {{"SND", OWN, 0, 2, 1, 1, 0}, {"INTR", OWN, 0, 1, 1, 1, 0}, {"LITE", OWN, 0, 1, 1, 1, 0},
      {"AUTO", OWN, 0, 1, 1, 1, 0}, {"SAVR", OWN, 0, 30, 30, 30, 0}, {"WAIT", OWN, 0, 7, 3, 3, 0},
-     EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY},
+     {"LANG", OWN, 0, 1, 0, 0, 0} /* 0 English, 1 Dutch (15 Nov 2026) */, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY},
     /* GUMBALLS: MIDI, its own menu */
     {EMPTY},
     /* GAIN: input A/B and C/D (THRU VOL, 64 = unity), the drive into the chain (HEAD IN),
      * the chain's output (T8 AMP VOL, 108 = unity), the cue send and the balance */
     {{"AB", OWN, 0, 127, 64, 64, 0}, {"CD", OWN, 0, 127, 64, 64, 0}, {"DRIV", OWN, 0, 127, 64, 64, 0},
      {"OUT", OWN, 0, 127, 108, 108, 0}, {"CUE", OWN, 0, 127, 127, 127, 0}, {"BAL", OWN, 0, 127, 64, 64, 0},
-     /* FUNC layer: the master EQ (12 Nov 2026), after everything and never moved by the weather. Four gains 1..25
-      * (13 = flat, a dB a step) and the two middle bands' centres (an index on 20 Hz .. 20 kHz); the shelves sit at
-      * 150 Hz and 6 kHz. (They start at 1 so a preset from before them, which holds 0 there, keeps them flat.) */
-     {"LOW", OWN, 1, 25, 13, 13, 0}, {"LMID", OWN, 1, 25, 13, 13, 0}, {"HMID", OWN, 1, 25, 13, 13, 0},
-     {"HIGH", OWN, 1, 25, 13, 13, 0}, {"LMF", OWN, 1, 127, 55, 55, 0}, {"HMF", OWN, 1, 127, 89, 89, 0}},
+     /* (FUNC layer: the master EQ was here, 12-13 Nov 2026; removed at the owner's request. Saved values there are ignored.) */
+     EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY},
     /* MASTER (12 Nov 2026): the freeze delay on the main mix, after the chain and never moved by the weather. TIME in
      * sixteenth notes at TMPO (the trigs pick it too), its feedback with a high-pass and a lowpass, how much goes in
      * and how much comes out; YES freezes it, NO taps the tempo. FUNC layer: TMPO (BPM). */
     {{"TIME", OWN, 1, 16, 4, 4, 0}, {"FDBK", OWN, 0, 127, 50, 50, 0}, {"HPF", OWN, 0, 127, 10, 10, 0},
      {"LPF", OWN, 0, 127, 100, 100, 0}, {"SEND", OWN, 0, 127, 100, 100, 0}, {"WET", OWN, 0, 127, 0, 0, 0},
-     {"TMPO", OWN, 0, 127, 60, 60, 0}, {"XFRZ", OWN, 1, 2, 2, 2, 0}, EMPTY, EMPTY, EMPTY, EMPTY},   /* XFRZ 2: the crossfader freezes the delay at B (1: it does not) */
+     {"TMPO", OWN, 0, 127, 60, 60, 0}, EMPTY /* (XFRZ: folded into XMOD = FREEZE, 15 Nov 2026) */, {"RFRZ", OWN, 0, 127, 0, 0, 0}, {"XMOD", OWN, 0, 4, 0, 0, 0}, EMPTY, EMPTY},   /* XMOD: what the crossfader does: SCEN, DJF (a DJ filter), WET (every effect dry at A), MOD (MOD depth 0 at A) */   /* RFRZ: Chloaelis's random freeze, the chance of a hold (12 Nov 2026) */   /* XFRZ 2: the crossfader freezes the delay at B (1: it does not) */
 };
 #define P(page, i) (params[page][i])
 /* ---- scenes (sadnoise, 12 Nov 2026), as on the Octatrack: the crossfader moves the sound between two of them -------
@@ -367,16 +375,92 @@ static Param params[N_PAGES][12] = {
 static int8_t scene_val[N_SCENES][SCENE_IDS];   /* -1: the scene does not hold this knob */
 static uint8_t scene_a, scene_b = 1, scene_dirty, scene_ready;
 static void scenes_init(void) { if (scene_ready) return; for (int s = 0; s < N_SCENES; s++) for (int i = 0; i < SCENE_IDS; i++) scene_val[s][i] = -1; scene_ready = 1; }
+static int xf_mode(void);
 static int scene_mix(int id, int base)
 {
-    if (!scene_ready) return base;
+    if (!scene_ready || xf_mode()) return base;              /* scenes only while the crossfader is SCEN */
     int a = scene_val[scene_a][id], b = scene_val[scene_b][id];
     if (a < 0 && b < 0) return base;
     int va = a < 0 ? base : a, vb = b < 0 ? base : b, x = xfade();
     return va + ((vb - va) * x + (vb >= va ? 63 : -63)) / 127;
 }
 static int pv_base(int page, int i) { Param *p = &params[page][i]; return p->user >= 0 ? p->user : p->value; }
-static int pv(int page, int i) { return scene_mix(page * 12 + i, pv_base(page, i)); }
+static int16_t mod_pv[N_PAGES * 12];   /* MOD's offsets (mod.c), knob units */
+static int pv(int page, int i) { int v = scene_mix(page * 12 + i, pv_base(page, i)); if (mod_pv[page * 12 + i]) { const Param *p = &params[page][i]; v += mod_pv[page * 12 + i]; if (v < p->lo) v = p->lo; if (v > p->hi) v = p->hi; } return v; }
+/* ---- language (sadnoise, 15 Nov 2026): English or Dutch -- SYSTEM, the second knob set, A: LANG ---------------------
+ * Every toast, label and page text goes through T(): the table is looked up by the whole string, so anything not in
+ * it (knob names, effect names, numbers, the panel's own words) stays as it is. The font has no accents; Dutch does
+ * without them. */
+typedef struct { const char *en, *nl; } Tr;
+static const Tr tr_nl[] = {
+    {"NEW SKY", "NIEUWE LUCHT"}, {"NEW STARS", "NIEUWE STERREN"}, {"NIGHT", "NACHT"}, {"DAY", "DAG"},
+    {"CHAIN", "KETEN"}, {"SKY", "LUCHT"}, {"SOURCE", "BRON"}, {"STARS", "STERREN"}, {"BALLOON", "BALLON"}, {"BALLOONS", "BALLONNEN"},
+    {"SYSTEM", "SYSTEEM"}, {"GUMBALLS", "KAUWGOM"}, {"GAIN", "NIVEAU"}, {"SHELF", "KAST"}, {"EMPTY", "LEEG"},
+    {"EMPTY  YES: SHELF", "LEEG  YES: KAST"}, {"YES PUT ON  NO BACK", "YES PLAATS  NO TERUG"}, {"FILLING THE SHELF", "KAST WORDT GEVULD"},
+    {"CHAIN READY", "KETEN KLAAR"}, {"NO ROOM", "GEEN RUIMTE"}, {"DSP FULL", "DSP VOL"}, {"ON ANOTHER", "OP EEN ANDER"}, {"TRACK", "SPOOR"},
+    {"NO EFFECT", "GEEN EFFECT"}, {"YES PICKS", "YES KIEST"}, {"NONE", "GEEN"}, {"NONE  YES PICKS", "GEEN  YES KIEST"},
+    {"WEATHER", "WEER"}, {"CLEAR", "HELDER"}, {"CLOUDY", "BEWOLKT"}, {"RAIN", "REGEN"}, {"SNOW", "SNEEUW"}, {"HEAT", "HITTE"}, {"FOG", "MIST"},
+    {"HAIL", "HAGEL"}, {"TWISTER", "WINDHOOS"}, {"ALL OFF", "ALLES UIT"}, {"GUST", "WINDVLAAG"}, {"LIGHTNING LENDS", "BLIKSEM LEENT"}, {"STORM TAKES", "STORM NEEMT"},
+    {"LAYER", "LAAG"}, {"KNOBS", "KNOPPEN"}, {"TAP", "TIK"}, {"FREEZE", "BEVRIEZEN"}, {"FROZEN", "BEVROREN"}, {"EFFECTS WET", "EFFECTEN NAT"}, {"MOD DEPTH", "MOD DIEPTE"},
+    {"DELAY TIME", "DELAY TIJD"}, {"DELAY HIGH-PASS", "DELAY HPF"}, {"DELAY LOWPASS", "DELAY LPF"}, {"DELAY WET", "DELAY NAT"},
+    {"SCALE", "TOONLADDER"}, {"ROOT", "GRONDTOON"}, {"OCTAVE", "OCTAAF"}, {"RANDOM", "WILLEKEURIG"}, {"RANDOM OCT", "WILLEK OCT"},
+    {"TUNE 1", "STEM 1"}, {"TUNE 2", "STEM 2"}, {"TUNE 3", "STEM 3"}, {"GRAIN SIZE", "KORREL"}, {"PITCH", "TOON"}, {"VELOCITY", "AANSLAG"},
+    {"LENGTH", "LENGTE"}, {"SPEED", "SNELHEID"}, {"SIZE", "GROOTTE"}, {"SPREAD", "SPREIDING"}, {"DECAY", "UITSTERVEN"}, {"MODE", "MODUS"},
+    {"CHANNEL", "KANAAL"}, {"FIRST CH", "EERSTE KAN"}, {"GRAVITY", "ZWAARTE"}, {"BOUNCE", "STUITER"}, {"LEVEL", "NIVEAU"},
+    {"BALLS", "BALLEN"}, {"BALL", "BAL"}, {"MUTED", "GEDEMPT"}, {"YES ADDS A BALL", "YES VOEGT BAL TOE"}, {"MARBLES", "KNIKKERS"}, {"YES STARTS", "YES START"},
+    {"MIDI ON", "MIDI AAN"}, {"MIDI OFF", "MIDI UIT"}, {"LISTEN", "LUISTER"}, {"LISTENING", "LUISTERT"}, {"STEADY", "STABIEL"}, {"CLARITY", "HELDERHEID"},
+    {"ARP TICKS", "ARP TIKKEN"}, {"NO INPUT TAP", "GEEN INGANG"}, {"NO CLOCK", "GEEN KLOK"}, {"PITCH MIDI", "TOON MIDI"},
+    {"PROJECTS", "PROJECTEN"}, {"SAVED", "OPGESLAGEN"}, {"NOT SAVED", "NIET OPGESLAGEN"}, {"LOADED", "GELADEN"}, {"LOAD FAILED", "LADEN MISLUKT"},
+    {"LOADING", "LADEN"}, {"NAME", "NAAM"}, {"YES SAVES", "YES SLAAT OP"}, {"YES LOADS  FUNC+YES SAVES", "YES LAADT  FUNC+YES SLAAT OP"},
+    {"FUNC+YES SAVES HERE", "FUNC+YES SLAAT HIER OP"}, {"FUNC+YES SAVES", "FUNC+YES SLAAT OP"}, {"KNOB: ANY LETTER", "KNOP: ELKE LETTER"},
+    {"DAMAGED", "BESCHADIGD"}, {"BLANK START", "LEGE START"}, {"BLANK SOUND", "LEEG GELUID"}, {"RESET ALL", "ALLES RESET"}, {"DONE", "KLAAR"},
+    {"YES       INIT: SOUND ONLY", "YES       INIT: ALLEEN GELUID"}, {"FUNC+YES  RESET ALL: SOUND,", "FUNC+YES  ALLES RESET: GELUID,"},
+    {"  BUFFERS AND SAMPLES", "  BUFFERS EN SAMPLES"}, {"SEQUENCES ARE KEPT", "SEQUENTIES BLIJVEN"}, {"NO        BACK", "NO        TERUG"},
+    {"USB DISK MODE", "USB SCHIJF MODUS"}, {"NO CARD", "GEEN KAART"}, {"BACK", "TERUG"}, {"EJECTED", "UITGEWORPEN"}, {"NOT YET", "NOG NIET"},
+    {"1 USB DISK MODE", "1 USB SCHIJF MODUS"}, {"NO: BACK TO THE SKY", "NO: TERUG NAAR DE LUCHT"}, {"A SOUND", "A GELUID"}, {"C LIGHTS", "C LAMPEN"},
+    {"F WAIT", "F WACHT"}, {"YES TRY", "YES PROBEER"}, {"LANGUAGE", "TAAL"}, {"ENGLISH", "ENGELS"},
+    {"PICK A SAMPLE", "KIES EEN SAMPLE"}, {"PICK A FOLDER", "KIES EEN MAP"}, {"NO WAVS HERE", "GEEN WAVS HIER"},
+    {"YES LOAD  FUNC+YES HEAR", "YES LAAD  FUNC+YES HOOR"}, {"YES DEAL  FUNC+YES HEAR", "YES DEEL  FUNC+YES HOOR"}, {"KIT LOADED", "KIT GELADEN"}, {"STARS LOADED", "STERREN GELADEN"},
+    {"CATCHING", "VANGT"}, {"1 UP", "1 OP"}, {"2 UP", "2 OP"}, {"3 UP", "3 OP"}, {"BALLOON 1", "BALLON 1"}, {"BALLOON 2", "BALLON 2"}, {"BALLOON 3", "BALLON 3"},
+    {"QUIET", "STIL"}, {"SINGING", "ZINGT"}, {"STEREO", "STEREO"}, {"LOOP PLAY", "LOOP SPEELT"}, {"DRY + CLEAR", "DROOG + HELDER"},
+    {"GRID", "RASTER"}, {"CLEARED", "GEWIST"}, {"COPIED", "GEKOPIEERD"}, {"PASTED", "GEPLAKT"}, {"NOTHING", "NIETS"}, {"PATTERN", "PATROON"},
+    {"MUTES KEPT IN", "MUTES BEWAARD IN"}, {"FUNC KEEPS", "FUNC BEWAART"}, {"SCENE EMPTY", "SCENE LEEG"}, {"STEP", "STAP"},
+    {"BACKWARD", "ACHTERUIT"}, {"FORWARD", "VOORUIT"}, {"LOCKS CLEARED", "LOCKS GEWIST"}, {"A STEP", "PER STAP"}, {"SILENCE", "STILTE"},
+    {"AT THE BAR", "BIJ DE MAAT"}, {"VERB ON", "VERB OP"}, {"A TRACK", "EEN SPOOR"}, {"MOD CLOSED", "MOD DICHT"}, {"TURN A KNOB", "DRAAI EEN KNOP"},
+    {"TO MOVE", "OM TE BEWEGEN"}, {"LEARN: YES", "LEREN: YES"}, {"YES LEARN  FUNC+YES CLR", "YES LEER  FUNC+YES WIS"}, {"MOD TO", "MOD NAAR"},
+    {"GRAIN CLOUD", "KORRELWOLK"}, {"CLOUD", "WOLK"}, {"SKEW", "SCHEEF"}, {"PUFF", "PLUIS"}, {"SOFT", "ZACHT"}, {"EDGE", "RAND"}, {"FLIP", "SPIEGEL"},
+    {"SCATTER", "VERSTROOI"}, {"EACH", "ELK"}, {"OPEN", "OPEN"}, {"FULL", "VOL"}, {"EVEN", "GELIJK"}, {"NEXT", "VOLGENDE"}, {"SET", "GEZET"},
+    {"MAJOR", "MAJEUR"}, {"MINOR", "MINEUR"}, {"DORIAN", "DORISCH"}, {"LYDIAN", "LYDISCH"}, {"PHRYGIAN", "FRYGISCH"}, {"CHROMATIC", "CHROMATISCH"},
+    {"WHOLE", "HEELTOON"}, {"STACKED", "GESTAPELD"}, {"NOTE", "NOOT"}, {"CHORD", "AKKOORD"}, {"JUMP", "SPRONG"},
+    {"SINE", "SINUS"}, {"SAW", "ZAAG"}, {"RAMP", "HELLING"}, {"SQR", "BLOK"}, {"FWD", "VOOR"}, {"REV", "ACHTER"}, {"DRNK", "DRONK"},
+    {"ACCEL", "VERSNEL"}, {"DECEL", "VERTRAAG"}, {"ARCH", "BOOG"}, {"BULGE", "BUIK"}, {"WAVE", "GOLF"}, {"RAND", "WILLEK"},
+    {"COIN", "MUNT"}, {"DIVIDE", "DEEL"}, {"INDEP", "ONAFH"}, {"AND", "EN"}, {"FLOCK X", "ZWERM X"}, {"FLOCK Y", "ZWERM Y"}, {"FLOCK SPRD", "ZWERM SPRD"},
+    {"BIRD 1", "VOGEL 1"}, {"BIRD 2", "VOGEL 2"}, {"FIX", "VAST"}, {"ORBIT", "BAAN"}, {"DIVE", "DUIK"}, {"BOTH", "BEIDE"},
+    {"NO LOOP LOADED", "GEEN LOOP GELADEN"}, {"NO MORE KNOBS", "GEEN KNOPPEN MEER"}, {"FUNC+1 2: PICK FROM CARD", "FUNC+1 2: KIES VAN KAART"},
+    {"FILTERS OFF", "FILTERS UIT"}, {"PLANET", "PLANEET"}, {"BIRDS", "VOGELS"}, {"STAR", "STER"}, {"SOLO OFF", "SOLO UIT"}, {"VOLUME", "VOLUME"},
+    {"WEATHER OFF", "WEER UIT"}, {"OFF", "UIT"}, {"ON", "AAN"}, {"SND OFF", "GLD UIT"}, {"IN AB", "IN AB"},
+    {"A B STEREO", "A B STEREO"}, {"MONO", "MONO"}, {"AB STEREO", "AB STEREO"}, {"CD STEREO", "CD STEREO"}, {"TEMPO", "TEMPO"},
+    {"PADS 1-8", "PADS 1-8"}, {"TRIG 1-16", "TRIG 1-16"}, {"TRIG 1-4", "TRIG 1-4"}, {"MUTE SCENE", "MUTE SCENE"}, {"MUTE SCENES", "MUTE SCENES"},
+    {"RESAMPLE", "RESAMPLE"}, {"SEQUENCER", "SEQUENCER"}, {"MIXER", "MIXER"}, {"LIMITER", "LIMITER"}, {"CROSSFADER", "CROSSFADER"},
+    {"SCENES", "SCENES"}, {"DJ FILTER", "DJ FILTER"}, {"CHAIN SET", "REEKS GEZET"}, {"PAGE: BACK", "PAGE: TERUG"}, {"LAYER 2", "LAAG 2"},
+    {"DUTCH", "NEDERLANDS"},
+};
+#define N_TR ((int)(sizeof tr_nl / sizeof tr_nl[0]))
+static int lang_nl(void) { return pv(PG_SYSTEM, 6) == 1; }
+static const char *T(const char *s)
+{
+    if (!s || !s[0] || !lang_nl()) return s;
+    char c = s[0];
+    for (int i = 0; i < N_TR; i++) {
+        const char *e = tr_nl[i].en;
+        if (e[0] != c) continue;
+        int k = 1;
+        while (e[k] && e[k] == s[k]) k++;
+        if (!e[k] && !s[k]) return tr_nl[i].nl;
+    }
+    return s;
+}
+
 
 /* sources: off by default */
 static int src_loop, src_stars, src_balloons;
@@ -385,7 +469,7 @@ static int src_loop, src_stars, src_balloons;
 static int muted[8];
 static int night, hidden, func_held, func_latch, ready, page, page_until, intro;
 static uint32_t ui_until; /* the page shows until then; after, only the sky */
-#define UI_SHOW (60u * 10u)
+#define UI_SHOW 0x40000000u   /* (15 Nov 2026) a page stays up until NO hides it: no more vanishing after ten seconds */
 static int scene_held;
 static uint32_t held_tracks, stars_total;
 static int16_t drift_now[N_PAGES][6], drift_target[N_PAGES][6];
@@ -403,12 +487,20 @@ static void set_weather(int w);
 static void sync_to_card(void);
 static int balloon_placed;
 static void place_balloon(int step);
+#if defined(AERIAOS)
+static void xw_auto(int w);
+#endif
 static void step_auto(void)
 {
-    if (!auto_weather || spell_left-- > 0) return;
-    int pick = range(0, 19), w = 0;
-    for (; w < N_WEATHER - 1; w++) { pick -= next_w[weather][w]; if (pick < 0) break; }
-    set_weather(w == weather ? CLOUDY : w);
+    if (!auto_weather || pv_base(PG_SKY, 5) || spell_left-- > 0) return;
+    /* 13 Nov 2026: AUTO moves between the weathers that are left (clear, rain, fog; the aurora comes with a clear sky) */
+    static const uint8_t pool[3] = {CLEAR, RAIN, FOG};
+    int w = weather;
+    for (int i = 0; i < 8 && w == weather; i++) w = pool[range(0, 2)];
+    set_weather(w);
+#if defined(AERIAOS)
+    xw_auto(weather);
+#endif
 }
 
 /* ---- the pattern: recognise it, then place one step ahead ------------------------------ */
@@ -605,8 +697,14 @@ static int part_knob(int t, int fx2, int k) { return preview_part_fx[t][fx2 * 6 
 #ifndef CORE_ROOM
 #define CORE_ROOM 1700
 #endif
-#define CORE0_BASE 710     /* the engine's own share of core 0 -- with the time it spends sorting the host's words counted (the meter
-                            * left that out until 12 Nov 2026: 1,081 of effects then read 93 % in the worst frame) */
+/* core 0's engine share (13 Nov 2026: counted from what is on, no longer its worst case at all times). Measured 370 at
+ * its worst on the unit (the master EQ on all four bands, rain and helium, USB recording) + 50 room = 420; the EQ
+ * (4 x 30) is gone since, and the weather's two filters (rain's lowpass, helium's high-pass, the DJ filter, 2 x 24)
+ * are reserved only while they run: they stay off ("DSP FULL") until there is room for them (wxf_reserve). */
+#define CORE0_ENGINE 260
+#define CORE0_WXF 50
+static uint8_t wxf_reserved = 1;   /* boots counted; lets go when unused */
+#define CORE0_BASE (CORE0_ENGINE + (wxf_reserved ? CORE0_WXF : 0))
 #define CORE1_BASE 250     /* core 1 is the weaker in practice: VERB + ECHO (1,404) run clean, VERB + ECHO + SMEAR (1,673) drop
                             * blocks (measured on the unit with USB recording on, 12 Nov 2026) -- so its room ends near 1,450 */
 static int8_t slot_core[7] = {-1, -1, -1, -1, -1, -1, -1};
@@ -622,11 +720,28 @@ static int place_effect(int s, int row, int commit)
     if (row <= 0 || row > FX_COUNT) { if (commit) { slot_core[s] = -1; slot_cost[s] = 0; slot_any[s] = 0; } return 0; }
     int8_t core[7]; int load[2] = {CORE0_BASE, CORE1_BASE}, cost = fx_cost[row - 1], want = fx_core[row - 1];
     for (int i = 0; i < 7; i++) { core[i] = i == s ? -1 : slot_core[i]; if (core[i] >= 0) load[core[i]] += slot_cost[i]; }
-    int c = want < 2 ? want : (load[1] <= load[0] ? 1 : 0);
-    if (load[c] + cost > CORE_ROOM && want == 2 && load[c ^ 1] + cost <= CORE_ROOM) c ^= 1;
-    for (int i = 0; i < 7 && load[c] + cost > CORE_ROOM; i++)              /* make room: movable effects go across */
-        if (core[i] == c && slot_any[i] && load[c ^ 1] + slot_cost[i] <= CORE_ROOM) { core[i] = (int8_t)(c ^ 1); load[c] -= slot_cost[i]; load[c ^ 1] += slot_cost[i]; }
-    int fits = load[c] + cost <= CORE_ROOM;
+    /* one big effect alone on core 0 may take a little more than the shared room (the FFT SMEAR, 1,137: so it can
+     * stand beside VERB on core 1); nothing else joins it there */
+#define ROOM_OF(k) ((k) == 0 && load[0] == CORE0_BASE ? CORE0_BASE + 1170 : CORE_ROOM)   /* 1170: SMEAR after its quality pass (1,165), measured on the unit 13 Nov 2026 */
+    /* try the emptier core first, then (an effect that may run on either) the other; on each, movable effects may go
+     * across to make room. 13 Nov 2026: trying one core only refused SMEAR beside GRAINS when moving PITCH or RING
+     * off core 1 would have made room there */
+    int c = want < 2 ? want : (load[1] <= load[0] ? 1 : 0), tries = want == 2 ? 2 : 1;
+    int8_t core0[7]; int load0[2] = {load[0], load[1]};
+    for (int i = 0; i < 7; i++) core0[i] = core[i];
+    for (int t = 0; t < tries; t++, c ^= 1) {
+        for (int i = 0; i < 7; i++) core[i] = core0[i];
+        load[0] = load0[0]; load[1] = load0[1];
+        for (int i = 0; i < 7 && load[c] + cost > ROOM_OF(c); i++)              /* make room: movable effects go across */
+            if (core[i] == c && slot_any[i] && load[c ^ 1] + slot_cost[i] <= ROOM_OF(c ^ 1)) { core[i] = (int8_t)(c ^ 1); load[c] -= slot_cost[i]; load[c ^ 1] += slot_cost[i]; }
+        if (load[c] + cost <= ROOM_OF(c)) break;
+    }
+    if (load[c] + cost > ROOM_OF(c)) {                                           /* fits nowhere: say so for the first choice */
+        c = want < 2 ? want : (load0[1] <= load0[0] ? 1 : 0);
+        for (int i = 0; i < 7; i++) core[i] = core0[i];
+        load[0] = load0[0]; load[1] = load0[1];
+    }
+    int fits = load[c] + cost <= ROOM_OF(c);
     if (commit) {
         if (fits) for (int i = 0; i < 7; i++) if (i != s) slot_core[i] = core[i];
         slot_core[s] = (int8_t)c; slot_cost[s] = (uint16_t)cost; slot_any[s] = (uint8_t)(want == 2);
@@ -635,13 +750,40 @@ static int place_effect(int s, int row, int commit)
 }
 int aos_place(int s, int row) { place_effect(s, row, 1); return s >= 0 && s < 7 ? slot_core[s] : 0; }   /* main.c, when a slot's effect changes */
 int aos_slot_core(int s) { return s >= 0 && s < 7 ? slot_core[s] : -1; }                                 /* ... and each pass: has it been moved? */
+/* room on core 0 for `extra` more of the engine's own work, with the effects where they are now */
+static int core0_spare(void)
+{
+    int l = CORE0_BASE, n = 0;
+    for (int i = 0; i < 7; i++) if (slot_core[i] == 0) { l += slot_cost[i]; n++; }
+    return (n ? CORE_ROOM : CORE0_BASE + 1170) - l;
+}
+/* the weather's filters ask for their share when they come on, and give it back when they go off */
+static int wxf_reserve(int want)
+{
+    if (!want) { wxf_reserved = 0; return 0; }
+    if (!wxf_reserved) { if (core0_spare() < CORE0_WXF) return 0; wxf_reserved = 1; }
+    return 1;
+}
 int aos_core_load(int core) { int l = core ? CORE1_BASE : CORE0_BASE; for (int i = 0; i < 7; i++) if (slot_core[i] == core) l += slot_cost[i]; return l * 100 / 1760; }
+static int fx_is(int row, const char *n) { const char *p = fx_info[row - 1].name + 6; while (*n && *p == *n) { p++; n++; } return !*n && !*p; }
+/* two effects that keep their sound in the same memory (12 Nov 2026: Chloaelis' delays) -- the pair either way round */
+static int fx_pair(int a, int b, const char *x, const char *y) { return (fx_is(a, x) && fx_is(b, y)) || (fx_is(a, y) && fx_is(b, x)); }
+static int fx_clash(int a, int b)
+{
+    return fx_pair(a, b, "WIND", "FOG") || fx_pair(a, b, "HAIL", "AURORA")
+        || fx_pair(a, b, "TAPE", "ECHO")                                     /* core 1's Y:$8000-$bfff and X:$4000-$7fff */
+        || fx_pair(a, b, "PT2399", "HAIL") || fx_pair(a, b, "PT2399", "AURORA");   /* PT2399 moved to core 1's X:$2000 (13 Nov 2026) */
+}
 static int pick_effect(int t, int fx2, int row)
 {
     if (place_effect(place_slot_of(t, fx2), row, 0) < 0) return 0;   /* no core has the room */
     /* an effect with a delay buffer has one buffer: a second copy would share it, so it is refused */
     if (row > 0 && row <= FX_COUNT && fx_info[row - 1].has_y)
         for (int i = 0; i < 16; i++) if (i != fx2 * 8 + t && preview_live_fx[i] == row) return 0;
+    /* ... and two effects that keep their sound in the same memory are never in the chain together
+     * (WIND and FOG; HAIL and AURORA; PT2399 and HAIL or AURORA; TAPE and ECHO: fx_clash) */
+    if (row > 0 && row <= FX_COUNT)
+        for (int i = 0; i < 16; i++) { int o = preview_live_fx[i]; if (i != fx2 * 8 + t && o > 0 && o <= FX_COUNT && fx_clash(row, o)) return 0; }
     preview_live_fx[fx2 * 8 + t] = (uint8_t)row;
     for (int k = 0; k < 6; k++) preview_part_fx[t][fx2 * 6 + k] = row > 0 && row <= FX_COUNT ? fx_info[row - 1].def[k] : 64;
     return 1;
@@ -764,6 +906,7 @@ static int sel_slot = 1, shelf_open, shelf_row;
 /* the shelf offers only AERIA's own effects (and "-", empty): never a stock one. TAP and HEAD are AERIA's
  * plumbing with fixed places, so they are not on it either. shelf_row indexes this filtered list. */
 static int shelf_rows[48], shelf_n;
+static int fx_banned(const char *name);
 static void shelf_build(int fx2)
 {
     int n = list_count(fx2);
@@ -773,7 +916,9 @@ static void shelf_build(int fx2)
     for (int r = 1; r < n && shelf_n < 48; r++) {
         list_name(fx2, r, nm);
         if (!(nm[0] == 'A' && nm[1] == 'E' && nm[2] == 'R' && nm[3] == 'I' && nm[4] == 'A' && nm[5] == ' ')) continue;
-        if ((nm[6] == 'T' && nm[7] == 'A' && nm[8] == 'P') || (nm[6] == 'H' && nm[7] == 'E' && nm[8] == 'A' && nm[9] == 'D')) continue;
+        if ((nm[6] == 'T' && nm[7] == 'A' && nm[8] == 'P' && nm[9] != 'E') ||   /* TAP (not TAPE: hidden by mistake until 15 Nov 2026) */
+            (nm[6] == 'H' && nm[7] == 'E' && nm[8] == 'A' && nm[9] == 'D')) continue;
+        if (fx_banned(nm)) continue;
         shelf_rows[shelf_n++] = r;
     }
 }
@@ -792,6 +937,11 @@ static const Rule rules[] = {
     {"DEP", R_SHIM, 20, 120}, {"DPTH", R_SHIM, 20, 120}, {"SPD", R_RATE, 4, 90}, {"RATE", R_RATE, 4, 90},
     {"RES", R_RESO, 0, 35}, {"Q", R_RESO, 0, 25},   /* low resonance (sadnoise, 10 Nov 2026) */ {"HOLD", R_SMEAR, 0, 127}, {"SMR", R_SMEAR, 0, 127}, {"DIFF", R_SMEAR, 20, 127},
     {"FRZ", R_FREEZE, 0, 127},   /* the FFT SMEAR's freeze: the snow's (12 Nov 2026) */
+    /* more knobs that follow the weather (12 Nov 2026, late): PITCH's grain, GRAINS' density, the widths, SMEAR's tilt
+     * and gate, ROSE's brightness, RESO's detune, VERB's movement, RING's follower */
+    {"GRN", R_TIME, 40, 127}, {"DENS", R_SHIM, 30, 120}, {"WIDE", R_SHIM, 50, 127}, {"TILT", R_OPEN, 30, 100}, {"BRIT", R_OPEN, 30, 110},
+    {"GATE", R_DARK, 0, 60}, {"DTUN", R_SHIM, 0, 60}, {"MOD", R_SHIM, 0, 100}, {"FOLW", R_RATE, 0, 100},
+    {"GRIT", R_GRIT, 30, 100},   /* PT2399's CVSD step (64 = the plugin's): storms roughen it (12 Nov 2026) */
 };
 #define N_RULES ((int)(sizeof rules / sizeof rules[0]))
 /* per weather, how much of each role (0..127): SPACE TIME ECHO SEND OPEN DARK GRIT SHIM RESO RATE PITCH SMEAR FREEZE */
@@ -808,6 +958,9 @@ static int name_has(const char *name, const char *part)
     for (int i = 0; name[i]; i++) { int k = 0; while (part[k] && name[i + k] == part[k]) k++; if (!part[k]) return 1; }
     return 0;
 }
+/* effects the owner does not want offered (12 Nov 2026: no clipping or distortion): kept in the firmware so saved
+ * rows still mean the same, but never on a list, never lent, never set up */
+static int fx_banned(const char *name) { return name_has(name, "DIST") || name_has(name, "AERIA -") || name_has(name, "WIND") || name_has(name, "HAIL") || name_has(name, "TWIS"); }   /* WIND, HAIL, TWISTER: gone with their weathers (13 Nov 2026) */   /* "AERIA -": a removed effect's empty row (BBD, 13 Nov 2026) */   /* (BBD, PT2399 and TAPE were held back on 13 Nov 2026 until a crash was found: PT2399 now lives at X:$2000) */
 static int rule_of(const char *knob)
 {
     for (int r = 0; r < N_RULES; r++) {
@@ -881,6 +1034,7 @@ static void slot_pick(int s, int row)
     int ok = pick_effect(slot_track(s), slot_fx(s), row);
 #if defined(AERIAOS)
     if (ok) for (int k = 0; k < 6; k++) preview_slot_p2[s][k] = row > 0 && row <= FX_COUNT ? fx_info[row - 1].def2[k] : 0;
+    else { sl->pending = -1; picking = -1; say("NO ROOM", "DSP FULL"); return; }   /* (15 Nov 2026) refused: said at once, not after five seconds */
 #endif
     (void)ok;
 }
@@ -899,6 +1053,27 @@ static void picks_tick(void)
     }
 }
 
+/* the storm (12 Nov 2026, late): every knob the weather may move -- all of an effect's, not only the ones a rule
+ * names -- is thrown somewhere new every few seconds, each by itself, and all of them at once at a strike. A
+ * knob with a rule stays inside the rule's range (feedback and resonance keep their ceilings); the others take
+ * their whole range. MIX and a knob the musician holds are left alone, as in every weather. */
+static int16_t storm_to[N_SLOTS][6];
+static uint32_t storm_at[N_SLOTS][6];
+static int storm_target(int s, int k)
+{
+    Slot *sl = &slots[s];
+    if (ticks >= storm_at[s][k] || storm_to[s][k] < 0) {
+        int r = rule_of(sl->knob[k]), lo = 0, hi = sl->count[k] - 1;
+        if (r >= 0) { lo = rules[r].lo; hi = rules[r].hi; if (rules[r].role == R_RATE && name_has(sl->name, "DIST")) { lo = 97; hi = 127; } }
+        if (hi > sl->count[k] - 1) hi = sl->count[k] - 1;
+        if (lo > hi) lo = hi;
+        storm_to[s][k] = (int16_t)range(lo, hi);
+        storm_at[s][k] = ticks + (uint32_t)range(61 * 2, 61 * 9);
+    }
+    return storm_to[s][k];
+}
+static int mod_slot_of(int s, int k);   /* mod.c */
+static int xf_mode(void); static int xf_scale(void);   /* master.c */
 /* the weather and the musician, written into each slot */
 static void slots_sound(void)
 {
@@ -914,11 +1089,17 @@ static void slots_sound(void)
                 int want = -1, sum = 0, cnt = 0;
                 for (int w = 1; w < N_WEATHER; w++) if (WON(w)) { int t1 = slot_target(s, k, w); if (t1 >= 0) { sum += t1; cnt++; } }
                 want = cnt ? (sum + cnt / 2) / cnt : slot_target(s, k, CLEAR);
+                if (WON(STORM)) want = storm_target(s, k); else storm_to[s][k] = -1;
+#if defined(AERIAOS)
+                /* a knob no weather has a rule for sits at the effect's own setting, and goes back there after a storm */
+                if (want < 0 && sl->row > 0 && sl->row <= FX_COUNT) want = fx_info[sl->row - 1].def[k];
+#endif
                 if (want >= 0 && xf > 0) { int b = slot_target(s, k, xf_right); if (b >= 0) want += (b - want) * xf / 127; }
                 if (want >= 0 && thunder && rule_of(sl->knob[k]) >= 0 && rules[rule_of(sl->knob[k])].role == R_OPEN) want = want * (256 - thunder) / 256;
                 if (want >= 0) sl->value[k] = (int16_t)(sl->value[k] < want ? sl->value[k] + 1 : sl->value[k] > want ? sl->value[k] - 1 : want);
             }
-            int v = slot_value(s, k);
+            int v = slot_value(s, k) + mod_slot_of(s, k);
+            if (knob_is_mix(sl->knob[k]) && xf_mode() == 2) v = v * xf_scale() / 127;   /* the crossfader as everything's wet */
             if ((slot_bypass >> s) & 1) { int r = rule_of(sl->knob[k]); if (r >= 0 && (rules[r].role == R_SPACE || rules[r].role == R_SEND)) v = 0; }
             lane_put(t, (fx2 ? 24 : 18) + k, clamp(v, 0, sl->count[k] - 1));
         }
@@ -940,7 +1121,7 @@ typedef struct { uint8_t track, fx2; char name[13]; } Want_fx;
 static const Want_fx setup_list[] = {
     {0, 0, "AERIA TAP"}, {1, 0, "AERIA TAP"}, {4, 0, "AERIA HEAD"},
     /* pitch > disto > grains > ring > smear > filter: three long-buffer effects fill this core's FX2 buffers */
-    {4, 1, "AERIA PITCH"}, {5, 0, "AERIA DIST"}, {5, 1, "AERIA GRAIN"},
+    {4, 1, "AERIA PITCH"}, {5, 0, "NONE"}, {5, 1, "AERIA GRAIN"},
     {6, 0, "AERIA RING"}, {6, 1, "AERIA SMEAR"}, {7, 0, "NONE"}, {7, 1, "NONE"},   /* no stock effect anywhere */
 };
 #define N_SETUP ((int)(sizeof setup_list / sizeof setup_list[0]))
@@ -974,6 +1155,67 @@ static void setup_tick(void)
     setup_want = list_id(w->fx2, row);
     pick_effect(w->track, w->fx2, row);
 }
+/* ---- the Lorenz attractor (AERIA OS, sadnoise, 12 Nov 2026), after Chloaelis's (Source/DSP.h `Lorenz`,
+ * PluginProcessor.cpp `modulate`): integrated at the UI's tick (61 a second) in fixed point -- the main processor
+ * has no floating point. x and y each come out as -1000..1000 (Chloaelis: tanh(x / (1.4 sqrt(beta (rho - 1)))),
+ * tanh(y / (1.9 ...))); FILT's two cutoffs follow them, and the quad panner can fly a slot along them.
+ *   speed 0..127: 0.03 x 2^(9 v/127) attractor time units a second (Chloaelis 0..1, default 0.35)
+ *   chaos 0..127: rho = 24.5 + c^2 x 155.5 (just above 24.7 it barely holds a lobe; higher gets wilder)
+ *   shape 0..127: beta 0.5 .. 4 (8/3 at 76)
+ * The state is Q12 (x, y about +-60, z up to about 300); a product (a>>6)(b>>6) is Q12 again without overflow. */
+#if defined(AERIAOS)
+static int32_t lz_x = 410, lz_y = 0, lz_z = 20 << 12;
+static int lz_out[2];                      /* -1000..1000: x (the left), y (the right) */
+static uint32_t lz_seed = 0x10e7u;
+static int32_t lz_mul(int32_t a, int32_t b) { return (a >> 6) * (b >> 6); }
+static void lz_f(int32_t a, int32_t b, int32_t c, int32_t rho, int32_t beta, int32_t *da, int32_t *db, int32_t *dc)
+{
+    *da = 10 * (b - a);
+    *db = lz_mul(a, rho - c) - b;
+    *dc = lz_mul(a, b) - lz_mul(beta, c);
+}
+/* h in Q16 attractor time units: d x h, Q12 x Q16 -> Q12, kept inside 32 bits */
+static int32_t lz_h(int32_t d, int32_t h) { return (d >> 4) * h >> 12; }
+static int lz_isqrt(int32_t v) { int32_t r = 0, b = 1 << 30; if (v <= 0) return 0; while (b > v) b >>= 2; while (b) { if (v >= r + b) { v -= r + b; r = (r >> 1) + b; } else r >>= 1; b >>= 2; } return (int)r; }
+/* tanh, close enough (a rational fit): u and the result in thousandths */
+static int lz_tanh(int32_t u)
+{
+    if (u > 4000) return 1000;
+    if (u < -4000) return -1000;
+    int32_t u2 = u * u / 1000;                                    /* thousandths */
+    return (int)(u * (27000 + u2) / (27000 + 9 * u2));
+}
+static void lz_tick(int speed, int chaos, int shape)
+{
+    int32_t c = chaos * 1000 / 127;                               /* thousandths */
+    int32_t rho = (245 << 12) / 10 + (c * c / 1000) * 637;        /* 24.5 + c^2 x 155.5, Q12 (155.5 x 4096 / 1000 = 637) */
+    int32_t beta = (int32_t)(2048 + shape * (14 << 12) / (4 * 127));   /* 0.5 .. 4, Q12 */
+    /* speed x dt: 0.03 x 2^(9 s) / 61 time units, as Q16 */
+    int32_t e = speed * 9 * 256 / 127;                            /* the exponent, Q8 */
+    int32_t pw = 1 << (e >> 8); pw = pw + (pw * (e & 255)) / 256 * 7 / 10 + 0;   /* 2^(e/256), a line between octaves (close) */
+    int32_t dt = 32 * pw;                                         /* Q16: 0.03 x 65536 / 61 = 32 */
+    int n = (int)((dt + 261) / 262); if (n < 1) n = 1; if (n > 80) n = 80;   /* steps of at most 0.004 */
+    int32_t h = dt / n;
+    for (int i = 0; i < n; i++) {
+        int32_t k1x, k1y, k1z, k2x, k2y, k2z, k3x, k3y, k3z, k4x, k4y, k4z;
+        lz_f(lz_x, lz_y, lz_z, rho, beta, &k1x, &k1y, &k1z);
+        lz_f(lz_x + lz_h(k1x, h / 2), lz_y + lz_h(k1y, h / 2), lz_z + lz_h(k1z, h / 2), rho, beta, &k2x, &k2y, &k2z);
+        lz_f(lz_x + lz_h(k2x, h / 2), lz_y + lz_h(k2y, h / 2), lz_z + lz_h(k2z, h / 2), rho, beta, &k3x, &k3y, &k3z);
+        lz_f(lz_x + lz_h(k3x, h), lz_y + lz_h(k3y, h), lz_z + lz_h(k3z, h), rho, beta, &k4x, &k4y, &k4z);
+        lz_x += lz_h(k1x + 2 * k2x + 2 * k3x + k4x, h) / 6;
+        lz_y += lz_h(k1y + 2 * k2y + 2 * k3y + k4y, h) / 6;
+        lz_z += lz_h(k1z + 2 * k2z + 2 * k3z + k4z, h) / 6;
+    }
+    lz_seed = lz_seed * 1103515245u + 12345u;
+    lz_x += (int32_t)((lz_seed >> 16) & 15) - 8;                  /* a whisper of noise so it never settles */
+    if (lz_x > (400 << 12) || lz_x < -(400 << 12) || lz_y > (400 << 12) || lz_y < -(400 << 12) || lz_z > (900 << 12) || lz_z < -(100 << 12)) { lz_x = 410; lz_y = 0; lz_z = 20 << 12; }
+    /* the outputs: tanh(x / (1.4 sqrt(beta (rho - 1)))) */
+    int32_t br = lz_mul(beta, rho - 4096);                        /* Q12 */
+    int32_t sq = lz_isqrt(br >> 12); if (sq < 1) sq = 1;          /* whole units */
+    lz_out[0] = lz_tanh((lz_x >> 2) * 1000 / (1434 * sq / 1));    /* x / (1.4 sq): (x Q12 >> 2) = x x 1024 */
+    lz_out[1] = lz_tanh((lz_y >> 2) * 1000 / (1946 * sq / 1));
+}
+#endif
 /* generated by ~/octa/tools/gen_scales.py: Balloon Shop's Western scales and Cloudfin's microtonal ones (Scales.h).
  * Degrees in tenths of a cent above the root, ascending, within one period (an octave; Bohlen-Pierce: 3/1). */
 typedef struct { const char *name; uint16_t period, n; const uint16_t *dc; const char *const *lab; } Scale;
@@ -1161,15 +1403,11 @@ static void reso_text(char *n, int midi)
 #if defined(AERIAOS)
 uint8_t preview_scale_key;
 void aos_limiter(int on);
-void aos_master_eq(int band, int freq, int db);
 static void scale_tick(void) { preview_scale_key = (uint8_t)(scale_now() * 12 + aos_scale_root()); aos_limiter(pv(PG_MIX, 10) != 1);   /* and MIX's LIMT: the main out's limiter */
-    /* the master EQ (GAIN, FUNC layer) */
-    aos_master_eq(0, 37, pv(PG_GAIN, 6) - 13); aos_master_eq(1, pv(PG_GAIN, 10), pv(PG_GAIN, 7) - 13);
-    aos_master_eq(2, pv(PG_GAIN, 11), pv(PG_GAIN, 8) - 13); aos_master_eq(3, 105, pv(PG_GAIN, 9) - 13); }
+}
 #endif
 /* ---- MASTER: the freeze delay on the main mix, and the tempo (AERIA OS, sadnoise, 12 Nov 2026) --------------------
- * After the chain and after the weather; the weather never moves it. (The master EQ is on GAIN's FUNC layer, the
- * limiter's switch on MIX's.) The MIX key opens the page:
+ * After the chain and after the weather; the weather never moves it. (The limiter's switch is on MIX's FUNC layer.) The MIX key opens the page:
  *   TIME  the delay's time in sixteenth notes at the tempo, 1..16 -- the sixteen trigs pick it at a touch
  *   FDBK  how much comes round again      HPF / LPF  a high-pass and a lowpass in the feedback
  *   SEND  how much of the mix goes in     WET  how much of the delay is heard (0: the delay is off)
@@ -1177,7 +1415,9 @@ static void scale_tick(void) { preview_scale_key = (uint8_t)(scale_now() * 12 + 
  *   FREEZE: the crossfader at B. Nothing more goes in, what is in it goes round for ever; a change of TIME or
  *         tempo then jumps
  *   NO    tap the tempo (the last taps' average)
- *   The crossfader (FUNC: XFRZ on): at A the delay runs, moved to B it freezes -- and thaws on the way back. */
+ *   The crossfader does ONE thing, XMOD (15 Nov 2026): SCENES (it moves between scene A and scene B), FREEZE (at B
+ *   the delay freezes, back towards A it thaws), DJ FILTER, EFFECTS WET or MOD DEPTH. FUNC + SCENE A makes it the
+ *   scenes' fader, FUNC + SCENE B the freeze; the screen's bottom line and the SCENE lamps say which it is. */
 #if defined(AERIAOS)
 void aos_freeze_delay(int on, int sixteenths, int bpm, int fb, int hp, int lp, int send, int wet, int frozen);
 static uint8_t fz_frozen;
@@ -1186,13 +1426,46 @@ static int tap_n;
 static int master_bpm(void) { return 60 + pv(PG_MASTER, 6); }
 static void master_fast(uint32_t us) { us_clock += us; }
 static uint8_t fz_fader;   /* the crossfader holds it frozen */
-static int master_frozen(void) { return fz_frozen || fz_fader; }
+/* XMOD (12 Nov 2026): what the crossfader does besides freezing the delay.
+ *   0 SCEN  the scenes (as before)
+ *   1 DJF   a DJ filter on the main mix: left of the middle a low-pass comes down, right of it a high-pass goes up
+ *   2 WET   every effect's MIX scaled by the fader: A all dry, B as set
+ *   3 MOD   the MOD page's routes scaled by the fader: A still, B full */
+enum { XM_SCENES, XM_DJF, XM_WET, XM_MOD, XM_FREEZE, N_XMODES };
+static const char *const xf_mode_names[N_XMODES] = {"SCENES", "DJ FILTER", "EFFECTS WET", "MOD DEPTH", "FREEZE"};
+static int xf_mode(void) { Param *p = &params[PG_MASTER][9]; int v = p->user >= 0 ? p->user : p->value; return v < 0 || v >= N_XMODES ? 0 : v; }
+static const char *xf_mode_name(void) { return xf_mode_names[xf_mode()]; }
+static void xf_set_mode(int m) { Param *p = &params[PG_MASTER][9]; p->value = p->user = (int16_t)clamp(m, 0, N_XMODES - 1); say("CROSSFADER", xf_mode_name()); }
+static int xf_scale(void) { return xfade(); }                                    /* 0..127 */
+static void xf_filters(int *lp, int *hp)
+{
+    *lp = 127; *hp = 0;
+    if (xf_mode() != 1) return;
+    int x = xfade();
+    if (x < 56) *lp = 127 - (56 - x) * 85 / 56;                                   /* down to index 42: about 200 Hz */
+    if (x > 72) *hp = (x - 72) * 101 / 55;                                        /* up to index 101: about 5 kHz */
+}
+static uint8_t fz_rand;   /* RFRZ holds it frozen for a while */
+static int16_t fz_rand_t; /* ticks to its next turn */
+static int master_frozen(void) { return fz_frozen || fz_fader || fz_rand; }
+/* RFRZ (Chloaelis's random freeze): a slow random on/off; the knob is the chance of a hold. Holds last 0.4 s to
+ * about 4.6 s, longer the higher the knob; between them 0.3 to 3 s, shorter the higher the knob */
+static void master_rfrz(void)
+{
+    int r = pv(PG_MASTER, 8);                                                   /* 0..127 */
+    if (!r) { if (fz_rand) { fz_rand = 0; if (!master_frozen()) say("FREEZE", "OFF"); } fz_rand_t = 0; return; }
+    if (--fz_rand_t > 0) return;
+    if (fz_rand) { fz_rand = 0; fz_rand_t = (int16_t)(18 + range(0, 152 * (140 - r) / 127)); }
+    else if (range(0, 126) < r) { fz_rand = 1; fz_rand_t = (int16_t)(24 + range(0, 213 * (40 + r) / 127)); }
+    else fz_rand_t = (int16_t)(15 + range(0, 73));
+}
 static void master_tick(void)
 {
     int wet = pv(PG_MASTER, 5);
     /* the crossfader: past three quarters of the way to B it freezes, back under a quarter past the middle it thaws */
-    if (pv(PG_MASTER, 7) == 2) { int x = xfade(); if (x > 96 && !fz_fader) { fz_fader = 1; say("FREEZE", "ON"); } else if (x < 80 && fz_fader) { fz_fader = 0; if (!fz_frozen) say("FREEZE", "OFF"); } }
+    if (xf_mode() == XM_FREEZE) { int x = xfade(); if (x > 96 && !fz_fader) { fz_fader = 1; say("FREEZE", "ON"); } else if (x < 80 && fz_fader) { fz_fader = 0; if (!fz_frozen) say("FREEZE", "OFF"); } }
     else fz_fader = 0;
+    master_rfrz();
     aos_freeze_delay(wet > 0 || master_frozen(), pv(PG_MASTER, 0), master_bpm(), pv(PG_MASTER, 1), pv(PG_MASTER, 2), pv(PG_MASTER, 3),
                      pv(PG_MASTER, 4), wet, master_frozen());
 }
@@ -1218,7 +1491,7 @@ static void master_say(int i, int v, char *n)
 {
     int k = 0;
     if (i == 0) { num(n, v); while (n[k]) k++; n[k++] = '/'; n[k++] = '1'; n[k++] = '6'; n[k] = 0; say("DELAY TIME", n); }
-    else if (i == 7) say("FADER FREEZES", v == 2 ? "ON" : "OFF");
+    else if (i == 9) say("CROSSFADER", xf_mode_names[v < 0 || v >= N_XMODES ? 0 : v]);
     else if (i == 6) { num(n, 60 + v); while (n[k]) k++; n[k++] = 'B'; n[k++] = 'P'; n[k++] = 'M'; n[k] = 0; say("TEMPO", n); }
     else if (i == 2 || i == 3) {                                              /* the one-pole's corner, about */
         int c = i == 3 ? (v >= 127 ? 32768 : 600 + v * v * 2) : v * v / 2, hz = c >= 30000 ? 0 : c * 7019 / (32768 - c / 2);
@@ -1271,6 +1544,7 @@ static void weather_fresh(void);
 /* this weather alone (the knob, the up and down keys, the weather's own turning) */
 static void set_weather(int w)
 {
+    if (!wx_kept(w) || pv_base(PG_SKY, 5)) w = CLEAR;                  /* a weather that is gone, or WX OFF: a clear sky */
     if (w == weather && wx_on == (w == CLEAR ? 0 : 1u << w)) return;
     weather = w; wx_on = (uint8_t)(w == CLEAR ? 0 : 1u << w);
     weather_fresh();
@@ -1279,6 +1553,8 @@ static void set_weather(int w)
 static void toggle_weather(int w)
 {
     if (w <= CLEAR || w >= N_WEATHER) { set_weather(CLEAR); return; }
+    if (!wx_kept(w)) return;
+    if (pv_base(PG_SKY, 5)) { say("WEATHER", "OFF"); return; }
     wx_on ^= (uint8_t)(1u << w);
     if (WON(w)) { if (w == SNOW) wx_on &= (uint8_t)~(1u << HEAT); if (w == HEAT) wx_on &= (uint8_t)~(1u << SNOW); weather = w; }
     else { weather = CLEAR; for (int i = N_WEATHER - 1; i > CLEAR; i--) if (WON(i)) { weather = i; break; } }
@@ -1323,7 +1599,7 @@ static void sound_tick(void)
 #if defined(PREVIEW) && defined(AERIAOS)
     /* the balloons' long grains (aeria-os sampler.c): each floating balloon sings, unless trig 1-3 quieted it */
     for (int b = 0; b < 3; b++)
-        aos_balloon_cloud(b, src_balloons && balloon[b].state == B_FLOATING && !((balloon_quiet >> b) & 1),
+        aos_balloon_cloud(b, !seq_on && src_balloons && balloon[b].state == B_FLOATING && !((balloon_quiet >> b) & 1),
                           pv(PG_BALLOON, 0), pv(PG_BALLOON, 3), pv(PG_BALLOON, 4), pv(PG_BALLOON, 1),
                           pv(PG_BALLOON, 2) - 64 + 12 * (pv(PG_BALLOON, 6) - 3) + pv(PG_BALLOON, 9 + b) - 25,
                           pv(PG_BALLOON, 7) - 1, pv(PG_BALLOON, 8) - 1, pv(PG_BALLOON, 5));
@@ -1331,12 +1607,12 @@ static void sound_tick(void)
     /* HEAD on T3 FX1: FDBK FTON SMPL STAR IN WARM (the order its manifest gives) */
     int smpl = src_loop ? pv(PG_LOOP, 4) : (src_balloons && any_floating()) ? pv(PG_BALLOON, 5) : 0;
     int star = src_stars ? pv(PG_STARS, 11) : 0;
-    lane_put(HEAD_T, 18, pv(PG_MIX, 0));
-    lane_put(HEAD_T, 19, pv(PG_MIX, 1));
+    lane_put(HEAD_T, 18, 0);                 /* no main feedback (12 Nov 2026) */
+    lane_put(HEAD_T, 19, 90);
     lane_put(HEAD_T, 20, smpl);
     lane_put(HEAD_T, 21, star);
     lane_put(HEAD_T, 22, pv(PG_GAIN, 2));
-    lane_put(HEAD_T, 23, pv(PG_MIX, 3));
+    lane_put(HEAD_T, 23, 0);                 /* no soft clip */
     /* the inputs: T3 THRU, MAIN slots 0 INAB, 1 VOL, 3 INCD, 4 VOL (64 = unity) */
     lane_put(HEAD_T, 0, pv(PG_MIX, 6));
     lane_put(HEAD_T, 3, pv(PG_MIX, 7));
@@ -5447,9 +5723,9 @@ static void midi_mod_set(int m);
 void aos_route(int s, int on, const uint32_t g[4]);
 void aos_cue_chain(int on);
 enum { RT_CHAIN, RT_MAIN, RT_CUE, RT_QUAD, N_ROUTES };
-enum { PN_FIX, PN_DRIFT, PN_ORBIT, PN_FIG8, PN_PING, PN_DIVE, PN_JUMP, N_PMODES };
+enum { PN_FIX, PN_DRIFT, PN_ORBIT, PN_FIG8, PN_PING, PN_DIVE, PN_JUMP, PN_LRNZ, N_PMODES };
 static const char *const route_name[N_ROUTES] = {"CHAIN", "MAIN", "CUE", "QUAD"};
-static const char *const pmode_name[N_PMODES] = {"FIX", "DRIFT", "ORBIT", "FIG 8", "PING", "DIVE", "JUMP"};
+static const char *const pmode_name[N_PMODES] = {"FIX", "DRIFT", "ORBIT", "FIG 8", "PING", "DIVE", "JUMP", "LRNZ"};
 typedef struct { uint8_t route, mode, scat, x, y, spd, dpth; } PanSet;
 static PanSet pan_set[N_SLOTS] = {{0, 0, 0, 64, 0, 40, 60}, {0, 0, 0, 64, 0, 40, 60}, {0, 0, 0, 64, 0, 40, 60}, {0, 0, 0, 64, 0, 40, 60},
                                   {0, 0, 0, 64, 0, 40, 60}, {0, 0, 0, 64, 0, 40, 60}, {0, 0, 0, 64, 0, 40, 60}};
@@ -5472,8 +5748,10 @@ static void pan_gains(int x, int y, uint32_t g[4])
     g[2] = q23(gl * bk, 127 * 127); g[3] = q23(gr * bk, 127 * 127);
 }
 static int slot_is_grains(int s) { return slots[s].row > 0 && slots[s].name[0] && slots[s].name[6] == 'G'; }   /* "AERIA GRAINS" */
+static int lz_speed = 44, lz_chaos = 38, lz_shape = 76;   /* FILT's FUNC knobs set them while a FILT is in the chain */
 static void pan_tick(void)
 {
+    lz_tick(lz_speed, lz_chaos, lz_shape);
     int any_back = 0;
     for (int s = 0; s < N_SLOTS; s++) {
         PanSet *p = &pan_set[s];
@@ -5495,6 +5773,7 @@ static void pan_tick(void)
         case PN_FIG8: pan_ph[s] += (uint16_t)sp; x = bx + sin10(pan_ph[s]) * d / 127; y = by + sin10(2 * pan_ph[s]) * d / 254; break;
         case PN_PING: pan_ph[s] += (uint16_t)sp; x = bx + sin10(pan_ph[s]) * d / 127; break;
         case PN_DIVE: pan_ph[s] += (uint16_t)sp; y = by + sin10(pan_ph[s]) * d / 127; break;
+        case PN_LRNZ: x = bx + lz_out[0] * d / 1000; y = by + lz_out[1] * d / 1000; break;   /* along the Lorenz attractor (Chloaeilius flies its echoes on it) */
         case PN_JUMP:
             if (!pan_hold[s]--) { pan_hold[s] = (uint16_t)(2 + (127 - p->spd)); pan_jx[s] = bx + range(-d, d); pan_jy[s] = by + range(-d, d); }
             x = pan_jx[s]; y = pan_jy[s]; break;
@@ -6017,11 +6296,25 @@ static void pong_leds(void)
 #if defined(AERIAOS)
 void aos_weather_filters(int lp, int hp);   /* cutoff indices 0..127 (20 Hz .. 20 kHz, log); -1 off */
 static int wx_lp = 127 << 8, wx_hp = 0, wx_roll;
-static int lend_slot = -1, lend_row;
-static uint32_t lend_until, roll_next;
+static int16_t lend_row[N_SLOTS];        /* what the lightning lent each slot (0: nothing) */
+static uint32_t lend_until[N_SLOTS], lend_at[N_SLOTS], roll_next;
+static uint8_t wx_struck;                /* a strike the lending has not answered yet (strike() sets it) */
+/* the filters to the engine (13 Nov 2026): they run only with their share of core 0 reserved (shelf.c), and give it
+ * back when both are open; no room: they stay off and it says so once */
+static void wx_send(int lp, int hp)
+{
+    static uint8_t full_said;
+    lp = lp >= 126 ? -1 : lp; hp = hp <= 1 ? -1 : hp;
+    if (lp < 0 && hp < 0) { wxf_reserve(0); full_said = 0; }
+    else if (!wxf_reserve(1)) { lp = hp = -1; if (!full_said) { say("DSP FULL", "FILTERS OFF"); full_said = 1; } }
+    aos_weather_filters(lp, hp);
+}
 static void wx_tick(void)
 {
-    if (!pv(PG_MIX, 5)) { aos_weather_filters(-1, -1); wx_lp = 127 << 8; wx_hp = 0; return; }
+    /* WSND off: no filters, no thunder in the sound -- but the lightning still lends (that is the chain, not the weather's own sound) */
+    int xlp, xhp; xf_filters(&xlp, &xhp);                          /* the crossfader as a DJ filter (master.c) */
+    if (seq_on) { wx_send(xlp, xhp); return; }                     /* the sequencer: the DJ filter only (13 Nov 2026) */
+    if (!pv(PG_MIX, 5)) { wx_send(xlp, xhp); wx_lp = 127 << 8; wx_hp = 0; goto lends; }
     int rain = WON(RAIN) || WON(STORM);
     int lp_t = rain ? 105 : 127;                                   /* index 105: about 6 kHz */
     /* thunder: the strikes (thunder 200 falling) and, under clouds, rolls of their own */
@@ -6033,27 +6326,38 @@ static void wx_tick(void)
     int hp_t = pv(PG_MIX, 4) ? 42 : 0;                             /* index 42: about 200 Hz */
     wx_hp += (hp_t * 256 - wx_hp) / 90;
     int lp = wx_lp >> 8, hp = wx_hp >> 8;
-    aos_weather_filters(lp >= 126 ? -1 : lp, hp <= 1 ? -1 : hp);
-    /* lightning lends an effect: a strike in a storm, an empty slot, an effect the chain has not got (one with no
-     * buffer, so it always fits); it goes back when its time is up, unless the musician kept it */
-    if (lend_slot >= 0 && ticks > lend_until) {
-        if (slots[lend_slot].row == lend_row) slot_pick(lend_slot, 0);
-        lend_slot = -1;
+    if (xlp < lp) lp = xlp;
+    if (xhp > hp) hp = xhp;
+    wx_send(lp, hp);
+lends:
+    /* lightning lends effects, as in Balloon Shop: every strike of a storm drops an effect the chain has not got
+     * into an empty slot for 45 to 90 s, and it goes again when its time is up (unless the musician kept it by
+     * turning one of its knobs) -- several at once, so in a storm effects keep dropping in and out */
+    /* a loan that found no room (the loader said so) frees its slot for the next strike */
+    for (int sl = 0; sl < N_SLOTS; sl++) if (lend_row[sl] && picking < 0 && slots[sl].row != lend_row[sl] && ticks > lend_at[sl] + 244u) lend_row[sl] = 0;
+    for (int sl = 0; sl < N_SLOTS; sl++) if (lend_row[sl] && ticks > lend_until[sl] && picking < 0) {
+        int held = 0;
+        for (int k = 0; k < 6; k++) if (slots[sl].user[k] >= 0) held = 1;
+        if (slots[sl].row == lend_row[sl] && !held) { slot_pick(sl, 0); say("STORM TAKES", fx_info[lend_row[sl] - 1].name + 6); }
+        lend_row[sl] = 0;
     }
-    if (WON(STORM) && thunder == 200 && lend_slot < 0 && picking < 0) {
+    if (!WON(STORM)) wx_struck = 0;
+    if (WON(STORM) && wx_struck && picking < 0) {
+        wx_struck = 0;
         int empty = -1;
-        for (int s = N_SLOTS - 1; s >= 0; s--) if (slots[s].row <= 0) { empty = s; break; }
+        for (int sl = N_SLOTS - 1; sl >= 0; sl--) if (slots[sl].row <= 0 && !lend_row[sl]) { empty = sl; break; }
         int cand[FX_COUNT], n = 0;
         for (int r = 1; r <= FX_COUNT; r++) {
-            int have = 0;
-            for (int s = 0; s < N_SLOTS; s++) if (slots[s].row == r) have = 1;
-            if (!have && !fx_info[r - 1].has_y) cand[n++] = r;
+            int have = 0; const char *nm = fx_info[r - 1].name;
+            for (int sl = 0; sl < N_SLOTS; sl++) if (slots[sl].row == r) have = 1;
+            if (name_has(nm, "WIND") || name_has(nm, "FOG") || name_has(nm, "TWIS") || name_has(nm, "HAIL") || name_has(nm, "AURO") || name_has(nm, "WARM")) continue;   /* their own weathers bring those */
+            if (!have && !fx_info[r - 1].has_y && !fx_banned(nm)) cand[n++] = r;
         }
         if (empty >= 0 && n) {
-            lend_row = cand[rnd() % (uint32_t)n]; lend_slot = empty;
-            lend_until = ticks + 61u * (uint32_t)range(45, 90);
-            slot_pick(empty, lend_row);
-            say("LIGHTNING LENDS", fx_info[lend_row - 1].name + 6);
+            lend_row[empty] = (int16_t)cand[rnd() % (uint32_t)n];
+            lend_until[empty] = ticks + 61u * (uint32_t)range(45, 90); lend_at[empty] = ticks;
+            slot_pick(empty, lend_row[empty]);
+            say("LIGHTNING LENDS", fx_info[lend_row[empty] - 1].name + 6);
         }
     }
 }
@@ -6072,18 +6376,28 @@ static uint8_t xw_on;                    /* a bit a weather of the three */
 static const char *const xf_name[XF_N] = {"AERIA WIND", "AERIA FOG", "AERIA TWISTER", "AERIA HAIL", "AERIA AURORA"};
 static const uint16_t xf_tail[XF_N] = {30, 30, 30, 120, 720};   /* ticks it is left ringing after its fade (hail's stones, the aurora's tail) */
 static int8_t xf_slot[XF_N] = {-1, -1, -1, -1, -1};
-static uint8_t xf_amt[XF_N], xf_row[XF_N], xf_ready;
+static uint8_t xf_amt[XF_N], xf_row[XF_N], xf_ready, xf_fail[XF_N], xf_set[XF_N];
 static uint16_t xf_gone[XF_N];
 static uint32_t tw_until, tw_roll;
 static int xf_same(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 static void xw_toggle(int w)
 {
+    if (w != XW_AURORA) return;                                        /* WIND and HAIL are gone (13 Nov 2026) */
+    if (pv_base(PG_SKY, 5)) { say("WEATHER", "OFF"); return; }
     xw_on ^= (uint8_t)(1u << w);
     int on = (xw_on >> w) & 1;
     if (on && w == XW_WIND && WON(FOG)) toggle_weather(FOG);          /* wind blows the fog away */
     if (on && w == XW_HAIL) xw_on &= (uint8_t)~(1u << XW_AURORA);
     if (on && w == XW_AURORA) xw_on &= (uint8_t)~(1u << XW_HAIL);
     say(w == XW_WIND ? "WIND" : w == XW_HAIL ? "HAIL" : "AURORA", on ? "ON" : "OFF");
+}
+/* AUTO's share: with a new spell of weather the wind, the hail or the aurora may come along (after Balloon Shop's
+ * auto weather: wind out of a clear or cloudy sky, hail only out of a storm, the aurora on a clear night) */
+static void xw_auto(int w)
+{
+    uint32_t r = rnd() % 100u;
+    xw_on = 0;
+    if (w == CLEAR && r < 30) xw_on = 1u << XW_AURORA;                 /* 13 Nov 2026: the aurora is the only one left */
 }
 static void xw_twister(void) { if (ticks > tw_until) { tw_until = ticks + 61u * 24u; say("TWISTER", 0); } }
 static void xw_tick(void)
@@ -6092,35 +6406,40 @@ static void xw_tick(void)
         if (ticks < 90) return;
         for (int i = 0; i < XF_N; i++) for (int r = 1; r <= FX_COUNT; r++) if (xf_same(fx_info[r - 1].name, xf_name[i])) xf_row[i] = (uint8_t)r;
         /* what a weather left in the chain when the power went: its again, to fade and take away */
-        for (int i = 0; i < XF_N; i++) for (int s = 0; s < N_SLOTS; s++) if (xf_row[i] && slots[s].row == xf_row[i]) { xf_slot[i] = (int8_t)s; xf_amt[i] = (uint8_t)clamp(slots[s].user[0], 0, 127); }
+        for (int i = 0; i < XF_N; i++) for (int s = 0; s < N_SLOTS; s++) if (xf_row[i] && slots[s].row == xf_row[i]) { xf_slot[i] = (int8_t)s; xf_amt[i] = (uint8_t)clamp(slots[s].user[0], 0, 127); xf_set[i] = 1; }
         xf_ready = 1;
     }
     static uint8_t fog_was;
     if (WON(FOG) && !fog_was) xw_on &= (uint8_t)~(1u << XW_WIND);     /* ... and fog stills the wind */
     fog_was = (uint8_t)WON(FOG);
     int sound = pv(PG_MIX, 5) != 0;                                    /* WSND: the weather's sound */
-    if (sound && (xw_on & 1) && WON(CLOUDY) && ticks > tw_roll) { tw_roll = ticks + 61u; if (rnd() % 150u == 0) xw_twister(); }
-    int want[XF_N] = {sound && (xw_on >> XW_WIND) & 1, sound && WON(FOG), sound && ticks < tw_until, sound && (xw_on >> XW_HAIL) & 1, sound && (xw_on >> XW_AURORA) & 1};
+    (void)tw_roll; (void)xw_twister;                                   /* WIND, HAIL and the TWISTER are gone (13 Nov 2026) */
+    int want[XF_N] = {0, sound && WON(FOG), 0, 0, sound && (xw_on >> XW_AURORA) & 1};
     for (int i = 0; i < XF_N; i++) {
         int s = xf_slot[i], row = xf_row[i];
         if (!row) continue;
-        if (s >= 0 && slots[s].row != row) { s = xf_slot[i] = -1; xf_amt[i] = 0; }   /* the musician took the slot for something else */
+        if (!want[i]) xf_fail[i] = 0;                                   /* asked again only when the weather comes again */
+        if (s >= 0 && slots[s].pending >= 0) continue;                  /* still being put in */
+        if (s >= 0 && slots[s].row != row) { if (!xf_set[i]) xf_fail[i] = 1; s = xf_slot[i] = -1; xf_amt[i] = 0; }   /* it did not fit (said once), or the musician took the slot */
         if (s < 0) {
-            if (!want[i] || picking >= 0) continue;
+            if (!want[i] || picking >= 0 || xf_fail[i]) continue;
             int have = 0, empty = -1;
-            for (int k = 0; k < N_SLOTS; k++) { if (slots[k].row == row) have = 1; if (slots[k].row <= 0 && k != lend_slot) empty = k; }
+            for (int k = 0; k < N_SLOTS; k++) { if (slots[k].row == row) have = 1; if (slots[k].row <= 0 && !lend_row[k]) empty = k; }
             if (have || empty < 0) continue;                            /* there by hand already, or no room: the sky still shows it */
             slot_pick(empty, row);
             if (slots[empty].row != row && slots[empty].pending != row) continue;   /* the DSP had no room for it */
-            xf_slot[i] = (int8_t)empty; xf_amt[i] = 0; xf_gone[i] = 0;
+            xf_slot[i] = (int8_t)empty; xf_amt[i] = 0; xf_gone[i] = 0; xf_set[i] = 0;
             continue;
         }
-        if (slots[s].pending >= 0) continue;                            /* still being put in */
+        if (!xf_set[i]) {                                               /* in: its own knobs as its maker set them, not as the sky would */
+            for (int k = 1; k < 6; k++) slots[s].user[k] = slots[s].value[k] = fx_info[row - 1].def[k];
+            xf_set[i] = 1;
+        }
         int target = want[i] ? 127 : 0;
         if (i == XF_TWISTER) target = want[i] && tw_until - ticks > 61u * 22u ? 127 : 0;   /* its knob is a trigger: up for the first two seconds */
         if (xf_amt[i] < target) xf_amt[i] = (uint8_t)clamp(xf_amt[i] + 6, 0, 127); else if (xf_amt[i] > target) xf_amt[i] = (uint8_t)clamp(xf_amt[i] - 6, 0, 127);
         slots[s].user[0] = xf_amt[i]; slots[s].value[0] = xf_amt[i];
-        if (!want[i] && !xf_amt[i]) { if (++xf_gone[i] > xf_tail[i]) { slot_pick(s, 0); xf_slot[i] = -1; } } else xf_gone[i] = 0;
+        if (!want[i] && !xf_amt[i]) { if (++xf_gone[i] > xf_tail[i] && picking < 0) { slot_pick(s, 0); xf_slot[i] = -1; } } else xf_gone[i] = 0;
     }
 }
 /* the sky's share: wind streaks, hailstones, the aurora's curtains, the twister's funnel */
@@ -6155,7 +6474,293 @@ static void xw_draw(void)
 #if defined(AERIAOS) && (defined(__m68k__) || defined(SEQ_HOST))
 #include "seq_host.h"
 #define SEQ_UI 1
-static uint8_t seq_on;
+/* (seq_on is declared in head12.c: the sky's parts ask it too, 13 Nov 2026) */
+#endif
+/* ---- MOD: the modulation matrix (AERIA OS, sadnoise, 12 Nov 2026) ------------------------------------------------
+ * After Chloaelis: three LFOs, the Lorenz attractor and the flock (boids), each free to move any number of knobs, in
+ * the sky and in the sequencer alike. [FUNC] + [ARR] opens the MOD page (both faces):
+ *   TRIG 1..16  a route (lit: it moves something; brightest: the one in hand)
+ *   A ROUT  the route      B SRC  its source      C DPTH  how far (-63..63: either way; 63 = the knob's whole range)
+ *   D E F   the source's own three settings (LFO: RATE SHAP PHAS; LORENZ: SPD CHAS SHAP; FLOCK: SPD COHE SCAT)
+ *   YES     learn: the page closes; the next knob you turn, on any page, is the route's destination
+ *   FUNC + YES  the route is cleared        NO or FUNC + ARR  closes
+ * Destinations: a page knob of the sky (CHAIN's effects' knobs, SKY, LOOP, STARS, BALLOON, MIX, GAIN, MASTER), a
+ * sequencer track's parameter (SRC AMP MOD FLT GEN MIDI pages) or a track's effect knob. A knob you hold, or that the
+ * weather moves, is moved further from where it is. Everything is kept in battery RAM at 0x100EC000.
+ * Sources give -1000..1000 at the UI's tick (61 a second). */
+#if defined(AERIAOS)
+enum { MS_OFF, MS_LFO1, MS_LFO2, MS_LFO3, MS_LZX, MS_LZY, MS_LZZ, MS_FLKX, MS_FLKY, MS_FLKS, MS_BRD1, MS_BRD2, MS_N };
+static const char *const ms_name[MS_N] = {"OFF", "LFO 1", "LFO 2", "LFO 3", "LRNZ X", "LRNZ Y", "LRNZ Z", "FLOCK X", "FLOCK Y", "FLOCK SPRD", "BIRD 1", "BIRD 2"};
+enum { MK_NONE, MK_PAGE, MK_SLOT, MK_TRK, MK_TFX };
+#define N_ROUTES 16
+typedef struct { uint8_t src; int8_t depth; uint16_t dest; } ModRoute;     /* dest: kind << 12 | index */
+typedef struct { uint8_t magic[4], ver, pad[3]; ModRoute r[N_ROUTES]; uint8_t lfo[3][3], lz[3], flk[3], pad2[5]; } ModStore;
+#define MODS ((volatile ModStore *)fake_mods)
+void aos_lorenz(int l, int r);
+#ifdef SEQ_UI
+static void sqsc_apply(void);
+#endif
+static int mod_open, mod_sel, mod_learn = -1;
+static uint8_t led_want[16];   /* (ui12.c's) */
+static void strcat_s(char *d, const char *s) { int i = 0; while (d[i]) i++; while (*s && i < 15) d[i++] = *s++; d[i] = 0; }
+static int ms_val[MS_N];
+static uint32_t lfo_ph[3]; static int lfo_sh[3], lfo_sh_to[3];
+static void mod_init(void)
+{
+    volatile ModStore *m = MODS;
+    if (m->magic[0] == 'A' && m->magic[1] == 'E' && m->magic[2] == 'M' && m->magic[3] == 'D' && m->ver == 1) return;
+    for (unsigned i = 0; i < sizeof(ModStore); i++) ((volatile uint8_t *)m)[i] = 0;
+    for (int i = 0; i < 3; i++) { m->lfo[i][0] = (uint8_t)(40 + 15 * i); m->lfo[i][1] = (uint8_t)i; }
+    m->lz[0] = 44; m->lz[1] = 38; m->lz[2] = 76;
+    m->flk[0] = 50; m->flk[1] = 64; m->flk[2] = 40;
+    m->magic[0] = 'A'; m->magic[1] = 'E'; m->magic[2] = 'M'; m->magic[3] = 'D'; m->ver = 1;
+}
+/* ---- the sources ---- */
+static uint32_t pow2_q8(int e) { uint32_t w = 1u << (e >> 8); return w + (w * (uint32_t)(e & 255)) / 256u; }   /* 2^(e/256), between octaves a line */
+static const char *const lfo_shape[7] = {"TRI", "SINE", "SAW", "RAMP", "SQR", "S+H", "SMTH"};
+static int lfo_out(int i)
+{
+    volatile ModStore *m = MODS;
+    uint32_t fm = 20u * pow2_q8(m->lfo[i][0] * 10 * 256 / 127);     /* milli-Hz: 0.02 .. 20 Hz */
+    uint32_t was = lfo_ph[i];
+    lfo_ph[i] += fm * 70409u;                                        /* 2^32 / 61000 */
+    uint32_t p = lfo_ph[i] + ((uint32_t)m->lfo[i][2] << 25);         /* PHAS: where it starts against the others */
+    int x = (int)(p >> 22);                                          /* 0..1023 */
+    int tri = x < 512 ? x * 4 - 1024 : 3072 - x * 4;                 /* -1024..1024 */
+    if (tri > 1000) tri = 1000;
+    if (tri < -1000) tri = -1000;
+    if (lfo_ph[i] < was) { lfo_sh_to[i] = range(-1000, 1000); if (m->lfo[i][1] == 5) lfo_sh[i] = lfo_sh_to[i]; }
+    switch (m->lfo[i][1]) {
+    case 1: { int a = tri; return a * (2000 - (a < 0 ? -a : a)) / 1000; }      /* a parabola: close to a sine */
+    case 2: return x * 2000 / 1023 - 1000;
+    case 3: return 1000 - x * 2000 / 1023;
+    case 4: return x < 512 ? 1000 : -1000;
+    case 5: return lfo_sh[i];
+    case 6: lfo_sh[i] += (lfo_sh_to[i] - lfo_sh[i]) / 8; return lfo_sh[i];
+    default: return tri;
+    }
+}
+/* the flock: eight birds on a square of -1000..1000, after Chloaelis's boids (cohesion, separation, alignment, a
+ * little wander, walls that turn them) */
+#define N_BIRDS 8
+static int brd_x[N_BIRDS], brd_y[N_BIRDS], brd_vx[N_BIRDS], brd_vy[N_BIRDS], brd_ready;
+static void flock_tick(void)
+{
+    volatile ModStore *m = MODS;
+    if (!brd_ready) { for (int i = 0; i < N_BIRDS; i++) { brd_x[i] = range(-600, 600); brd_y[i] = range(-600, 600); brd_vx[i] = range(-8, 8); brd_vy[i] = range(-8, 8); } brd_ready = 1; }
+    int spd = 2 + m->flk[0] / 4, coh = m->flk[1], sep = m->flk[2];
+    int cx = 0, cy = 0, ax = 0, ay = 0;
+    for (int i = 0; i < N_BIRDS; i++) { cx += brd_x[i]; cy += brd_y[i]; ax += brd_vx[i]; ay += brd_vy[i]; }
+    cx /= N_BIRDS; cy /= N_BIRDS; ax /= N_BIRDS; ay /= N_BIRDS;
+    for (int i = 0; i < N_BIRDS; i++) {
+        int dx = (cx - brd_x[i]) * coh / 6000, dy = (cy - brd_y[i]) * coh / 6000;     /* cohesion */
+        for (int j = 0; j < N_BIRDS; j++) if (j != i) {                               /* separation */
+            int ex = brd_x[i] - brd_x[j], ey = brd_y[i] - brd_y[j], d = (ex < 0 ? -ex : ex) + (ey < 0 ? -ey : ey);
+            if (d < 60 + sep * 3) { dx += ex * sep / 2000; dy += ey * sep / 2000; }
+        }
+        dx += (ax - brd_vx[i]) / 8; dy += (ay - brd_vy[i]) / 8;                       /* alignment */
+        dx += range(-2, 2); dy += range(-2, 2);                                       /* wander */
+        if (brd_x[i] > 850) dx -= 4;
+        if (brd_x[i] < -850) dx += 4;
+        if (brd_y[i] > 850) dy -= 4;
+        if (brd_y[i] < -850) dy += 4;
+        brd_vx[i] = clamp(brd_vx[i] + dx, -spd, spd); brd_vy[i] = clamp(brd_vy[i] + dy, -spd, spd);
+        brd_x[i] = clamp(brd_x[i] + brd_vx[i], -1000, 1000); brd_y[i] = clamp(brd_y[i] + brd_vy[i], -1000, 1000);
+    }
+    int sp = 0;
+    for (int i = 0; i < N_BIRDS; i++) { int ex = brd_x[i] - cx, ey = brd_y[i] - cy; sp += (ex < 0 ? -ex : ex) + (ey < 0 ? -ey : ey); }
+    sp /= N_BIRDS;
+    ms_val[MS_FLKX] = cx; ms_val[MS_FLKY] = cy; ms_val[MS_FLKS] = clamp(sp * 2000 / 1000 - 1000, -1000, 1000);
+    ms_val[MS_BRD1] = brd_x[0]; ms_val[MS_BRD2] = brd_y[1];
+}
+/* ---- where they go ---- */
+static int16_t mod_slot[N_SLOTS][6];
+#ifdef SEQ_UI
+extern int16_t aos_mod_tp[SQ_TRACKS][TP_ALL], aos_mod_fxk[SQ_TRACKS][6];
+#endif
+static int mod_slot_of(int s, int k) { return mod_slot[s][k]; }
+static int mod_range(uint16_t dest)
+{
+    int k = dest >> 12, i = dest & 0xFFF;
+    if (k == MK_PAGE && i < N_PAGES * 12) { const Param *p = &params[i / 12][i % 12]; return p->name[0] ? p->hi - p->lo : 0; }
+    if (k == MK_SLOT && i < N_SLOTS * 6) { const Slot *sl = &slots[i / 6]; return sl->row > 0 && sl->knob[i % 6][0] ? sl->count[i % 6] - 1 : 0; }
+    if (k == MK_TRK || k == MK_TFX) return 127;
+    return 0;
+}
+static void mod_tick(void)
+{
+    volatile ModStore *m = MODS;
+    mod_init();
+    for (int i = 0; i < 3; i++) ms_val[MS_LFO1 + i] = lfo_out(i);
+    /* a FILT in the chain (or on a track) owns the attractor's settings: its FUNC knobs LZSP CHAS SHAP are MOD's
+     * LRNZ settings too, so there is one attractor and both places show it */
+    for (int s = 0; s < N_SLOTS; s++) if (slots[s].row > 0 && slots[s].row <= FX_COUNT && name_has(fx_info[slots[s].row - 1].name, "FILT") && !seq_on) {
+        for (int k = 0; k < 3; k++) m->lz[k] = preview_slot_p2[s][k];
+        break;
+    }
+#ifdef SEQ_UI
+    if (seq_on) for (int t = 0; t < SQ_TRACKS; t++) { int r = SQH->fx_row[t]; if (r > 0 && r <= FX_COUNT && name_has(fx_info[r - 1].name, "FILT")) { for (int k = 0; k < 3; k++) m->lz[k] = SQH->fx_knob[t][6 + k]; break; } }
+#endif
+    lz_speed = m->lz[0]; lz_chaos = m->lz[1]; lz_shape = m->lz[2];                     /* the attractor itself runs in pan_tick */
+    aos_lorenz(lz_out[0], lz_out[1]);                                                 /* FILT's two cutoffs follow it (main.c) */
+    ms_val[MS_LZX] = lz_out[0]; ms_val[MS_LZY] = lz_out[1];
+    { int z = lz_z >> 12, rho = 25 + m->lz[1] * m->lz[1] / 104; ms_val[MS_LZZ] = clamp((z - (rho - 1)) * 1000 / (rho > 0 ? rho : 1) * 2, -1000, 1000); }
+    flock_tick();
+    for (int i = 0; i < N_PAGES * 12; i++) mod_pv[i] = 0;
+    for (int s = 0; s < N_SLOTS; s++) for (int k = 0; k < 6; k++) mod_slot[s][k] = 0;
+#ifdef SEQ_UI
+    for (int t = 0; t < SQ_TRACKS; t++) { for (int k = 0; k < TP_ALL; k++) aos_mod_tp[t][k] = 0; for (int k = 0; k < 6; k++) aos_mod_fxk[t][k] = 0; }
+#endif
+#ifdef SEQ_UI
+    if (seq_on) sqsc_apply();
+    if (seq_on && xf_mode() == 1) {                       /* the crossfader as a DJ filter, in the sequencer: every track's own filters */
+        int x = xfade(), lp = x < 56 ? (56 - x) * 100 / 56 : 0, hp = x > 72 ? (x - 72) * 100 / 55 : 0;
+        for (int t = 0; t < SQ_TRACKS; t++) {
+            if (lp) aos_mod_tp[t][TP_LP] = (int16_t)(aos_mod_tp[t][TP_LP] - lp);
+            if (hp) aos_mod_tp[t][TP_HP] = (int16_t)(aos_mod_tp[t][TP_HP] + hp);
+        }
+    }
+#endif
+    for (int r = 0; r < N_ROUTES; r++) {
+        ModRoute q = {m->r[r].src, m->r[r].depth, m->r[r].dest};
+        if (!q.src || q.src >= MS_N || !q.depth || !(q.dest >> 12)) continue;
+        int rg = mod_range(q.dest); if (!rg) continue;
+        int off = ms_val[q.src] * q.depth / 63 * rg / 1000, k = q.dest >> 12, i = q.dest & 0xFFF;
+        if (xf_mode() == 3) off = off * xf_scale() / 127;                       /* the crossfader as MOD's depth */
+        if (k == MK_PAGE) mod_pv[i] = (int16_t)(mod_pv[i] + off);
+        else if (k == MK_SLOT) mod_slot[i / 6][i % 6] = (int16_t)(mod_slot[i / 6][i % 6] + off);
+#ifdef SEQ_UI
+        else if (k == MK_TRK && i < SQ_TRACKS * TP_ALL) aos_mod_tp[i / TP_ALL][i % TP_ALL] = (int16_t)(aos_mod_tp[i / TP_ALL][i % TP_ALL] + off);
+        else if (k == MK_TFX && i < SQ_TRACKS * 6) aos_mod_fxk[i / 6][i % 6] = (int16_t)(aos_mod_fxk[i / 6][i % 6] + off);
+#endif
+    }
+}
+/* ---- the crossfader's scenes for the sequencer's tracks (12 Nov 2026): a track knob turned with SCENE A or B held
+ * goes into that scene (the same scene numbers as the sky's); the crossfader blends between them. Kept at battery
+ * RAM 0x100ED000 (not in projects). */
+#ifdef SEQ_UI
+#define SQSC_HEAD ((volatile uint8_t *)fake_sqsc_head)
+#define SQSC ((volatile int8_t *)fake_sqsc)
+static void sqsc_init(void)
+{
+    volatile uint8_t *h = SQSC_HEAD;
+    if (h[0] == 'A' && h[1] == 'E' && h[2] == 'S' && h[3] == 'C' && h[4] == TP_ALL) return;
+    for (int i = 0; i < N_SCENES * SQ_TRACKS * TP_ALL; i++) SQSC[i] = -1;
+    h[0] = 'A'; h[1] = 'E'; h[2] = 'S'; h[3] = 'C'; h[4] = TP_ALL;
+}
+static volatile int8_t *sqsc(int sc, int t, int tp) { return &SQSC[(sc * SQ_TRACKS + t) * TP_ALL + tp]; }
+static void sqsc_apply(void)
+{
+    sqsc_init();
+    if (xf_mode()) return;
+    int x = xfade();
+    for (int t = 0; t < SQ_TRACKS; t++) for (int tp = 0; tp < TP_ALL; tp++) {
+        int a = *sqsc(scene_a, t, tp), b = *sqsc(scene_b, t, tp);
+        if (a < 0 && b < 0) continue;
+        int base = *sq_tp(t, tp), va = a < 0 ? base : a, vb = b < 0 ? base : b;
+        aos_mod_tp[t][tp] = (int16_t)(aos_mod_tp[t][tp] + va + (vb - va) * x / 127 - base);
+    }
+}
+#endif
+/* the destination's name, for the page */
+#ifdef SEQ_UI
+static const char *sq_tp_label(int tp);
+#endif
+static void mod_dest_name(uint16_t dest, char *n)
+{
+    int k = dest >> 12, i = dest & 0xFFF; n[0] = 0;
+    static const char *const pg_short[N_PAGES] = {"CHN", "SKY", "SRC", "LOOP", "STAR", "BALN", "MIX", "SYS", "MIDI", "GAIN", "MSTR"};
+    if (k == MK_PAGE) { strcat_s(n, pg_short[i / 12]); strcat_s(n, " "); strcat_s(n, params[i / 12][i % 12].name); }
+    else if (k == MK_SLOT) { n[0] = 'S'; n[1] = (char)('1' + i / 6); n[2] = ' '; n[3] = 0; strcat_s(n, slots[i / 6].row > 0 ? slots[i / 6].knob[i % 6] : "-"); }
+#ifdef SEQ_UI
+    else if (k == MK_TRK) { n[0] = 'T'; n[1] = (char)('1' + i / TP_ALL); n[2] = ' '; n[3] = 0; strcat_s(n, sq_tp_label(i % TP_ALL)); }
+    else if (k == MK_TFX) { n[0] = 'T'; n[1] = (char)('1' + i / 6); n[2] = ' '; n[3] = 'F'; n[4] = 'X'; n[5] = (char)('A' + i % 6); n[6] = 0; }
+#endif
+    else strcat_s(n, "LEARN: YES");
+}
+/* learn: the knob turned now is the route's destination (called first by the sky's and the sequencer's knob handlers) */
+static int mod_learn_take(uint16_t dest)
+{
+    if (mod_learn < 0 || !(dest >> 12)) return 0;
+    volatile ModStore *m = MODS;
+    m->r[mod_learn].dest = dest;
+    if (!m->r[mod_learn].src) m->r[mod_learn].src = MS_LFO1;
+    if (!m->r[mod_learn].depth) m->r[mod_learn].depth = 20;
+    static char n[16]; mod_dest_name(dest, n); say("MOD TO", n);
+    mod_learn = -1;
+    return 1;
+}
+static int mod_param_of(int which, int *lo, int *hi, const char **lab)
+{
+    volatile ModStore *m = MODS; int src = m->r[mod_sel].src;
+    *lo = 0; *hi = 127;
+    if (src >= MS_LFO1 && src <= MS_LFO3) { static const char *const l[3] = {"RATE", "SHAP", "PHAS"}; *lab = l[which]; if (which == 1) *hi = 6; return 0 * 0 + (src - MS_LFO1) * 3 + which; }
+    if (src >= MS_LZX && src <= MS_LZZ) { static const char *const l[3] = {"SPD", "CHAS", "SHAP"}; *lab = l[which]; return 9 + which; }
+    if (src >= MS_FLKX) { static const char *const l[3] = {"SPD", "COHE", "SCAT"}; *lab = l[which]; return 12 + which; }
+    *lab = ""; return -1;
+}
+static volatile uint8_t *mod_param_ptr(int id) { volatile ModStore *m = MODS; return id < 9 ? &m->lfo[id / 3][id % 3] : id < 12 ? &m->lz[id - 9] : &m->flk[id - 12]; }
+static void mod_enc(int e, int delta)
+{
+    volatile ModStore *m = MODS; volatile ModRoute *r = &m->r[mod_sel]; static char n[16];
+    int st = delta > 0 ? 1 : -1;
+    if (e == 0 || e == 6) { mod_sel = clamp(mod_sel + st, 0, N_ROUTES - 1); num(n, mod_sel + 1); say("ROUTE", n); return; }
+    if (e == 1) { r->src = (uint8_t)clamp(r->src + st, 0, MS_N - 1); say("SOURCE", ms_name[r->src]); return; }
+    if (e == 2) { r->depth = (int8_t)clamp(r->depth + delta, -63, 63); signed_text(n, r->depth); say("DEPTH", n); return; }
+    int lo, hi; const char *lab; int id = mod_param_of(e - 3, &lo, &hi, &lab);
+    if (id < 0) return;
+    volatile uint8_t *p = mod_param_ptr(id);
+    *p = (uint8_t)clamp(*p + (hi <= 16 ? st : delta), lo, hi);
+    if (id < 9 && id % 3 == 1) say(lab, lfo_shape[*p]); else { num(n, *p); say(lab, n); }
+}
+static int mod_key(int code, int pressed)
+{
+    if (!pressed) return 1;
+    volatile ModStore *m = MODS;
+    if (code < KEY_TRIG0 + 16) { mod_sel = code - KEY_TRIG0; static char n[4]; num(n, mod_sel + 1); say("ROUTE", n); return 1; }
+    if (code == KEY_YES) {
+        if (func_held) { m->r[mod_sel].src = 0; m->r[mod_sel].depth = 0; m->r[mod_sel].dest = 0; say("ROUTE", "CLEARED"); }
+        else { mod_learn = mod_sel; mod_open = 0; say("TURN A KNOB", "TO MOVE"); }
+        return 1;
+    }
+    if (code == KEY_NO || code == KEY_ARR) { mod_open = 0; return 1; }
+    return 1;
+}
+static void mod_leds(void)
+{
+    volatile ModStore *m = MODS;
+    for (int k = 0; k < 16; k++) led_want[k] = k == mod_sel ? 3 : (m->r[k].src && m->r[k].dest >> 12 && m->r[k].depth) ? 1 : 0;
+}
+static void mod_draw(void)
+{
+    volatile ModStore *m = MODS; char n[24];
+    for (int x = 0; x < W; x++) span(x, 0, 63, 0);
+    text(1, 1, "MOD", 1);
+    /* the routes around the one in hand */
+    int top = clamp(mod_sel - 2, 0, N_ROUTES - 5);
+    for (int i = 0; i < 5; i++) {
+        int r = top + i, y = 9 + i * 7; ModRoute q = {m->r[r].src, m->r[r].depth, m->r[r].dest};
+        num(n, r + 1); if (r == mod_sel) for (int x = 0; x < W; x++) span(x, y - 1, y + 5, 1);
+        int inv = r == mod_sel ? 0 : 1;
+        text(1, y, n, inv); text(12, y, ms_name[q.src], inv);
+        if (q.src) { mod_dest_name(q.dest, n); text(56, y, n, inv); signed_text(n, q.depth); text(W - 1 - text_w(n), y, n, inv); }
+    }
+    /* the source's live value, as a bar, and its three settings */
+    int src = m->r[mod_sel].src;
+    if (src) { int v = ms_val[src]; int c = 64, w = v * 60 / 1000; for (int x = c; x != c + w; x += w > 0 ? 1 : -1) px(x, 46); px(c, 45); px(c, 47); }
+    if (!src) { text(1, 52, "A ROUT B SRC C DPTH", 1); text(1, 58, "YES LEARN  FUNC+YES CLR", 1); }   /* the help, until a source is chosen */
+    else {
+        /* the route's own knobs across the bottom: A ROUT, B SRC, C DPTH, then the source's D E F (fixed 13 Nov 2026:
+         * they were drawn over the help line) */
+        static const char *const lab3[3] = {"ROUT", "SRC", "DPTH"};
+        for (int e = 0; e < 6; e++) {
+            int x = 1 + e * 21; const char *lab = 0; char v[8] = "";
+            if (e < 3) { lab = lab3[e]; if (e == 0) num(v, mod_sel + 1); else if (e == 1) { int k = 0; const char *q = ms_name[src]; while (q[k] && k < 4 && q[k] != ' ') { v[k] = q[k]; k++; } if (src >= MS_LFO1 && src <= MS_LFO3) v[k++] = (char)('1' + src - MS_LFO1); v[k] = 0; } else signed_text(v, m->r[mod_sel].depth); }
+            else { int lo, hi; int id = mod_param_of(e - 3, &lo, &hi, &lab); if (id < 0) continue; int pvv = *mod_param_ptr(id); if (id < 9 && id % 3 == 1) { int k = 0; while (lfo_shape[pvv][k]) { v[k] = lfo_shape[pvv][k]; k++; } v[k] = 0; } else num(v, pvv); }
+            text(x, 52, lab, 1); text(x, 58, v, 1);
+        }
+    }
+}
 #endif
 /* ---- AERIA OS: the saved state and the presets (sadnoise, 10 Nov 2026) ----------------------------------------
  * A snapshot is every page parameter (the musician's setting, or -1: follow the weather), the chain (which effect
@@ -6166,6 +6771,9 @@ static uint8_t seq_on;
  * Only in AERIA OS: the Modwerk module build has no battery RAM of its own to keep this in. */
 #if defined(AERIAOS)
 static uint8_t led_want[16];   /* ui12.c's (a tentative definition: the same object) */
+int aos_restoring(void);
+static uint8_t proj_loading;             /* a project's samples are still coming back from the card: LOADED is said when they are (15 Nov 2026) */
+static char proj_loading_name[13];
 #define SNAP_MAGIC 0x41455338u   /* 'AES8': saved since the weather leaves MIX alone (the dry start holds) */
 #define SNAP_MAGIC_V7 0x41455337u   /* 'AES7': a page more (MASTER); kept in the bigger store */
 #define SNAP_MAGIC_V6 0x41455336u   /* 'AES6': AES4's layout; saved since untouched effects start dry (slot_gentle) */
@@ -6231,7 +6839,7 @@ static void snap_take(Snap *s)
     for (int i = 0; i < 16; i++) s->live_fx[i] = preview_live_fx[i];
     for (int t = 0; t < 8; t++) for (int k = 0; k < 12; k++) s->part_fx[t][k] = preview_part_fx[t][k];
     for (int i = 0; i < N_SLOTS; i++) for (int k = 0; k < 6; k++) s->slot_user[i][k] = (int8_t)(slots[i].user[k] < 0 ? -1 : slots[i].user[k] > 127 ? 127 : slots[i].user[k]);
-    s->weather = (int16_t)weather; s->auto_weather = (int16_t)auto_weather; s->xf_right = (int16_t)(0x100 | wx_on);   /* (the field the weather crossfade used: now which weathers are on) */ s->night = (int16_t)night;
+    s->weather = (int16_t)weather; s->auto_weather = (int16_t)auto_weather; s->xf_right = (int16_t)(0x100 | wx_on | (xw_on & 7) << 9);   /* (the field the weather crossfade used: now which weathers are on) */ s->night = (int16_t)night;
     s->src_loop = (int16_t)src_loop; s->src_stars = (int16_t)src_stars; s->src_balloons = (int16_t)src_balloons;
     s->planet_mask = planet_mask; s->slot_bypass = slot_bypass;
     for (int i = 0; i < N_SLOTS; i++) s->pan[i] = pan_set[i];
@@ -6279,7 +6887,10 @@ static void snap_apply(const Snap *s)
     if (s->magic != SNAP_MAGIC) for (int i = 0; i < N_SLOTS; i++) slot_gentle(i);   /* saved before effects started dry (or while a weather change still undid it) */
 #endif
     weather = clamp(s->weather, 0, N_WEATHER - 1); auto_weather = s->auto_weather != 0; wx_on = (uint8_t)((s->xf_right & 0x100) ? (s->xf_right & 0x7e) : (weather == CLEAR ? 0 : 1u << weather));
-    if (WON(SNOW) && WON(HEAT)) wx_on &= (uint8_t)~(1u << HEAT);
+    xw_on = (uint8_t)((s->xf_right & 0x100) ? (s->xf_right >> 9) & 4 : 0);   /* (WIND, HAIL,) AURORA: only the aurora is left (13 Nov 2026) */
+    wx_on &= (uint8_t)WX_KEEP;   /* the weathers that are gone (13 Nov 2026) */
+    if (!wx_on) weather = CLEAR;
+    else if (weather == CLEAR || !wx_kept(weather) || !((wx_on >> weather) & 1u)) weather = (wx_on >> FOG) & 1u ? FOG : RAIN;   /* RAIN + a gone one: the name follows what is on (15 Nov 2026) */
     night = s->night != 0; src_loop = s->src_loop != 0; src_stars = s->src_stars != 0; src_balloons = s->src_balloons != 0;
     planet_mask = s->planet_mask; slot_bypass = s->slot_bypass;
     /* the FUNC-layer knobs: a snapshot from before they were saved gets each slot's effect's own defaults */
@@ -6343,8 +6954,11 @@ static Snap state_loaded;
 static int state_had;
 static int state_restored;
 static void scenes_load(void);
+static Snap snap_factory;   /* the sound as the OS is built (taken before the saved state goes on): INIT (13 Nov 2026) */
+static uint8_t factory_ok;
 void aeria_state_restore(void)
 {
+    snap_take(&snap_factory); factory_ok = 1;
     snap_bring_over();
     scenes_load();
     if (snap_valid(snap_slot(0))) { snap_fetch(0, &state_loaded); snap_apply(&state_loaded); state_sum = state_loaded.sum; state_had = 1; }
@@ -6388,6 +7002,7 @@ static void scenes_save(void)
 }
 void aeria_state_tick(void)
 {
+    if (proj_loading && !aos_restoring()) { proj_loading = 0; say("LOADED", proj_loading_name); }   /* the samples are back */
     if (scene_dirty) { scene_dirty = 0; scene_dirty_at = ticks | 1u; }
     if (scene_dirty_at && ticks - scene_dirty_at > 120u) { scene_dirty_at = 0; scenes_save(); }
     if (!state_restored || (ticks % 30u) != 0) return;
@@ -6413,8 +7028,13 @@ static int preset_mode, preset_cur = -1;
  * first, a second press at once the other --, 14 the digits (press again: the next), 15 space - _, 16 rubs out.
  * Any knob turns the letter under the cursor through them all; LEFT and RIGHT move the cursor; YES saves, NO gives up.
  * A new letter starts where the last one ended as soon as another trig is pressed or a moment has passed. */
+#ifndef PROJ_BASE
 #define PROJ_BASE ((uintptr_t)fake_proj)
+#endif
 #define PROJ_STRIDE 0x8000u
+#ifndef PROJ_MIDI_BASE
+#define PROJ_MIDI_BASE ((uintptr_t)fake_proj_midi)
+#endif
 #define PROJ_MAGIC 0x4145504Au   /* 'AEPJ' */
 #define N_PROJ 16
 #define LOADED_AT ((uintptr_t)fake_loaded)
@@ -6442,6 +7062,11 @@ static void proj_save(int i, const char *name)
       for (unsigned k = 0; k < SEQ_HEAD_SIZE; k++) b[0x1C00 + k] = q[k];
       for (unsigned k = 0; k < SEQ_STEPS_SIZE; k++) { b[0x2000 + k] = q[SEQ_HEAD_SIZE + k]; if (!(k & 255)) aos_breathe(); } }
     b[7] = 1;
+    { const volatile uint8_t *q = (const volatile uint8_t *)MT_BASE;       /* the MIDI tracks (15 Nov 2026): their head here, their steps below the projects */
+      volatile uint8_t *ms = (volatile uint8_t *)(PROJ_MIDI_BASE + (unsigned)i * MT_STEPS_SIZE);
+      for (unsigned k = 0; k < MT_HEAD_SIZE; k++) b[0xB00 + k] = q[k];
+      for (unsigned k = 0; k < MT_STEPS_SIZE; k++) { ms[k] = q[MT_HEAD_SIZE + k]; if (!(k & 255)) aos_breathe(); } }
+    b[0x21] = 1;
 #endif
     b[4] = 1; b[5] = (uint8_t)(SCENE_IDS >> 8); b[6] = (uint8_t)SCENE_IDS; b[1] = 'E'; b[2] = 'P'; b[3] = 'J'; b[0] = 'A';
     proj_cur = i;
@@ -6467,10 +7092,49 @@ static void proj_load(int i)
         aos_seq_play(0);
         for (unsigned k = 0; k < SEQ_HEAD_SIZE; k++) q[k] = b[0x1C00 + k];
         for (unsigned k = 0; k < SEQ_STEPS_SIZE; k++) { q[SEQ_HEAD_SIZE + k] = b[0x2000 + k]; if (!(k & 255)) aos_breathe(); }
-        seq_on = SQH->mode == 1; aos_seq_mode(0); if (seq_on) aos_seq_mode(1);
+        { int want = SQH->mode == 1;                                  /* (15 Nov 2026) the same face: set up again without leaving it (no gap in the stream) */
+          if (want == (seq_on != 0)) { if (want) aos_seq_refresh(); } else { seq_on = (uint8_t)want; aos_seq_mode(want); } }
     }
+    if (b[0x21] == 1 && b[0xB00] == 'A' && b[0xB01] == 'E' && b[0xB02] == 'M' && b[0xB03] == 'T') {   /* the MIDI tracks (15 Nov 2026) */
+        volatile uint8_t *q = (volatile uint8_t *)MT_BASE;
+        const volatile uint8_t *ms = (const volatile uint8_t *)(PROJ_MIDI_BASE + (unsigned)i * MT_STEPS_SIZE);
+        for (unsigned k = 0; k < MT_HEAD_SIZE; k++) q[k] = b[0xB00 + k];
+        for (unsigned k = 0; k < MT_STEPS_SIZE; k++) { q[MT_HEAD_SIZE + k] = ms[k]; if (!(k & 255)) aos_breathe(); }
+    } else aos_mt_defaults();                                        /* a project from before them: fresh MIDI tracks */
 #endif
     proj_cur = i;
+}
+/* ---- INIT and RESET ALL (13 Nov 2026): a blank start that is always there ---------------------------------------
+ * FUNC + PROJ (on any page of the sky or the sequencer) asks; then YES = INIT: the sound as the OS is built -- every knob at its default, the
+ * chain empty, scenes empty, a clear sky (AUTO off), the sky's MOD routes cleared (the sequencer's stay), sources off.
+ * FUNC + YES = RESET ALL: INIT, and every buffer and sample emptied too (the loop, the stars' and the sequencer's
+ * samples, the balloons, the master delay; aeria-os seq.c aos_wipe_all). The sequences are never touched; NO goes back. */
+void aos_wipe_all(void);
+static int init_ask;
+static void aeria_init_sound(void)
+{
+    if (!factory_ok) return;
+    snap_factory.slot_bypass = 0;
+    for (int i = 0; i < 16; i++) snap_factory.live_fx[i] = 0;
+    for (int i = 0; i < N_SLOTS; i++) for (int k = 0; k < 6; k++) snap_factory.slot_user[i][k] = -1;
+    snap_factory.src_loop = snap_factory.src_stars = snap_factory.src_balloons = 0;
+    snap_factory.weather = CLEAR; snap_factory.auto_weather = 0; snap_factory.xf_right = 0x100;
+    snap_apply(&snap_factory);
+    for (int i = 0; i < N_SLOTS; i++) { slots[i].pending = -1; slot_refresh(i); }
+    picking = -1;
+    for (int sc = 0; sc < N_SCENES; sc++) for (int q = 0; q < SCENE_IDS; q++) scene_val[sc][q] = -1;
+    scene_dirty = 1;
+    { volatile ModStore *m = MODS; mod_init();
+      for (int r = 0; r < N_ROUTES; r++) { int k = m->r[r].dest >> 12; if (k == MK_PAGE || k == MK_SLOT) { m->r[r].src = 0; m->r[r].depth = 0; m->r[r].dest = 0; } } }
+    xw_on = 0; set_weather(CLEAR); auto_weather = 0;
+    state_loaded = snap_factory; state_had = 1;
+    proj_cur = -1;
+}
+static void aeria_reset_all(void)
+{
+    aeria_init_sound();
+    for (int b = 0; b < 3; b++) { balloon[b].state = B_EMPTY; balloon[b].size = 0; }
+    aos_wipe_all();
 }
 /* the presets of before (snapshots 1..16) become projects once, named PRESET n */
 static void proj_from_presets(void)
@@ -6528,8 +7192,14 @@ static int preset_key(int code, int pressed)
         }
         return code != KEY_FUNC;
     }
-    if (code == KEY_PROJ) { preset_mode = !preset_mode; if (preset_mode) { proj_from_presets(); if (proj_cur >= 0) proj_sel = proj_cur; } say(preset_mode ? "PROJECTS" : page_name[page], 0); return 1; }
+    if (code == KEY_PROJ && func_held) { preset_mode = 1; naming = 0; init_ask = 1; say("BLANK START", "YES / FUNC+YES"); return 1; }
+    if (code == KEY_PROJ) { init_ask = 0; preset_mode = !preset_mode; if (preset_mode) { proj_from_presets(); if (proj_cur >= 0) proj_sel = proj_cur; } say(preset_mode ? "PROJECTS" : page_name[page], 0); return 1; }
     if (!preset_mode) return 0;
+    if (init_ask) {
+        if (code == KEY_YES) { init_ask = 0; preset_mode = 0; if (func_held) { aeria_reset_all(); say("RESET ALL", "DONE"); } else { aeria_init_sound(); say("INIT", "BLANK SOUND"); } return 1; }
+        if (code == KEY_NO) { init_ask = 0; preset_mode = 0; say(page_name[page], 0); return 1; }
+        return code != KEY_FUNC;
+    }
     if (code == KEY_NO) { preset_mode = 0; say(page_name[page], 0); return 1; }
     if (code >= KEY_TRIG0 && code < KEY_TRIG0 + N_PROJ) { proj_sel = code - KEY_TRIG0; return 1; }
     if (code == KEY_YES && func_held) {                              /* save here: its name first */
@@ -6538,7 +7208,7 @@ static int preset_key(int code, int pressed)
         name_at = 0; while (name_at < 11 && name_buf[name_at]) name_at++;
         name_last = -1; name_taps = 0; naming = 1; return 1;
     }
-    if (code == KEY_YES) { if (proj_saved(proj_sel)) { char n[13]; proj_name(proj_sel, n); proj_load(proj_sel); say("LOADED", n); preset_mode = 0; } else say("EMPTY", "FUNC+YES SAVES"); return 1; }
+    if (code == KEY_YES) { if (proj_saved(proj_sel)) { proj_name(proj_sel, proj_loading_name); proj_load(proj_sel); proj_loading = 1; say("LOADING", proj_loading_name); preset_mode = 0; } else say("EMPTY", "FUNC+YES SAVES"); return 1; }
     return code != KEY_FUNC;   /* the page holds every other key while it is open */
 }
 static int preset_enc(int d) { if (naming) { name_turn(d); return 1; } return preset_mode; }
@@ -6560,7 +7230,17 @@ static void preset_draw(void)
         text(8, 52, "KNOB: ANY LETTER", 1);
         return;
     }
+    if (init_ask) {
+        text(8, 9, "BLANK START", 1);
+        text(8, 21, "YES       INIT: SOUND ONLY", 1);
+        text(8, 29, "FUNC+YES  RESET ALL: SOUND,", 1);
+        text(8, 37, "  BUFFERS AND SAMPLES", 1);
+        text(8, 45, "SEQUENCES ARE KEPT", 1);
+        text(8, 53, "NO        BACK", 1);
+        return;
+    }
     text(8, 9, "PROJECTS", 1);
+    text(W - 8 - text_w("FUNC+PROJ INIT"), 9, "FUNC+PROJ INIT", 1);
     for (int i = 0; i < N_PROJ; i++) {
         int bx = 10 + (i % 8) * 14, by = 17 + (i / 8) * 12;
         for (int x = bx; x < bx + 12; x++) { px(x, by); px(x, by + 9); }
@@ -6594,41 +7274,90 @@ static void preset_leds(void)
  *   SRC AMP LFO FX1 FX2   the knob pages: SRC (sample), AMP, MOD, FLT (filters, delay send), FX (the track's effect;
  *                 YES opens the list)          PAGE  PTN: lengths, swing, tempo, the ducking
  *   PATTERN + trig 1-4   the pattern (it changes at the bar); several in a row while held: a chain
- *   BANK          the mixer (meters; trigs 1-8 mute, 9-16 solo)
+ *   BANK          the mixer (meters; trigs 1-8 mute, 9-16 solo)      FUNC + BANK  resample the main output into sample 6.1
+ *   SCENE A / B   held + a trig: that mute scene (with FUNC: the mutes as they are go into it)
  *   LEVEL         the track's volume       TEMPO  tap        FUNC + PLAY  clear the track        FUNC + YES (SRC)  load a kit
- *   MIX           the master page (freeze delay), any page key comes back */
+ *   MIX           the master page (freeze delay), any page key comes back
+ *   MIDI          (15 Nov 2026) the MIDI TRACKS: eight more tracks that only send MIDI, each on its own channel, on the
+ *                 same clock as the audio tracks. The MIDI key goes between the two banks; T1-T8 are then M1-M8, the
+ *                 trigs their steps, SRC their parameters (CHAN NOTE VEL GATE CHRD PROG; again: OCT CC1 CC1V CC2 CC2V
+ *                 FREE), ARR their GEN page, PAGE the pattern page. A MIDI step keeps one parameter lock.
+ *                 FUNC + LFO on an audio track: that track's own MIDI page (MCH NOTE CHRD GATE PROG). */
 #if defined(AERIAOS) && (defined(__m68k__) || defined(SEQ_HOST))
 static int layer(void);
 static void upper(const char *in, char *out, int max);
 enum { SV_GRID, SV_MIXER, SV_MASTER };
-enum { SQP_SRC, SQP_AMP, SQP_MOD, SQP_FLT, SQP_GEN, SQP_MIDI, SQP_FX, SQP_PTN, SQP_STEP, SQP_N };   /* SRC..MIDI can be locked on a step */
-static const char *const sq_page_name[SQP_N] = {"SRC", "AMP", "MOD", "FLT", "GEN", "MIDI", "FX", "PTN", "STEP"};
+enum { SQP_SRC, SQP_AMP, SQP_MOD, SQP_FLT, SQP_GEN, SQP_MIDI, SQP_FX, SQP_PTN, SQP_STEP, SQP_RVB, SQP_N };   /* RVB: FUNC + FX2, the reverb bus (15 Nov 2026) */   /* SRC..MIDI can be locked on a step */
+static const char *const sq_page_name[SQP_N] = {"SRC", "AMP", "MOD", "FLT", "GEN", "MIDI", "FX", "PTN", "STEP", "RVB"};
 enum { SP_NONE = -1, SP_LEN = -2, SP_MLEN = -3, SP_SWNG = -4, SP_TMPO = -5, SP_DSRC = -6, SP_DREL = -7,
        SP_VEL = -8, SP_MICR = -9, SP_PROB = -10, SP_COND = -11, SP_RTCH = -12, SP_SREV = -13, SP_CURV = -14 };
-enum { SP_SYNC = -3 - 100, SP_PCCH = -4 - 100 };   /* (kept apart from the step's own: these are the pattern page's kind) */
+enum { SP_SYNC = -3 - 100, SP_PCCH = -4 - 100, SP_NIN = -5 - 100, SP_CLK = -6 - 100, SP_CAMT = -7 - 100, SP_CSED = -8 - 100,
+       SP_RON = -9 - 100, SP_RDEC = -10 - 100, SP_RTON = -11 - 100, SP_RMOD = -12 - 100, SP_RLEV = -13 - 100 };   /* the reverb bus: on, VERB's DECY TONE MOD, the return */   /* (kept apart from the step's own: these are the pattern page's kind) */
 typedef struct { const char *lab; int8_t tp; uint8_t lo, hi; } SqP;
 static const SqP sq_par[SQP_N][12] = {
     {{"SMPL", TP_SMPL, 0, 127}, {"PTCH", TP_PTCH, 28, 100}, {"STRT", TP_STRT, 0, 127}, {"REV", TP_REV, 0, 1}, {"MACH", TP_MACH, 0, SQM_N - 1}, {"SLIP", TP_SLIP, 0, 127}, {"RTIO", TP_FMR, 1, 127}, {"INDX", TP_FMI, 0, 127}, {"IDEC", TP_FMD, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
-    {{"ATK", TP_ATK, 0, 127}, {"DEC", TP_DEC, 0, 127}, {"VOL", TP_VOL, 0, 127}, {"PAN", TP_PAN, 0, 127}, {"DRIV", TP_DRIV, 0, 127}, {"BITS", TP_BITS, 0, 12}, {"PENV", TP_PENV, 0, 127}, {"PDEC", TP_PDEC, 0, 127}, {"DUCK", TP_DUCK, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
-    {{"WAVE", TP_MODW, 0, 2}, {"DEST", TP_LFOD, 0, 7}, {"RATE", TP_LFOR, 0, 127}, {"DPTH", TP_LFOA, 0, 127}, {"PENV", TP_PENV, 0, 127}, {"PDEC", TP_PDEC, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
-    {{"HP", TP_HP, 0, 127}, {"LP", TP_LP, 0, 127}, {"DLY", TP_DLY, 0, 127}, {"OUT", TP_OUT, 0, 2}, {"DUCK", TP_DUCK, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
-    {{"DENS", TP_DENS, 0, 127}, {"DIR", TP_DIR, 0, 4}, {"ROT", TP_ROT, 0, 63}, {"WARP", TP_WARP, 0, 127}, {"RATE", TP_RATE, 0, SQ_RATES - 1}, {"SHUF", TP_SHUF, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"ATK", TP_ATK, 0, 127}, {"DEC", TP_DEC, 0, 127}, {"VOL", TP_VOL, 0, 127}, {"PAN", TP_PAN, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"PENV", TP_PENV, 0, 127}, {"PDEC", TP_PDEC, 0, 127}, {"DUCK", TP_DUCK, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"WAVE", TP_MODW, 0, 2}, {"DEST", TP_LFOD, 0, 8}, {"RATE", TP_LFOR, 0, 127}, {"DPTH", TP_LFOA, 0, 127}, {"PENV", TP_PENV, 0, 127}, {"PDEC", TP_PDEC, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"HP", TP_HP, 0, 127}, {"LP", TP_LP, 0, 127}, {"DLY", TP_DLY, 0, 127}, {"OUT", TP_OUT, 0, 4}, {"DUCK", TP_DUCK, 0, 127}, {"Y", TP_Y, 1, 127}, {"MAIN", TP_MOUT, 0, 4}, {"CUE", TP_COUT, 0, 4}, {"PHNS", TP_HOUT, 0, 4}, {"RVB", TP_RVB, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"DENS", TP_DENS, 0, 127}, {"DIR", TP_DIR, 0, 4}, {"ROT", TP_ROT, 0, 63}, {"WARP", TP_WARP, 0, 127}, {"RATE", TP_RATE, 0, SQ_RATES - 1}, {"SHUF", TP_SHUF, 0, 127}, {"RULE", TP_CAR, 0, 127}, {"SEED", TP_CSD, 0, 127}, {"CAMD", TP_CAM, 0, 3}, {"FREE", TP_FREE, 0, 1}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
     {{"MCH", TP_MCH, 0, 16}, {"NOTE", TP_MNOT, 0, 127}, {"CHRD", TP_CHRD, 0, SQ_CHORDS - 1}, {"GATE", TP_GATE, 1, 127}, {"PROG", TP_PROG, 0, 128}, {"", SP_NONE, 0, 0},
-     {"SYNC", SP_SYNC, 0, 2}, {"PCCH", SP_PCCH, 0, 16}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+     {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
     {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
-    {{"LEN", SP_LEN, 1, 64}, {"PLEN", SP_MLEN, 1, 64}, {"SWNG", SP_SWNG, 50, 80}, {"TMPO", SP_TMPO, 60, 187}, {"DSRC", SP_DSRC, 0, 7}, {"DREL", SP_DREL, 0, 127}, {"FREE", TP_FREE, 0, 1}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"LEN", SP_LEN, 1, 64}, {"PLEN", SP_MLEN, 1, 64}, {"SWNG", SP_SWNG, 50, 80}, {"TMPO", SP_TMPO, 60, 187}, {"DSRC", SP_DSRC, 0, 7}, {"DREL", SP_DREL, 0, 127}, {"CLK", SP_CLK, 0, 6}, {"CAMT", SP_CAMT, 0, 127}, {"CSED", SP_CSED, 0, 127}, {"SYNC", SP_SYNC, 0, 2}, {"PCCH", SP_PCCH, 0, 16}, {"NIN", SP_NIN, 0, 1}},   /* (15 Nov 2026: FREE went to GEN's second set, SYNC PCCH NIN came here from the MIDI page) */
     {{"VEL", SP_VEL, 1, 127}, {"MICR", SP_MICR, 0, 46}, {"PROB", SP_PROB, 1, 100}, {"COND", SP_COND, 0, SQ_COND_N - 1}, {"RTCH", SP_RTCH, 0, 13}, {"CURV", SP_CURV, 0, 14}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"BUS", SP_RON, 0, 1}, {"DECY", SP_RDEC, 0, 127}, {"TONE", SP_RTON, 0, 127}, {"MOD", SP_RMOD, 0, 127}, {"LEVL", SP_RLEV, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
 };
+/* ---- the MIDI tracks' bank (15 Nov 2026): their parameters by MP_ codes (and 16 + their second block's index) ---- */
+#define MP2(x) (16 + ((x) - SQ_TP))
+static const SqP mt_par[SQP_N][12] = {
+    {{"CHAN", MP_CH, 0, 16}, {"NOTE", MP_NOTE, 0, 127}, {"VEL", MP_VEL, 1, 127}, {"GATE", MP_GATE, 1, 127}, {"CHRD", MP_CHRD, 0, SQ_CHORDS - 1}, {"PROG", MP_PROG, 0, 128},
+     {"OCT", MP_OCT, 0, 6}, {"CC1", MP_CC1, 0, 127}, {"CC1V", MP_CC1V, 0, 127}, {"CC2", MP_CC2, 0, 127}, {"CC2V", MP_CC2V, 0, 127}, {"FREE", MP_FREE, 0, 1}},
+    {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"DENS", MP2(TP_DENS), 0, 127}, {"DIR", MP2(TP_DIR), 0, 4}, {"ROT", MP2(TP_ROT), 0, 63}, {"WARP", MP2(TP_WARP), 0, 127}, {"RATE", MP2(TP_RATE), 0, SQ_RATES - 1}, {"", SP_NONE, 0, 0},
+     {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"LEN", SP_LEN, 1, 64}, {"PLEN", SP_MLEN, 1, 64}, {"SWNG", SP_SWNG, 50, 80}, {"TMPO", SP_TMPO, 60, 187}, {"DSRC", SP_DSRC, 0, 7}, {"DREL", SP_DREL, 0, 127}, {"CLK", SP_CLK, 0, 6}, {"CAMT", SP_CAMT, 0, 127}, {"CSED", SP_CSED, 0, 127}, {"SYNC", SP_SYNC, 0, 2}, {"PCCH", SP_PCCH, 0, 16}, {"NIN", SP_NIN, 0, 1}},
+    {{"VEL", SP_VEL, 1, 127}, {"MICR", SP_MICR, 0, 46}, {"PROB", SP_PROB, 1, 100}, {"COND", SP_COND, 0, SQ_COND_N - 1}, {"RTCH", SP_RTCH, 0, 13}, {"CURV", SP_CURV, 0, 14}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+};
+static uint8_t sq_bank;                  /* 0 the audio tracks, 1 the MIDI tracks */
+static const SqP *sq_param(int pg, int i) { return sq_bank ? &mt_par[pg][i] : &sq_par[pg][i]; }
+static uint8_t *sq_val_ptr(int t, int tp) { return sq_bank ? (tp < 16 ? &MTH->trk[t & 7][tp & 15] : &MTH->trk2[t & 7][(tp - 16) & 15]) : sq_tp(t, tp); }
+/* a MIDI step read as an audio step (its one lock in the first place) and written back (the first lock kept) */
+static SqStep sq_tmp_step;
+static SqStep *sq_step_get(int p, int t, int n)
+{
+    if (!sq_bank) return SQ_STEP(p, t, n);
+    const MtStep *m = MT_STEP(p, t, n); SqStep *s = &sq_tmp_step;
+    s->flags = m->flags; s->vel = m->vel; s->micro = m->micro; s->prob = m->prob; s->cond = m->cond; s->ratch = m->ratch;
+    s->lp[0] = m->lp; s->lv[0] = m->lv; s->lp[1] = s->lp[2] = 0; s->lv[1] = s->lv[2] = 0;
+    return s;
+}
+static void sq_step_put(int p, int t, int n, const SqStep *s)
+{
+    if (!sq_bank) { if (s != SQ_STEP(p, t, n)) *SQ_STEP(p, t, n) = *s; return; }
+    MtStep *m = MT_STEP(p, t, n);
+    m->flags = (uint8_t)(s->flags & (uint8_t)~SF_REV); m->vel = s->vel; m->micro = s->micro; m->prob = s->prob; m->cond = s->cond; m->ratch = s->ratch;
+    int k = s->lp[0] ? 0 : s->lp[1] ? 1 : 2;   /* one lock: the first there is (a second one turned replaces it: sq_turn) */
+    m->lp = s->lp[k]; m->lv = s->lv[k];
+}
+static uint8_t *sq_mutes(void) { return sq_bank ? &MTH->mutes : &SQH->mutes; }
+static uint8_t *sq_solo(void) { return sq_bank ? &MTH->solo : &SQH->solo; }
 /* a ratchet's hits: 1..8, then rolls so fast they turn into a pitch */
 static const uint8_t sq_rtch[14] = {1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 24, 32, 48, 64};
 static int sq_rtch_i(int r) { int i = 0; while (i < 13 && sq_rtch[i] < r) i++; return i; }
 static uint8_t sq_page, sq_view, sq_rec, sq_spage, sq_pat_held, sq_cue_held, sq_fxlist, sq_fxrow, sq_turned, sq_lockpage = SQP_STEP, sq_restored;
 static uint16_t sq_held;                 /* the trigs held in GRID */
-static uint8_t sq_chain_n, sq_chain[8], sq_tempo_held;
+static uint8_t sq_chain_n, sq_chain[8], sq_tempo_held, sq_scn_held;
 static SqStep sq_clip[SQ_TRACKS][SQ_STEPS]; static uint8_t sq_clip_len[SQ_TRACKS], sq_clip_kind;   /* copied: 1 a track, 2 a pattern */
-static int sq_sel(void) { return SQH->sel & 7; }
+static int sq_sel(void) { return (sq_bank ? MTH->sel : SQH->sel) & 7; }
+static void sq_sel_set(int t) { if (sq_bank) MTH->sel = (uint8_t)(t & 7); else SQH->sel = (uint8_t)(t & 7); }
 static int sq_pat(void) { return SQH->pattern & 3; }
-static int sq_len(int t) { int l = SQH->len[sq_pat()][t & 7]; return l >= 1 && l <= SQ_STEPS ? l : 16; }
+static int sq_len(int t) { int l = sq_bank ? MTH->len[sq_pat()][t & 7] : SQH->len[sq_pat()][t & 7]; return l >= 1 && l <= SQ_STEPS ? l : 16; }
+static void sq_len_set(int t, int v) { if (sq_bank) MTH->len[sq_pat()][t & 7] = (uint8_t)v; else SQH->len[sq_pat()][t & 7] = (uint8_t)v; }
 static void sq_tempo_set(int bpm) { Param *p = &P(PG_MASTER, 6); p->value = p->user = (int16_t)(clamp(bpm, 60, 187) - 60); }
 
 /* ---- what a value reads as ---- */
@@ -6641,8 +7370,28 @@ static void sq_cond_text(int c, char *n)
     if (c <= SQ_COND_AB) { int b = 2, k = c - 1; while (k >= b) { k -= b; b++; } n[0] = (char)('1' + k); n[1] = ':'; n[2] = (char)('0' + b); n[3] = 0; return; }
     n[0] = 0; sq_cat(n, sp[clamp(c - SQC_FILL, 0, 7)]);
 }
+static void mt_text(int tp, int v, char *n)
+{
+    static const char *const nn[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    n[0] = 0;
+    switch (tp) {
+    case MP_CH: if (!v) sq_cat(n, "OFF"); else num(n, v); break;
+    case MP_NOTE: sq_cat(n, nn[v % 12]); { char d[4]; num(d, v / 12 - 1); sq_cat(n, d); } break;
+    case MP_GATE: { int g = v ? v : 4; if (g % 8 == 0) num(n, g / 8); else { num(n, g); sq_cat(n, "/8"); } } break;
+    case MP_CHRD: { static const char *const c[SQ_CHORDS] = {"NOTE", "OCT", "5TH", "MAJ", "MIN", "SUS2", "SUS4", "MAJ7", "MIN7", "DOM7", "DIM", "AUG", "MIN9", "4THS", "CLUS"}; sq_cat(n, c[clamp(v, 0, SQ_CHORDS - 1)]); } break;
+    case MP_PROG: case MP_CC1: case MP_CC2: if (!v) sq_cat(n, "OFF"); else num(n, v); break;
+    case MP_OCT: if (v == 3) sq_cat(n, "0"); else { n[0] = v > 3 ? '+' : '-'; num(n + 1, v > 3 ? v - 3 : 3 - v); } break;
+    case MP_FREE: sq_cat(n, v ? "ON" : "OFF"); break;
+    case MP2(TP_DIR): { static const char *const d[5] = {"FWD", "REV", "PONG", "RND", "DRNK"}; sq_cat(n, d[clamp(v, 0, 4)]); } break;
+    case MP2(TP_RATE): { static const char *const r[SQ_RATES] = {"1/4", "1/3", "1/2", "2/3", "3/4", "X1", "4/3", "3/2", "X2", "X3", "X4"}; sq_cat(n, r[clamp(v, 0, SQ_RATES - 1)]); } break;
+    case MP2(TP_WARP): if (v == 64) sq_cat(n, "-"); else { n[0] = v > 64 ? '+' : '-'; num(n + 1, v > 64 ? v - 64 : 64 - v); } break;
+    case MP2(TP_DENS): num(n, (v + 1) * 100 / 128); sq_cat(n, "%"); break;
+    default: num(n, v);
+    }
+}
 static void sq_text(int tp, int v, char *n)
 {
+    if (sq_bank && tp >= 0) { mt_text(tp, v, n); return; }
     n[0] = 0;
     switch (tp) {
     case TP_SMPL: num(n, v / 16 + 1); sq_cat(n, "."); { char d[4]; num(d, v % 16 + 1); sq_cat(n, d); } break;
@@ -6652,8 +7401,10 @@ static void sq_text(int tp, int v, char *n)
     case TP_LP: if (v >= 127) sq_cat(n, "OPEN"); else { int h = sq_hz(v); if (h >= 1000) { num(n, h / 1000); sq_cat(n, "K"); { char d[4]; num(d, h % 1000 / 100); sq_cat(n, d); } } else num(n, h); } break;
     case TP_REV: case TP_FREE: case SP_SREV: sq_cat(n, v ? "ON" : "OFF"); break;
     case TP_MACH: { static const char *const m[SQM_N] = {"SMPL", "SUB", "FM", "NOIS", "PLUK", "MIDI"}; sq_cat(n, m[clamp(v, 0, SQM_N - 1)]); } break;
-    case TP_OUT: sq_cat(n, v == 1 ? "CUE" : v == 2 ? "BOTH" : "MAIN"); break;
-    case TP_LFOD: { static const char *const d[8] = {"OFF", "LP", "HP", "VOL", "PAN", "PTCH", "STRT", "INDX"}; sq_cat(n, d[clamp(v, 0, 7)]); } break;
+    case TP_OUT: sq_cat(n, v == 1 ? "CUE" : v == 2 ? "BOTH" : v == 3 ? "QUAD" : v == 4 ? "EACH" : "MAIN"); break;
+    case TP_MOUT: case TP_COUT: case TP_HOUT: { static const char *const o[5] = {"OFF", "L", "R", "L+R", "ST"}; sq_cat(n, o[clamp(v, 0, 4)]); } break;
+    case TP_Y: if (!v) v = 64; if (v == 64) sq_cat(n, "MID"); else { n[0] = v < 64 ? 'F' : 'B'; num(n + 1, v < 64 ? 64 - v : v - 64); } break;
+    case TP_LFOD: { static const char *const d[9] = {"OFF", "LP", "HP", "VOL", "PAN", "PTCH", "STRT", "INDX", "Y"}; sq_cat(n, d[clamp(v, 0, 8)]); } break;
     case TP_MODW: { static const char *const w[3] = {"TRI", "RND", "ENV"}; sq_cat(n, w[clamp(v, 0, 2)]); } break;
     case TP_DIR: { static const char *const d[5] = {"FWD", "REV", "PONG", "RND", "DRNK"}; sq_cat(n, d[clamp(v, 0, 4)]); } break;
     case TP_RATE: { static const char *const r[SQ_RATES] = {"1/4", "1/3", "1/2", "2/3", "3/4", "X1", "4/3", "3/2", "X2", "X3", "X4"}; sq_cat(n, r[clamp(v, 0, SQ_RATES - 1)]); } break;
@@ -6667,11 +7418,19 @@ static void sq_text(int tp, int v, char *n)
     case TP_SHUF: if (!v) sq_cat(n, "PTN"); else { num(n, 50 + v * 30 / 127); sq_cat(n, "%"); } break;
     case TP_DEC: if (v >= 127) sq_cat(n, "FULL"); else num(n, v); break;
     case SP_SWNG: num(n, v); sq_cat(n, "%"); break;
+    case SP_CLK: { static const char *const c[7] = {"OFF", "ACCEL", "DECEL", "ARCH", "BULGE", "WAVE", "RAND"}; sq_cat(n, c[clamp(v, 0, 6)]); } break;
+    case TP_CAR: if (!v) sq_cat(n, "OFF"); else { n[0] = 'R'; num(n + 1, 2 * v); } break;
+    case TP_CAM: { static const char *const c[4] = {"GATE", "AND", "XOR", "PTCH"}; sq_cat(n, c[v & 3]); } break;
     case SP_DSRC: n[0] = 'T'; num(n + 1, v + 1); break;
     case TP_CHRD: { static const char *const c[SQ_CHORDS] = {"NOTE", "OCT", "5TH", "MAJ", "MIN", "SUS2", "SUS4", "MAJ7", "MIN7", "DOM7", "DIM", "AUG", "MIN9", "4THS", "CLUS"}; sq_cat(n, c[clamp(v, 0, SQ_CHORDS - 1)]); } break;
     case TP_GATE: { int g = v ? v : 4; if (g % 8 == 0) num(n, g / 8); else { num(n, g); sq_cat(n, "/8"); } } break;
     case TP_PROG: case SP_PCCH: if (!v) sq_cat(n, "OFF"); else num(n, v); break;
     case SP_SYNC: sq_cat(n, v == 1 ? "SEND" : v == 2 ? "RECV" : "OFF"); break;
+    case SP_RON: sq_cat(n, v ? "ON" : "OFF"); break;
+    case SP_RDEC: case SP_RTON: case SP_RMOD: { int r = aos_verb_row(), k = SP_RDEC - tp; const FxInfo *fi = r > 0 && r <= FX_COUNT ? &fx_info[r - 1] : 0;
+        if (fi && fi->text[k] && v < fi->count[k]) { const char *s = fi->text[k][v]; int i = 0; while (s[i] && i < 10) { n[i] = s[i]; i++; } n[i] = 0; } else num(n, v); } break;
+    case TP_RVB: if (!v) sq_cat(n, "OFF"); else num(n, v); break;
+    case SP_NIN: sq_cat(n, v ? "ON" : "OFF"); break;
     case TP_MNOT: { static const char *const nn[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"}; sq_cat(n, nn[v % 12]); char d[4]; num(d, v / 12 - 1); sq_cat(n, d); } break;
     case SP_MICR: if (v > 23) { n[0] = '+'; num(n + 1, v - 23); } else num(n, v - 23); break;
     case SP_PROB: num(n, v); sq_cat(n, "%"); break;
@@ -6684,15 +7443,17 @@ static void sq_text(int tp, int v, char *n)
 /* Measured on the unit (12 Nov 2026), eight pitched tracks sounding on every step with all sixteen filters on: core 0
  * is at 64-80 % before any effect, so the effects go to core 1 first (1,257 instructions a sample of them ran there
  * with none late) and core 0 keeps room for the two that can only run there (519 together: 95 % in the worst frame). */
-#define SQ_ROOM0 560
+#define SQ_ROOM0 1060   /* 560 until 13 Nov 2026: the engine in core 0's private P took the torture test's worst frame from 89 % to 50 % */
 #define SQ_ROOM1 1300
-static int sq_fx_place(int t, int row)   /* 0, 1: the core; -1: no room; -2: that effect is on another track */
+static int sq_fx_place(int t, int row)   /* 0, 1: the core; -1: no room; -2: that effect is on another track (or the reverb bus) */
 {
     if (row <= 0) return 0;
     const SqHead *h = SQH;
-    int use0 = 0, use1 = 0;
+    int use0 = 0, use1 = 0, vr = aos_verb_row();
+    if (h->rv_on && vr) { if (row == vr || fx_clash(row, vr)) return -2; use1 += fx_cost[vr - 1]; }   /* the reverb bus's VERB on core 1 */
     for (int k = 0; k < SQ_TRACKS; k++) if (k != t && h->fx_row[k] && h->fx_row[k] <= FX_COUNT) {
         if (h->fx_row[k] == row && fx_info[row - 1].has_y) return -2;
+        if (fx_clash(row, h->fx_row[k])) return -2;                    /* WIND and FOG, HAIL and AURORA: one memory between them */
         /* the effects in the shared window (PITCH, SMEAR) and the ones written for one place keep their state where the code says */
         if (h->fx_core[k] == 1) use1 += fx_cost[h->fx_row[k] - 1]; else use0 += fx_cost[h->fx_row[k] - 1];
     }
@@ -6701,8 +7462,23 @@ static int sq_fx_place(int t, int row)   /* 0, 1: the core; -1: no room; -2: tha
     if (pref != 1 && use0 + c <= SQ_ROOM0) return 0;
     return -1;
 }
+/* the reverb bus may come on: 0 yes; -2 a track has VERB (or one that shares its memory); -1 core 1 has no room */
+static int sq_rv_block(void)
+{
+    const SqHead *h = SQH; int vr = aos_verb_row(), use1 = 0;
+    if (!vr) return -1;
+    for (int k = 0; k < SQ_TRACKS; k++) if (h->fx_row[k] && h->fx_row[k] <= FX_COUNT) {
+        if (h->fx_row[k] == vr || fx_clash(vr, h->fx_row[k])) return -2;
+        if (h->fx_core[k] == 1) use1 += fx_cost[h->fx_row[k] - 1];
+    }
+    return use1 + fx_cost[vr - 1] <= SQ_ROOM1 ? 0 : -1;
+}
+/* the effects offered: every row but the ones the owner does not want (fx_banned: no distortion) */
+static int sq_fx_ok(int r) { return r == 0 || (r >= 1 && r <= FX_COUNT && !fx_banned(fx_info[r - 1].name)); }
+static int sq_fx_move(int r, int d) { int q = r; do { q += d; } while (q > 0 && q <= FX_COUNT && !sq_fx_ok(q)); return q < 0 || q > FX_COUNT ? r : q; }
 static void sq_fx_pick(int t, int row)
 {
+    if (!sq_fx_ok(row)) return;
     SqHead *h = SQH;
     int c = sq_fx_place(t, row);
     if (c == -2) { say("ON ANOTHER", "TRACK"); return; }
@@ -6728,27 +7504,34 @@ static void sq_fx_text(int t, int k, int v, char *n)
 }
 
 /* ---- reading and writing a knob ---- */
-static int sq_lockable(int pg) { return pg == SQP_SRC || pg == SQP_AMP || pg == SQP_FLT || pg == SQP_MIDI; }   /* MOD and GEN are the whole track's */
+static int sq_lockable(int pg) { return sq_bank ? pg == SQP_SRC : (pg == SQP_SRC || pg == SQP_AMP || pg == SQP_FLT || pg == SQP_MIDI); }   /* MOD and GEN are the whole track's */
 static int sq_shown_page(void) { return sq_held ? sq_lockpage : sq_page; }
 static int sq_first_held(void) { for (int k = 0; k < 16; k++) if ((sq_held >> k) & 1) return sq_spage * 16 + k; return -1; }
 static int sq_lock_of(const SqStep *s, int tp) { for (int k = 0; k < SQ_LOCKS; k++) if (s->lp[k] == tp + 1) return s->lv[k]; return -1; }
 static int sq_get(int pg, int i)
 {
     const SqHead *h = SQH; int t = sq_sel();
-    const SqP *p = &sq_par[pg][i];
+    const SqP *p = sq_param(pg, i);
     int st = sq_first_held();
-    const SqStep *s = st >= 0 ? SQ_STEP(sq_pat(), t, st) : 0;
-    if (pg == SQP_FX) return h->fx_knob[t][i];
+    const SqStep *s = st >= 0 ? sq_step_get(sq_pat(), t, st) : 0;
+    if (pg == SQP_FX) return sq_bank ? 0 : h->fx_knob[t][i];
     switch (p->tp) {
     case SP_NONE: return 0;
     case SP_LEN: return sq_len(t);
     case SP_MLEN: return h->mlen[sq_pat()] ? h->mlen[sq_pat()] : 16;
     case SP_SWNG: return clamp(h->swing, 50, 80);
+    case SP_CLK: return h->curv > 6 ? 0 : h->curv;
+    case SP_CAMT: return h->camt & 127;
+    case SP_CSED: return h->cseed & 127;
     case SP_TMPO: return master_bpm();
     case SP_DSRC: return h->duck_src & 7;
     case SP_DREL: return h->duck_rel;
     case SP_SYNC: return h->sync > 2 ? 0 : h->sync;
     case SP_PCCH: return h->pcch > 16 ? 0 : h->pcch;
+    case SP_NIN: return !h->nin;
+    case SP_RON: return h->rv_on != 0;
+    case SP_RDEC: case SP_RTON: case SP_RMOD: return h->rv_knob[SP_RDEC - p->tp] & 0x7F;
+    case SP_RLEV: return h->rv_lev & 0x7F;
     case SP_VEL: return s ? (s->vel ? s->vel : 100) : 100;
     case SP_MICR: return s ? s->micro + 23 : 23;
     case SP_PROB: return s && s->prob ? s->prob : 100;
@@ -6758,12 +7541,12 @@ static int sq_get(int pg, int i)
     case SP_SREV: return s ? (s->flags & SF_REV) != 0 : 0;
     }
     if (s) { int l = sq_lock_of(s, p->tp); if (l >= 0) return l; }
-    return *sq_tp(t, p->tp);
+    return *sq_val_ptr(t, p->tp);
 }
 static void sq_say(int pg, int i, int v)
 {
-    static char n[14]; const SqP *p = &sq_par[pg][i];
-    if (pg == SQP_FX) { int row = SQH->fx_row[sq_sel()]; if (row <= 0 || row > FX_COUNT) return; sq_fx_text(sq_sel(), i, v, n); say(i < 6 ? fx_info[row - 1].knob[i] : fx_info[row - 1].knob2[i - 6], n); return; }
+    static char n[14]; const SqP *p = sq_param(pg, i);
+    if (pg == SQP_FX) { if (sq_bank) return; int row = SQH->fx_row[sq_sel()]; if (row <= 0 || row > FX_COUNT) return; sq_fx_text(sq_sel(), i, v, n); say(i < 6 ? fx_info[row - 1].knob[i] : fx_info[row - 1].knob2[i - 6], n); return; }
     sq_text(p->tp, v, n); say(p->lab, n);
 }
 /* a step's own value for a track parameter: one of its three locks */
@@ -6775,10 +7558,21 @@ static int sq_lock_set(SqStep *s, int tp, int v)
     s->lp[free_k] = (uint8_t)(tp + 1); s->lv[free_k] = (uint8_t)v;
     return 1;
 }
+/* (15 Nov 2026) the SMPL knob stops only on slots that hold a sample (the owner had a track on 8.10, EMPTY); with
+ * nothing loaded at all it turns freely */
+static int sq_smpl_step(int cur, int dir)
+{
+    int any = 0;
+    for (int s = 0; s < 128; s++) if (aos_slot_ready(s)) { any = 1; break; }
+    if (!any) return clamp(cur + dir, 0, 127);
+    for (int s = cur + dir; s >= 0 && s <= 127; s += dir) if (aos_slot_ready(s)) return s;
+    return cur;
+}
 static void sq_turn(int pg, int i, int delta)
 {
     SqHead *h = SQH; int t = sq_sel();
     if (pg == SQP_FX) {
+        if (sq_bank) return;
         int row = h->fx_row[t]; if (row <= 0 || row > FX_COUNT) { say("NO EFFECT", "YES PICKS"); return; }
         const FxInfo *fi = &fx_info[row - 1];
         if (i >= 6 && !fi->knob2[i - 6][0]) return;
@@ -6787,16 +7581,17 @@ static void sq_turn(int pg, int i, int delta)
         h->fx_knob[t][i] = (uint8_t)v; sq_say(pg, i, v);
         return;
     }
-    const SqP *p = &sq_par[pg][i];
+    const SqP *p = sq_param(pg, i);
     if (p->tp == SP_NONE) return;
     int small = p->hi - p->lo <= 16;
     int v = clamp(sq_get(pg, i) + (small ? (delta > 0 ? 1 : -1) : delta), p->lo, p->hi);
+    if (!sq_bank && p->tp == TP_SMPL) v = sq_smpl_step(sq_get(pg, i), delta > 0 ? 1 : -1);
     if ((p->tp <= SP_VEL && p->tp > -100) || (sq_held && p->tp >= 0 && sq_lockable(pg))) {
         /* the held steps: their own attributes, or a lock */
         if (!sq_held) return;
         sq_turned = 1;
         for (int k = 0; k < 16; k++) if ((sq_held >> k) & 1) {
-            SqStep *s = SQ_STEP(sq_pat(), t, sq_spage * 16 + k);
+            SqStep *s = sq_step_get(sq_pat(), t, sq_spage * 16 + k);
             s->flags |= SF_ON;
             switch (p->tp) {
             case SP_VEL: s->vel = (uint8_t)v; break;
@@ -6806,25 +7601,43 @@ static void sq_turn(int pg, int i, int delta)
             case SP_RTCH: s->ratch = (uint8_t)(v <= 0 ? 0 : sq_rtch[v]); break;
             case SP_CURV: s->flags = (uint8_t)((s->flags & 0x0F) | (((v - 7) & 15) << 4)); break;
             case SP_SREV: if (v) s->flags |= SF_REV; else s->flags &= (uint8_t)~SF_REV; break;
-            default: if (!sq_lock_set(s, p->tp, v)) { say("3 LOCKS", "A STEP"); return; }
+            default:
+                if (sq_bank && s->lp[0] && s->lp[0] != p->tp + 1) { s->lp[0] = 0; }   /* a MIDI step keeps one lock: the new one takes its place */
+                if (!sq_lock_set(s, p->tp, v)) { say("3 LOCKS", "A STEP"); return; }
             }
+            sq_step_put(sq_pat(), t, sq_spage * 16 + k, s);
         }
         sq_say(pg, i, v);
         return;
     }
     switch (p->tp) {
-    case SP_LEN: h->len[sq_pat()][t] = (uint8_t)v; if (sq_spage * 16 >= v) sq_spage = (uint8_t)((v - 1) / 16); break;
+    case SP_LEN: sq_len_set(t, v); if (sq_spage * 16 >= v) sq_spage = (uint8_t)((v - 1) / 16); break;
     case SP_MLEN: h->mlen[sq_pat()] = (uint8_t)v; break;
     case SP_SWNG: h->swing = (uint8_t)v; break;
+    case SP_CLK: h->curv = (uint8_t)v; break;
+    case SP_CAMT: h->camt = (uint8_t)v; break;
+    case SP_CSED: h->cseed = (uint8_t)v; break;
     case SP_TMPO: sq_tempo_set(v); break;
     case SP_DSRC: h->duck_src = (uint8_t)v; break;
     case SP_DREL: h->duck_rel = (uint8_t)v; break;
     case SP_SYNC: h->sync = (uint8_t)v; break;
     case SP_PCCH: h->pcch = (uint8_t)v; break;
+    case SP_NIN: h->nin = (uint8_t)!v; break;
+    case SP_RON: { int why = v ? sq_rv_block() : 0;
+        if (why == -2) { say("VERB ON", "A TRACK"); return; }
+        if (why == -1) { say("NO ROOM", "DSP FULL"); return; }
+        h->rv_on = (uint8_t)v; break; }
+    case SP_RDEC: case SP_RTON: case SP_RMOD: h->rv_knob[SP_RDEC - p->tp] = (uint8_t)v; break;
+    case SP_RLEV: h->rv_lev = (uint8_t)v; break;
     default:
-        *sq_tp(t, p->tp) = (uint8_t)v;
+        if (!sq_bank) {
+            /* OUT to EACH for the first time: start from the main and the phones in stereo, the cue off */
+            if (((p->tp == TP_OUT && v == 4) || p->tp == TP_MOUT || p->tp == TP_COUT || p->tp == TP_HOUT) && !*sq_tp(t, TP_MOUT) && !*sq_tp(t, TP_COUT) && !*sq_tp(t, TP_HOUT)) { *sq_tp(t, TP_MOUT) = 4; *sq_tp(t, TP_HOUT) = 4; }
+            if (p->tp == TP_MOUT || p->tp == TP_COUT || p->tp == TP_HOUT) *sq_tp(t, TP_OUT) = 4;   /* turning one of them is choosing EACH */
+        }
+        *sq_val_ptr(t, p->tp) = (uint8_t)v;
         /* LIVE and running: the knob's move is written into the step going by */
-        if (sq_rec && aos_seq_playing()) { SqStep *s = SQ_STEP(sq_pat(), t, aos_seq_step(t)); if (s->flags & SF_ON) sq_lock_set(s, p->tp, v); }
+        if (sq_rec && aos_seq_playing() && sq_lockable(pg)) { int n = aos_seq_step(sq_bank ? SQ_TRACKS + t : t); SqStep *s = sq_step_get(sq_pat(), t, n); if (s->flags & SF_ON) { if (sq_bank && s->lp[0] && s->lp[0] != p->tp + 1) s->lp[0] = 0; sq_lock_set(s, p->tp, v); sq_step_put(sq_pat(), t, n, s); } }
     }
     sq_say(pg, i, v);
 }
@@ -6835,7 +7648,7 @@ static void seq_enter(int on)
 {
     seq_on = (uint8_t)(on != 0);
     aos_seq_mode(seq_on);
-    sq_view = SV_GRID; sq_held = 0; sq_fxlist = 0; sq_pat_held = 0; func_latch = 0;
+    sq_view = SV_GRID; sq_held = 0; sq_fxlist = 0; sq_pat_held = 0; func_latch = 0; sq_bank = 0;
     for (int id = 32; id < 126; id++) set_led(id, 0);
     say(seq_on ? "SEQUENCER" : "AERIA", 0);
 }
@@ -6848,53 +7661,76 @@ static void seq_ui_tick(void)
     }
     aos_seq_tempo(master_bpm() * 10);
     aos_seq_cushion(br_mode || preset_mode);
+    aos_seq_live(sq_rec);
     if (seq_on && !aos_seq_is()) aos_seq_mode(1);
 }
 
 /* ---- keys ---- */
 static void sq_step_tap(int n)
 {
-    SqStep *s = SQ_STEP(sq_pat(), sq_sel(), n);
+    SqStep *s = sq_step_get(sq_pat(), sq_sel(), n);
     if (s->flags & SF_ON) { for (unsigned k = 0; k < sizeof(SqStep); k++) ((uint8_t *)s)[k] = 0; }
     else { s->flags = SF_ON; s->vel = 100; }
+    sq_step_put(sq_pat(), sq_sel(), n, s);
 }
 static int seq_key(int code, int pressed)
 {
     if (code == KEY_MIDI && func_held) { if (pressed) seq_enter(!seq_on); return 1; }
     if (!seq_on) return 0;
     if (code == KEY_MIDI && !pressed) return 1;
-    if (preset_mode || code == KEY_PROJ || br_mode || code == KEY_FUNC || code == KEY_SCENEA || code == KEY_SCENEB) return 0;
+    if (br_mode) {
+        /* (15 Nov 2026) the KIT browser: a TRACK key leaves it and picks that track; PLAY / STOP still run the transport */
+        int trk = code >= KEY_TRACK0 && code < KEY_TRACK0 + 8, tp = (code == KEY_PLAY || code == KEY_STOP) && !func_held;
+        if (br_mode != BR_SEQ || br_busy || preset_mode || !(trk || tp)) return 0;
+        if (trk && pressed) browser_close();
+    }
+    if (preset_mode || code == KEY_PROJ || code == KEY_FUNC) return 0;
     SqHead *h = SQH; int t = sq_sel();
     if (sq_view == SV_MASTER) {
-        if (pressed && (code == 0x30 || code == KEY_SRC || code == KEY_AMP || code == KEY_LFO || code == KEY_FX1 || code == KEY_FX2 || code == KEY_PAGE || code == KEY_BANK || code == KEY_ARR || code == KEY_MIDI)) { sq_view = SV_GRID; say("SEQUENCER", 0); return 1; }
+        if (pressed && (code == 0x30 || code == KEY_NO || code == KEY_SRC || code == KEY_AMP || code == KEY_LFO || code == KEY_FX1 || code == KEY_FX2 || code == KEY_PAGE || code == KEY_BANK || code == KEY_ARR || code == KEY_MIDI)) { sq_view = SV_GRID; say("SEQUENCER", 0); return 1; }
         else if (code == KEY_PLAY || code == KEY_STOP) { /* the transport still runs */ }
         else return 0;
     }
     if (code == KEY_YES && !pressed) { aos_seq_fill(0); return 1; }
     if (code == KEY_PATTERN) { sq_pat_held = (uint8_t)pressed; if (pressed) { sq_chain_n = 0; say("PATTERN", "TRIG 1-4"); } else if (sq_chain_n > 1) { h->chain_n = sq_chain_n; for (int k = 0; k < 8; k++) h->chain[k] = sq_chain[k]; say("CHAIN", "SET"); } return 1; }
     if (code == KEY_CUE) { sq_cue_held = (uint8_t)pressed; return 1; }
+    /* the scene keys here: mute scenes. Hold one and a trig calls that scene's mutes; with FUNC it keeps the mutes as they are now */
+    if (sq_scn_held && pressed && code == KEY_NO) {                 /* the scene forgets the track knobs it holds */
+        int sc = scene_held == 1 ? scene_a : scene_b;
+        for (int t2 = 0; t2 < SQ_TRACKS; t2++) for (int tp = 0; tp < TP_ALL; tp++) *sqsc(sc, t2, tp) = -1;
+        static char n[4]; num(n, sc + 1); say("SCENE EMPTY", n); return 1;
+    }
+    if (code == KEY_SCENEA || code == KEY_SCENEB) { if (sq_view == SV_MASTER) return 0; sq_scn_held = (uint8_t)pressed; scene_held = pressed ? (code == KEY_SCENEA ? 1 : 2) : 0; if (pressed) say("MUTE SCENES", "TRIG 1-16"); return 1; }
     if (code == 0x18) { sq_tempo_held = (uint8_t)pressed; if (pressed) master_tap(); return 1; }   /* TEMPO: tap it; hold it and turn LEVEL */
     /* the list of effects */
     if (sq_fxlist) {
         if (!pressed) return 1;
-        if (code == KEY_UP && sq_fxrow > 0) sq_fxrow--;
-        else if (code == KEY_DOWN && sq_fxrow < FX_COUNT) sq_fxrow++;
+        if (code == KEY_UP) sq_fxrow = (uint8_t)sq_fx_move(sq_fxrow, -1);
+        else if (code == KEY_DOWN) sq_fxrow = (uint8_t)sq_fx_move(sq_fxrow, 1);
         else if (code == KEY_YES) { sq_fx_pick(t, sq_fxrow); sq_fxlist = 0; }
         else if (code == KEY_NO) sq_fxlist = 0;
         return 1;
     }
     if (code < KEY_TRIG0 + 16) {
         int k = code - KEY_TRIG0;
+        if (sq_scn_held) {
+            if (!pressed) return 1;
+            static char sn[4]; num(sn, k + 1);
+            if (func_held) { h->mscn[k] = h->mutes; h->mscn_ok[k >> 3] |= (uint8_t)(1u << (k & 7)); say("MUTES KEPT IN", sn); }
+            else if ((h->mscn_ok[k >> 3] >> (k & 7)) & 1) { h->mutes = h->mscn[k]; say("MUTE SCENE", sn); }
+            else say("EMPTY", "FUNC KEEPS");
+            return 1;
+        }
         if (sq_pat_held) {
             if (pressed && k < SQ_PATTERNS) { h->pattern = (uint8_t)k; h->chain_n = 0; if (sq_chain_n < 8) sq_chain[sq_chain_n++] = (uint8_t)k; static char n[2]; n[0] = (char)('A' + k); n[1] = 0; say("PATTERN", n); }
             return 1;
         }
         if (sq_view == SV_MIXER) {
-            if (pressed) { if (k < 8) h->mutes ^= (uint8_t)(1u << k); else h->solo ^= (uint8_t)(1u << (k - 8)); }
+            if (pressed) { if (k < 8) *sq_mutes() ^= (uint8_t)(1u << k); else *sq_solo() ^= (uint8_t)(1u << (k - 8)); }
             return 1;
         }
         if (sq_rec) {
-            if (pressed) { if (k < 8) aos_seq_hit(k, 100, 1); else h->mutes ^= (uint8_t)(1u << (k - 8)); }
+            if (pressed) { if (k < 8) { if (sq_bank) aos_mt_hit(k, 100, 1); else aos_seq_hit(k, 100, 1); } else *sq_mutes() ^= (uint8_t)(1u << (k - 8)); }
             return 1;
         }
         int n = sq_spage * 16 + k;
@@ -6908,80 +7744,116 @@ static int seq_key(int code, int pressed)
     if (code >= KEY_TRACK0 && code < KEY_TRACK0 + 8) {
         int k = code - KEY_TRACK0;
         if (!pressed) return 1;
-        static char n[4]; n[0] = 'T'; n[1] = (char)('1' + k); n[2] = 0;
-        if (func_held) { h->mutes ^= (uint8_t)(1u << k); say(n, (h->mutes >> k) & 1 ? "MUTED" : "ON"); }
-        else if (sq_cue_held) { h->solo ^= (uint8_t)(1u << k); say(n, (h->solo >> k) & 1 ? "SOLO" : "SOLO OFF"); }
-        else { h->sel = (uint8_t)k; sq_held = 0; if (sq_spage * 16 >= sq_len(k)) sq_spage = 0; if (!aos_seq_playing()) aos_seq_hit(k, 100, 0); }   /* stopped: the track is heard as it is picked */
+        static char n[4]; n[0] = sq_bank ? 'M' : 'T'; n[1] = (char)('1' + k); n[2] = 0;
+        if (func_held) { *sq_mutes() ^= (uint8_t)(1u << k); say(n, (*sq_mutes() >> k) & 1 ? "MUTED" : "ON"); }
+        else if (sq_cue_held) { *sq_solo() ^= (uint8_t)(1u << k); say(n, (*sq_solo() >> k) & 1 ? "SOLO" : "SOLO OFF"); }
+        else { sq_sel_set(k); sq_held = 0; if (sq_spage * 16 >= sq_len(k)) sq_spage = 0; if (!aos_seq_playing()) { if (sq_bank) aos_mt_hit(k, 100, 0); else aos_seq_hit(k, 100, 0); } }   /* stopped: the track is heard as it is picked */
         return 1;
     }
     if (!pressed) return 1;
     switch (code) {
     case KEY_PLAY:
-        if (func_held) { for (int n = 0; n < SQ_STEPS; n++) { SqStep *s = SQ_STEP(sq_pat(), t, n); for (unsigned k = 0; k < sizeof(SqStep); k++) ((uint8_t *)s)[k] = 0; } say("TRACK", "CLEARED"); }
+        if (func_held) { static const SqStep z = {0, 0, 0, 0, 0, 0, {0, 0, 0}, {0, 0, 0}}; for (int n = 0; n < SQ_STEPS; n++) sq_step_put(sq_pat(), t, n, &z); say("TRACK", "CLEARED"); }
         else { aos_seq_play(1); say("PLAY", 0); }
         return 1;
     case KEY_STOP:
-        if (func_held) {                                           /* paste what was copied */
+        if (func_held) {                                           /* paste what was copied (within the same bank of tracks) */
             int p = sq_pat();
-            if (sq_clip_kind == 1) { for (int n = 0; n < SQ_STEPS; n++) *SQ_STEP(p, t, n) = sq_clip[0][n]; h->len[p][t] = sq_clip_len[0]; say("TRACK", "PASTED"); }
-            else if (sq_clip_kind == 2) { for (int k = 0; k < SQ_TRACKS; k++) { for (int n = 0; n < SQ_STEPS; n++) *SQ_STEP(p, k, n) = sq_clip[k][n]; h->len[p][k] = sq_clip_len[k]; aos_breathe(); } say("PATTERN", "PASTED"); }
+            if (sq_clip_kind == 1 + 2 * sq_bank) { for (int n = 0; n < SQ_STEPS; n++) sq_step_put(p, t, n, &sq_clip[0][n]); sq_len_set(t, sq_clip_len[0]); say("TRACK", "PASTED"); }
+            else if (sq_clip_kind == 2 + 2 * sq_bank) { for (int k = 0; k < SQ_TRACKS; k++) { for (int n = 0; n < SQ_STEPS; n++) sq_step_put(p, k, n, &sq_clip[k][n]); sq_len_set(k, sq_clip_len[k]); aos_breathe(); } say("PATTERN", "PASTED"); }
             else say("NOTHING", "COPIED");
             return 1;
         }
         if (aos_seq_playing()) { aos_seq_play(0); say("STOP", 0); } else { aos_seq_mode(0); aos_seq_mode(1); say("SILENCE", 0); } return 1;
     case KEY_REC:
-        if (func_held) {                                           /* copy: the track, or with PATTERN held the whole pattern */
+        if (func_held) {                                           /* copy: the track, or with PATTERN held the whole pattern (of this bank) */
             int p = sq_pat();
-            if (sq_pat_held) { for (int k = 0; k < SQ_TRACKS; k++) { for (int n = 0; n < SQ_STEPS; n++) sq_clip[k][n] = *SQ_STEP(p, k, n); sq_clip_len[k] = (uint8_t)sq_len(k); aos_breathe(); } sq_clip_kind = 2; say("PATTERN", "COPIED"); }
-            else { for (int n = 0; n < SQ_STEPS; n++) sq_clip[0][n] = *SQ_STEP(p, t, n); sq_clip_len[0] = (uint8_t)sq_len(t); sq_clip_kind = 1; say("TRACK", "COPIED"); }
+            if (sq_pat_held) { for (int k = 0; k < SQ_TRACKS; k++) { for (int n = 0; n < SQ_STEPS; n++) sq_clip[k][n] = *sq_step_get(p, k, n); sq_clip_len[k] = (uint8_t)sq_len(k); aos_breathe(); } sq_clip_kind = (uint8_t)(2 + 2 * sq_bank); say("PATTERN", "COPIED"); }
+            else { for (int n = 0; n < SQ_STEPS; n++) sq_clip[0][n] = *sq_step_get(p, t, n); sq_clip_len[0] = (uint8_t)sq_len(t); sq_clip_kind = (uint8_t)(1 + 2 * sq_bank); say("TRACK", "COPIED"); }
             return 1;
         }
         sq_rec = !sq_rec; sq_held = 0; say(sq_rec ? "LIVE" : "GRID", sq_rec ? "PADS 1-8" : 0); return 1;
     case 0x18: master_tap(); return 1;
-    case KEY_SRC: case KEY_AMP: case KEY_LFO: case KEY_FX1: case KEY_FX2: case KEY_PAGE: case KEY_ARR: case KEY_MIDI: {
-        int pg = code == KEY_SRC ? SQP_SRC : code == KEY_AMP ? SQP_AMP : code == KEY_LFO ? SQP_MOD : code == KEY_FX1 ? SQP_FLT : code == KEY_FX2 ? SQP_FX : code == KEY_ARR ? SQP_GEN : code == KEY_MIDI ? SQP_MIDI : SQP_PTN;
+    case KEY_MIDI:                                                 /* (15 Nov 2026) the other bank of tracks: audio <-> MIDI */
+        sq_bank ^= 1; sq_held = 0; sq_fxlist = 0; func_latch = 0;
+        if (sq_bank && !(sq_page == SQP_SRC || sq_page == SQP_GEN || sq_page == SQP_PTN)) sq_page = SQP_SRC;
+        if (!sq_bank && sq_page == SQP_MIDI) sq_page = SQP_SRC;
+        if (sq_spage * 16 >= sq_len(sq_sel())) sq_spage = 0;
+        say(sq_bank ? "MIDI TRACKS" : "AUDIO TRACKS", 0);
+        return 1;
+    case KEY_SRC: case KEY_AMP: case KEY_LFO: case KEY_FX1: case KEY_FX2: case KEY_PAGE: case KEY_ARR: {
+        if (code == KEY_FX2 && func_held && !sq_held) { if (sq_bank) return 1; sq_page = SQP_RVB; sq_view = SV_GRID; func_latch = 0; say("RVB BUS", SQH->rv_on ? "ON" : "OFF"); return 1; }   /* the reverb bus's page */
+        if (code == KEY_LFO && func_held && !sq_held) { if (sq_bank) return 1; sq_page = SQP_MIDI; sq_view = SV_GRID; func_latch = 0; say("TRACK MIDI", 0); return 1; }   /* an audio track's own MIDI page (15 Nov 2026: FUNC + LFO) */
+        if (sq_bank && (code == KEY_AMP || code == KEY_LFO || code == KEY_FX1 || code == KEY_FX2)) { say("MIDI TRACKS", "SRC GEN PTN"); return 1; }
+        int pg = code == KEY_SRC ? SQP_SRC : code == KEY_AMP ? SQP_AMP : code == KEY_LFO ? SQP_MOD : code == KEY_FX1 ? SQP_FLT : code == KEY_FX2 ? SQP_FX : code == KEY_ARR ? SQP_GEN : SQP_PTN;
         if (sq_held && sq_lockable(pg)) { sq_lockpage = (uint8_t)pg; sq_turned = 1; say("LOCK", sq_page_name[pg]); }
         else if (sq_page == pg && sq_view == SV_GRID) { func_latch = !func_latch; say(sq_page_name[pg], func_latch ? "2" : "1"); }   /* the same key again: its other six knobs */
         else { sq_page = (uint8_t)pg; sq_view = SV_GRID; func_latch = 0; say(sq_page_name[pg], 0); }
         return 1; }
-    case KEY_BANK: sq_view = sq_view == SV_MIXER ? SV_GRID : SV_MIXER; say(sq_view == SV_MIXER ? "MIXER" : "GRID", 0); return 1;
+    case KEY_BANK:
+        if (func_held) {                                           /* the main output into sample 6.1, one pattern long from its next start */
+            if (aos_resampling()) { aos_resample(80, 0); say("RESAMPLE", "OFF"); }
+            else { aos_resample(80, h->mlen[sq_pat()] ? h->mlen[sq_pat()] : 16); say("RESAMPLE 6.1", "AT THE BAR"); }
+            return 1;
+        }
+        sq_view = sq_view == SV_MIXER ? SV_GRID : SV_MIXER; say(sq_view == SV_MIXER ? "MIXER" : "GRID", 0); return 1;
     case 0x30: sq_view = SV_MASTER; page = PG_MASTER; say("MASTER", 0); return 1;
     case KEY_LEFT: case KEY_RIGHT:
         if (sq_held) {                                             /* a held step: earlier, later */
             sq_turned = 1;
-            for (int k = 0; k < 16; k++) if ((sq_held >> k) & 1) { SqStep *s = SQ_STEP(sq_pat(), t, sq_spage * 16 + k); s->flags |= SF_ON; s->micro = (int8_t)clamp(s->micro + (code == KEY_RIGHT ? 1 : -1), -23, 23); sq_say(SQP_STEP, 1, s->micro + 23); }
+            for (int k = 0; k < 16; k++) if ((sq_held >> k) & 1) { int n = sq_spage * 16 + k; SqStep *s = sq_step_get(sq_pat(), t, n); s->flags |= SF_ON; s->micro = (int8_t)clamp(s->micro + (code == KEY_RIGHT ? 1 : -1), -23, 23); sq_say(SQP_STEP, 1, s->micro + 23); sq_step_put(sq_pat(), t, n, s); }
         } else { int pages = (sq_len(t) + 15) / 16; sq_spage = (uint8_t)((sq_spage + (code == KEY_RIGHT ? 1 : pages - 1)) % pages); }
         return 1;
-    case KEY_UP: case KEY_DOWN: h->sel = (uint8_t)((t + (code == KEY_DOWN ? 1 : 7)) & 7); sq_held = 0; if (sq_spage * 16 >= sq_len(h->sel)) sq_spage = 0; return 1;
+    case KEY_UP: case KEY_DOWN: sq_sel_set((t + (code == KEY_DOWN ? 1 : 7)) & 7); sq_held = 0; if (sq_spage * 16 >= sq_len(sq_sel())) sq_spage = 0; return 1;
     case KEY_YES:
-        if (sq_held) {                                             /* a held step: backward, or forward again */
+        if (sq_held) {                                             /* a held step: backward, or forward again (an audio track's) */
             sq_turned = 1;
+            if (sq_bank) return 1;
             for (int k = 0; k < 16; k++) if ((sq_held >> k) & 1) { SqStep *s = SQ_STEP(sq_pat(), t, sq_spage * 16 + k); s->flags |= SF_ON; s->flags ^= SF_REV; say("STEP", s->flags & SF_REV ? "BACKWARD" : "FORWARD"); }
             return 1;
         }
-        if (func_held && sq_page == SQP_SRC) { browser_open(BR_SEQ); return 1; }
-        if (sq_page == SQP_FX) { sq_fxlist = 1; sq_fxrow = h->fx_row[t] <= FX_COUNT ? h->fx_row[t] : 0; return 1; }
+        if (func_held && sq_page == SQP_SRC && !sq_bank) { browser_open(BR_SEQ); return 1; }
+        if (sq_page == SQP_FX && !sq_bank) { sq_fxlist = 1; sq_fxrow = h->fx_row[t] <= FX_COUNT && sq_fx_ok(h->fx_row[t]) ? h->fx_row[t] : 0; return 1; }
         aos_seq_fill(1); say("FILL", 0);
         return 1;
     case KEY_NO:
-        if (sq_held) { for (int k = 0; k < 16; k++) if ((sq_held >> k) & 1) { SqStep *s = SQ_STEP(sq_pat(), t, sq_spage * 16 + k); for (int q = 0; q < SQ_LOCKS; q++) s->lp[q] = 0; } sq_turned = 1; say("LOCKS", "CLEARED"); }
+        if (sq_held) { for (int k = 0; k < 16; k++) if ((sq_held >> k) & 1) { int n = sq_spage * 16 + k; SqStep *s = sq_step_get(sq_pat(), t, n); for (int q = 0; q < SQ_LOCKS; q++) s->lp[q] = 0; sq_step_put(sq_pat(), t, n, s); } sq_turned = 1; say("LOCKS", "CLEARED"); }
+        else if (sq_view != SV_GRID) { sq_view = SV_GRID; say("GRID", 0); }   /* (15 Nov 2026) NO backs out of the mixer */
+        else if (func_latch) { func_latch = 0; say(sq_page_name[sq_page], "1"); }
         return 1;
     }
     return 1;
 }
+static const char *sq_tp_label(int tp) { for (int p = 0; p < SQP_N; p++) for (int i = 0; i < 12; i++) if (sq_param(p, i)->tp == tp && sq_param(p, i)->lab[0]) return sq_param(p, i)->lab; return "?"; }
 static int seq_enc(int e, int delta)
 {
     if (!seq_on || preset_mode || br_mode) return 0;
     if (sq_view == SV_MASTER) return e == 6;                       /* the master page's own knobs; LEVEL does nothing there */
-    if (scene_held) return 1;                                      /* scenes belong to the sky's knobs */
+    if (scene_held && e >= 0 && e < 6 && !sq_bank) {                /* a track knob into the scene that end holds */
+        int pg = sq_shown_page(), i = e + (layer() && pg != SQP_STEP ? 6 : 0), t = sq_sel();
+        if (pg >= SQP_N || sq_par[pg][i].tp < 0 || sq_par[pg][i].tp >= TP_ALL) return 1;
+        const SqP *p = &sq_par[pg][i]; int sc = scene_held == 1 ? scene_a : scene_b;
+        volatile int8_t *v = sqsc(sc, t, p->tp);
+        int cur = *v >= 0 ? *v : *sq_tp(t, p->tp), nv = clamp(cur + (p->hi - p->lo <= 16 ? (delta > 0 ? 1 : -1) : delta), p->lo, p->hi);
+        *v = (int8_t)nv;
+        static char n[20]; sq_text(p->tp, nv, n); say(scene_held == 1 ? "SCENE A" : "SCENE B", n);
+        return 1;
+    }
+    if (scene_held) return 1;
     if (e == 6 && sq_tempo_held) { sq_tempo_set(master_bpm() + (delta > 0 ? 1 : -1)); static char b[6]; num(b, master_bpm()); say("TEMPO", b); return 1; }
-    if (sq_fxlist) { if (e == 0 || e == 6) sq_fxrow = (uint8_t)clamp(sq_fxrow + (delta > 0 ? 1 : -1), 0, FX_COUNT); return 1; }
-    if (e == 6) {                                                  /* LEVEL: the track's volume */
+    if (sq_fxlist) { if (e == 0 || e == 6) sq_fxrow = (uint8_t)sq_fx_move(sq_fxrow, delta > 0 ? 1 : -1); return 1; }
+    if (e == 6) {                                                  /* LEVEL: the track's volume (a MIDI track's velocity) */
+        if (sq_bank) { int t = sq_sel(), v = clamp(MTH->trk[t][MP_VEL] + delta, 1, 127); MTH->trk[t][MP_VEL] = (uint8_t)v; static char n[6]; num(n, v); say("VELOCITY", n); return 1; }
         SqHead *h = SQH; int t = sq_sel(), v = clamp(h->trk[t][TP_VOL] + delta, 0, 127);
         h->trk[t][TP_VOL] = (uint8_t)v; static char n[6]; num(n, v); say("VOLUME", n);
         return 1;
     }
     if (e < 0 || e > 5) return 1;
+    if (mod_learn >= 0 && !sq_bank) {                              /* MOD learning: this knob is the route's destination */
+        int pg = sq_shown_page(), i = e + (layer() && pg != SQP_STEP ? 6 : 0), t = sq_sel();
+        if (pg == SQP_FX && !layer()) { mod_learn_take((uint16_t)(MK_TFX << 12 | (t * 6 + e))); return 1; }
+        if (pg < SQP_N && sq_par[pg][i].tp >= 0 && sq_par[pg][i].tp < TP_ALL) { mod_learn_take((uint16_t)(MK_TRK << 12 | (t * TP_ALL + sq_par[pg][i].tp))); return 1; }
+    }
     { int pg = sq_shown_page(); sq_turn(pg, e + (layer() && pg != SQP_STEP ? 6 : 0), delta); }
     return 1;
 }
@@ -6992,32 +7864,35 @@ static void seq_draw(void)
 {
     const SqHead *h = SQH;
     int t = sq_sel(), pat = sq_pat(), playing = aos_seq_playing();
+    const int tb = sq_bank ? SQ_TRACKS : 0;   /* the clock's number of the track in hand */
     char n[16];
     /* the top line: track, pattern (and the one coming), page of steps, tempo, the eight meters */
-    n[0] = 'T'; n[1] = (char)('1' + t); n[2] = 0; text(1, 1, n, 1);
+    n[0] = sq_bank ? 'M' : 'T'; n[1] = (char)('1' + t); n[2] = 0; text(1, 1, n, 1);
     n[0] = (char)('A' + (playing ? aos_seq_pat() : pat)); n[1] = 0; if (aos_seq_pat() != pat && playing) { n[1] = '>'; n[2] = (char)('A' + pat); n[3] = 0; } text(12, 1, n, 1);
     if (h->chain_n) text(26, 1, "CH", 1);
     { int pages = (sq_len(t) + 15) / 16; n[0] = (char)('1' + sq_spage); n[1] = '/'; n[2] = (char)('0' + pages); n[3] = 0; text(37, 1, n, 1); }
     num(n, aos_seq_ext() ? (aos_seq_bpm10() + 5) / 10 : master_bpm()); text(52, 1, n, 1);
     if (aos_seq_ext()) { px(50, 1); px(50, 3); px(50, 5); }           /* a clock from outside has the tempo */
-    text(67, 1, sq_rec ? "LIVE" : playing ? "PLAY" : "", 1);
+    text(67, 1, aos_resampling() == 2 ? "RSMP" : aos_resampling() ? "ARM" : sq_rec ? "LIVE" : playing ? "PLAY" : "", 1);
     if (layer() && !sq_held) text(86, 1, "2", 1);
     if (playing && (aos_seq_bar() & 3) == 0) sq_box(90, 1, 92, 5);
     for (int k = 0; k < 8; k++) {
-        int x = 94 + k * 4, lv = aos_seq_peak(k) * 7 / 16, muted = ((h->mutes >> k) & 1) || (h->solo && !((h->solo >> k) & 1));
+        int x = 94 + k * 4, lv = sq_bank ? (aos_mt_active(k) ? 6 : 0) : aos_seq_peak(k) * 7 / 16, muted = ((*sq_mutes() >> k) & 1) || (*sq_solo() && !((*sq_solo() >> k) & 1));
         if (muted) px(x + 1, 3); else { px(x, 7); px(x + 1, 7); px(x + 2, 7); if (lv) sq_box(x, 7 - lv, x + 2, 7); }
         if (k == t) { px(x, 0); px(x + 1, 0); px(x + 2, 0); }
     }
     if (sq_view == SV_MIXER) {
-        /* eight strips: the meter, the volume's mark, M or S */
+        /* eight strips: the meter, the volume's mark, M or S (the MIDI tracks: their channel and velocity) */
         for (int k = 0; k < 8; k++) {
-            int x = 2 + k * 16, lv = aos_seq_peak(k) * 30 / 16, vol = h->trk[k][TP_VOL] * 30 / 127;
+            int x = 2 + k * 16, lv = sq_bank ? (aos_mt_active(k) ? 30 : 0) : aos_seq_peak(k) * 30 / 16, vol = (sq_bank ? MTH->trk[k][MP_VEL] : h->trk[k][TP_VOL]) * 30 / 127;
             for (int y = 12; y <= 42; y++) { px(x, y); px(x + 9, y); }
             if (lv) sq_box(x + 2, 42 - lv, x + 7, 42);
             for (int xx = x - 1; xx <= x + 10; xx++) px(xx, 42 - vol);
-            n[0] = (char)('1' + k); n[1] = 0; text(x + 3, 45, n, 1);
-            if ((h->mutes >> k) & 1) text(x + 3, 52, "M", 1);
-            if ((h->solo >> k) & 1) text(x + 3, 58, "S", 1);
+            if (sq_bank) { n[0] = 'M'; n[1] = (char)('1' + k); n[2] = 0; text(x + 1, 45, n, 1); num(n, MTH->trk[k][MP_CH]); text(x + 1, 58, MTH->trk[k][MP_CH] ? n : "-", 1); }
+            else { n[0] = (char)('1' + k); n[1] = 0; text(x + 3, 45, n, 1); }
+            if ((*sq_mutes() >> k) & 1) text(x + 3, 52, "M", 1);
+            if (!sq_bank && (h->solo >> k) & 1) text(x + 3, 58, "S", 1);
+            if (sq_bank && (MTH->solo >> k) & 1) text(x + 6, 52, "S", 1);
             if (k == t) for (int xx = x; xx <= x + 9; xx++) px(xx, 10);
         }
         return;
@@ -7026,11 +7901,11 @@ static void seq_draw(void)
     int y = 10;
     for (int r = 0; r < 8; r++) {
         if (r & 1) aos_breathe();                                  /* a long drawing: the stream is fed meanwhile */
-        int tall = r == t, hh = tall ? 6 : 2, len = sq_len(r), now = playing ? aos_seq_step(r) : -1;
+        int tall = r == t, hh = tall ? 6 : 2, len = sq_len(r), now = playing ? aos_seq_step(tb + r) : -1;
         for (int c = 0; c < 16; c++) {
             int nstep = sq_spage * 16 + c, x = c * 8;
             if (nstep >= len) continue;
-            const SqStep *s = SQ_STEP(pat, r, nstep);
+            const SqStep *s = sq_step_get(pat, r, nstep);
             int on = s->flags & SF_ON;
             if (on) {
                 int dx = tall ? (s->micro > 3 ? 1 : s->micro < -3 ? -1 : 0) : 0;
@@ -7053,9 +7928,11 @@ static void seq_draw(void)
         for (int x = 20; x < 108; x++) span(x, 9, 56, 0);
         for (int x = 20; x < 108; x++) { px(x, 9); px(x, 56); }
         for (int yy = 9; yy <= 56; yy++) { px(20, yy); px(107, yy); }
-        int top = clamp(sq_fxrow - 3, 0, FX_COUNT - 6 < 0 ? 0 : FX_COUNT - 6);
-        for (int i = 0; i < 7 && top + i <= FX_COUNT; i++) {
-            int r = top + i, yy = 12 + i * 6;
+        int vis[FX_COUNT + 1], nv = 0, at = 0;
+        for (int r = 0; r <= FX_COUNT; r++) if (sq_fx_ok(r)) { if (r == sq_fxrow) at = nv; vis[nv++] = r; }
+        int top = clamp(at - 3, 0, nv - 7 < 0 ? 0 : nv - 7);
+        for (int i = 0; i < 7 && top + i < nv; i++) {
+            int r = vis[top + i], yy = 12 + i * 6;
             const char *nm = r ? fx_info[r - 1].name + 6 : "NONE";
             upper(nm, n, 12);
             if (r == sq_fxrow) { for (int x = 22; x < 106; x++) span(x, yy - 1, yy + 5, 1); text(26, yy, n, 0); } else text(26, yy, n, 1);
@@ -7067,8 +7944,12 @@ static void seq_draw(void)
     int pg = sq_shown_page(), lay = layer() && pg != SQP_STEP ? 6 : 0;
     text(1, 40, sq_page_name[pg], 1);
     if (sq_held) { int st = sq_first_held(); text(22, 40, "STEP", 1); num(n, st + 1); text(40, 40, n, 1);
-        const SqStep *s = SQ_STEP(pat, t, st); int x = 52;
-        for (int k = 0; k < SQ_LOCKS; k++) if (s->lp[k] && s->lp[k] <= TP_ALL) { for (int a = 0; a < SQP_FX; a++) for (int b = 0; b < 12; b++) if (sq_par[a][b].tp == s->lp[k] - 1) { text(x, 40, sq_par[a][b].lab, 1); x += text_w(sq_par[a][b].lab) + 4; a = SQP_FX; break; } } }
+        const SqStep *s = sq_step_get(pat, t, st); int x = 52;
+        for (int k = 0; k < SQ_LOCKS; k++) if (s->lp[k] && s->lp[k] <= TP_ALL) { for (int a = 0; a < SQP_FX; a++) for (int b = 0; b < 12; b++) if (sq_param(a, b)->tp == s->lp[k] - 1) { text(x, 40, sq_param(a, b)->lab, 1); x += text_w(sq_param(a, b)->lab) + 4; a = SQP_FX; break; } } }
+    else if (sq_bank) {                                            /* a MIDI track: its channel and note */
+        text(22, 40, "CH", 1); if (MTH->trk[t][MP_CH]) num(n, MTH->trk[t][MP_CH]); else { n[0] = 'O'; n[1] = 'F'; n[2] = 'F'; n[3] = 0; } text(34, 40, n, 1);
+        mt_text(MP_NOTE, clamp(MTH->trk[t][MP_NOTE] + (MTH->trk[t][MP_OCT] - 3) * 12, 0, 127), n); text(50, 40, n, 1);
+        num(n, sq_len(t)); text(W - 1 - text_w(n) - 16, 40, "LEN", 1); text(W - 1 - text_w(n), 40, n, 1); }
     else if (pg == SQP_FX) { int row = h->fx_row[t]; upper(row > 0 && row <= FX_COUNT ? fx_info[row - 1].name + 6 : "NONE  YES PICKS", n, 15); text(22, 40, n, 1); }
     else { if (h->trk[t][TP_MACH]) { sq_text(TP_MACH, h->trk[t][TP_MACH], n); text(22, 40, n, 1); } else { text(22, 40, "SMPL", 1); sq_text(TP_SMPL, h->trk[t][TP_SMPL], n); text(42, 40, n, 1); if (!aos_slot_ready(h->trk[t][TP_SMPL])) text(62, 40, "EMPTY", 1); }
            num(n, sq_len(t)); text(W - 1 - text_w(n) - 16, 40, "LEN", 1); text(W - 1 - text_w(n), 40, n, 1); }
@@ -7077,13 +7958,13 @@ static void seq_draw(void)
     /* the six knobs: name and value */
     for (int i = 0; i < 6; i++) {
         const char *lab; int v = sq_get(pg, i + lay);
-        if (pg == SQP_FX) { int row = h->fx_row[t]; if (row <= 0 || row > FX_COUNT) break; lab = lay ? fx_info[row - 1].knob2[i] : fx_info[row - 1].knob[i]; if (!lab || !lab[0]) continue; sq_fx_text(t, i + lay, v, n); }
-        else { const SqP *p = &sq_par[pg][i + lay]; if (p->tp == SP_NONE) continue; lab = p->lab; sq_text(p->tp, v, n); }
+        if (pg == SQP_FX) { int row = sq_bank ? 0 : h->fx_row[t]; if (row <= 0 || row > FX_COUNT) break; lab = lay ? fx_info[row - 1].knob2[i] : fx_info[row - 1].knob[i]; if (!lab || !lab[0]) continue; sq_fx_text(t, i + lay, v, n); }
+        else { const SqP *p = sq_param(pg, i + lay); if (p->tp == SP_NONE) continue; lab = p->lab; sq_text(p->tp, v, n); }
         char l4[5]; int k = 0; while (lab[k] && k < 4) { l4[k] = lab[k] >= 'a' && lab[k] <= 'z' ? (char)(lab[k] - 32) : lab[k]; k++; } l4[k] = 0;
         n[5] = 0;
         text(1 + i * 21, 50, l4, 1); text(1 + i * 21, 57, n, 1);
         /* a value that is the step's own: underlined */
-        if (sq_held && sq_lockable(pg)) { const SqStep *s = SQ_STEP(pat, t, sq_first_held()); if (sq_lock_of(s, sq_par[pg][i + lay].tp) >= 0) for (int x = 1 + i * 21; x < 1 + i * 21 + 15; x++) px(x, 63); }
+        if (sq_held && sq_lockable(pg)) { const SqStep *s = sq_step_get(pat, t, sq_first_held()); if (sq_lock_of(s, sq_param(pg, i + lay)->tp) >= 0) for (int x = 1 + i * 21; x < 1 + i * 21 + 15; x++) px(x, 63); }
     }
     if (ticks < toast_until) {
         int x = (W - text_w(toast)) / 2;
@@ -7095,31 +7976,39 @@ static void seq_draw(void)
 static void seq_leds(void)
 {
     const SqHead *h = SQH; int t = sq_sel(), playing = aos_seq_playing();
-    static const uint8_t page_lamp[SQP_N] = {66, 68, 86, 80, 64, 70, 82, 0, 0};
-    if (sq_pat_held) { for (int k = 0; k < SQ_PATTERNS; k++) led_want[k] = k == sq_pat() ? 3 : 1; }
+    const int tb = sq_bank ? SQ_TRACKS : 0;
+    static const uint8_t page_lamp[SQP_N] = {66, 68, 86, 80, 64, 70, 82, 0, 0, 0};
+    /* the four lights above PAGE: the track's pages of sixteen steps -- the one on the trigs bright, the one playing lit, the others it has faint */
+    { int pages = (sq_len(t) + 15) / 16, pp = playing ? aos_seq_step(tb + t) / 16 : -1;
+      for (int k = 0; k < 4; k++) set_led(72 + 2 * k, k >= pages ? 0 : k == sq_spage ? 3 : k == pp ? 2 : 1); }
+    if (sq_scn_held) { for (int k = 0; k < 16; k++) led_want[k] = (h->mscn_ok[k >> 3] >> (k & 7)) & 1 ? (h->mscn[k] == h->mutes ? 3 : 2) : 0; }
+    else if (sq_pat_held) { for (int k = 0; k < SQ_PATTERNS; k++) led_want[k] = k == sq_pat() ? 3 : 1; }
     else if (sq_view == SV_MIXER || sq_rec) {
         int mixer = sq_view == SV_MIXER;
         for (int k = 0; k < 8; k++) {
-            int muted = (h->mutes >> k) & 1;
-            if (mixer) { led_want[k] = muted ? 0 : 2; led_want[8 + k] = (h->solo >> k) & 1 ? 3 : 0; }
-            else { led_want[k] = aos_seq_peak(k) > 6 ? 3 : 1; led_want[8 + k] = muted ? 0 : 2; }
+            int muted = (*sq_mutes() >> k) & 1;
+            if (mixer) { led_want[k] = muted ? 0 : 2; led_want[8 + k] = (*sq_solo() >> k) & 1 ? 3 : 0; }
+            else { led_want[k] = (sq_bank ? aos_mt_active(k) : aos_seq_peak(k) > 6) ? 3 : 1; led_want[8 + k] = muted ? 0 : 2; }
         }
     } else {
-        int len = sq_len(t), now = playing ? aos_seq_step(t) : -1;
+        int len = sq_len(t), now = playing ? aos_seq_step(tb + t) : -1;
         for (int k = 0; k < 16; k++) {
             int n = sq_spage * 16 + k;
             if (n >= len) continue;
-            led_want[k] = (SQ_STEP(sq_pat(), t, n)->flags & SF_ON) ? 2 : (k & 3) == 0 ? 1 : 0;
-            if (n == now) led_want[k] = 3;
+            led_want[k] = (sq_step_get(sq_pat(), t, n)->flags & SF_ON) ? 3 : 1;      /* a step that is on: bright; off: dim */
+            if (!sq_bank) { int c = aos_seq_ca(t, n); if (c >= 0 && (h->trk2[t][TP_CAM - SQ_TP] & 3) == 0) led_want[k] = c ? 3 : 1; }   /* GATE: the automaton's living cells are the steps */
+            if (n == now) led_want[k] = 2;                                      /* the playhead: between the two */
             if ((sq_held >> k) & 1) led_want[k] = (ticks & 8) ? 3 : 1;
         }
     }
     leds_clear_trigs();
     for (int k = 0; k < 16; k++) set_led(2 * k, led_want[k]);
     /* the tracks: the one in hand full, one sounding bright, a muted one dark */
-    for (int k = 0; k < 8; k++) { int muted = ((h->mutes >> k) & 1) || (h->solo && !((h->solo >> k) & 1)); set_led(40 + 2 * k, muted ? 0 : k == t ? 3 : aos_seq_peak(k) > 5 ? 2 : 1); }
+    for (int k = 0; k < 8; k++) { int muted = ((*sq_mutes() >> k) & 1) || (*sq_solo() && !((*sq_solo() >> k) & 1)); set_led(40 + 2 * k, muted ? 0 : k == t ? 3 : (sq_bank ? aos_mt_active(k) : aos_seq_peak(k) > 5) ? 2 : 1); }
     for (int a = 0; a < SQP_N; a++) if (page_lamp[a]) set_led(page_lamp[a], sq_page == a && sq_view == SV_GRID ? 3 : 1);
+    set_led(70, sq_bank ? 3 : 1);                                  /* the MIDI key's lamp: bright on the MIDI tracks */
     set_led(90, playing ? 3 : 1); set_led(88, playing ? 1 : 2); set_led(84, sq_rec ? 3 : 1);
+    set_led(32, xf_mode() == XM_SCENES ? 2 : 0); set_led(34, xf_mode() == XM_FREEZE ? 2 : 0);   /* the SCENE lamps: what the crossfader does (15 Nov 2026) */
     set_led(38, playing && (aos_seq_bar() & 3) == 0 ? 3 : 0);     /* TEMPO: the beat */
 }
 #endif
@@ -7533,6 +8422,12 @@ static void draw_system(void)
 {
     panel_clear(10, 61);
     if (usb_mode) { text(20, 20, "USB DISK MODE", 1); text(14, 32, "NO: BACK TO THE SKY", 1); return; }
+    if (layer()) {                                              /* the second knob set (15 Nov 2026): the language */
+        text(4, 11, "FUNC", 1);
+        text(4, 24, "A LANG", 1); text(52, 24, pv(PG_SYSTEM, 6) ? "NEDERLANDS" : "ENGLISH", 1);
+        text(4, 44, "PAGE: BACK", 1);
+        return;
+    }
     text(4, 11, "1 USB DISK MODE", 1);
     text(4, 17, "2 OS UPGRADE  FUNC+YES", 1);
     text(4, 24, "A SOUND", 1); text(52, 24, pv(PG_SYSTEM, 0) == 0 ? "OFF" : pv(PG_SYSTEM, 0) == 1 ? "KNOBS" : "LANE", 1);
@@ -7552,6 +8447,7 @@ static int param_page(int pg) { return pg == PG_SKY || pg == PG_LOOP || pg == PG
  * loop plays is solid and mirrored in the water (a dithered reflection that ripples), the rest a faint shore.
  * START and END are two buoys with pennants; a little boat sails the waterline where the loop is playing. */
 const uint8_t *aos_loop_wave(void);
+void aos_loop_restart(void);
 int aos_loop_at(void);
 static void loop_wave_draw(void)
 {
@@ -7665,9 +8561,20 @@ static void draw_hud(void)
         static const char *const ab[5] = {"-", "AB", "A", "B", "A+B"}, *const cd[5] = {"-", "CD", "C", "D", "C+D"};
         for (int i = 0; i < 60; i++) span(i, 57, 63, 0);
         text(1, 58, ab[pv(PG_MIX, 6)], 1); text(18, 58, cd[pv(PG_MIX, 7)], 1);
-        if (pv(PG_MIX, 0)) { char f[8] = "FB "; num(f + 3, pv(PG_MIX, 0)); text(34, 58, f, 1); }
     }
     if (pv(PG_SYSTEM, 0) != 1) { const char *m = pv(PG_SYSTEM, 0) == 0 ? "SND OFF" : "LANE"; for (int i = W - text_w(m) - 3; i < W; i++) span(i, 57, 63, 0); text(W - text_w(m) - 1, 58, m, 1); }
+#ifdef AERIAOS
+    if (showing && !br_mode && !out_open && !cloud_open && !(page == PG_MIDI && midi_mod >= 2) && !shelf_open) {   /* (15 Nov 2026) what the crossfader does, always in view */
+        char xl[20]; int n = 0; const char *m = master_frozen() ? "FROZEN" : xf_mode_name();
+        xl[n++] = 'X'; xl[n++] = 'F'; xl[n++] = ' ';
+        while (*m && n < 14) xl[n++] = *m++;
+        if (!master_frozen() && xf_mode() == XM_SCENES) { xl[n++] = ' '; num(xl + n, scene_a + 1); while (xl[n]) n++; xl[n++] = '-'; num(xl + n, scene_b + 1); while (xl[n]) n++; }
+        xl[n] = 0;
+        int x = (W - text_w(xl)) / 2, inv = master_frozen();
+        for (int i = x - 2; i < x + text_w(xl) + 2; i++) span(i, 57, 63, inv ? 1 : 0);
+        text(x, 58, xl, !inv);
+    }
+#endif
     if (ticks < toast_until) {
         int x = (W - text_w(toast)) / 2;
         for (int i = x - 3; i < x + text_w(toast) + 3; i++) span(i, 48, 56, 1);
@@ -7735,6 +8642,7 @@ static void leds_tick(void)
     }
     if (!pv(PG_SYSTEM, 2)) return;
 #ifdef SEQ_UI
+    if (mod_open) { mod_leds(); return; }
     if (seq_on && !br_mode && !preset_mode && sq_view != SV_MASTER) { seq_leds(); return; }
 #endif
     if (page == PG_CHAIN) {
@@ -7743,14 +8651,14 @@ static void leds_tick(void)
         if (slots[sel_slot].pending >= 0 && (ticks & 8)) led_want[sel_slot] = 3;
         led_want[11] = 1; led_want[12] = 1; led_want[13] = 1; /* shelf, weather down, weather up */
         led_want[14] = auto_weather ? 2 : 0;
-        led_want[15] = thunder ? 3 : 0;
         if (thunder > 150) for (int s = 0; s < N_SLOTS; s++) led_want[s] = 3;
     } else if (page == PG_SKY) {
-        for (int i = 1; i < N_WEATHER; i++) if (WON(i)) led_want[i] = 2;
-        if (!wx_on) led_want[CLEAR] = 2;
-        led_want[7] = auto_weather ? 2 : (uint8_t)((ticks >> 5) & 1);
-        for (int i = 0; i < XW_N; i++) led_want[8 + i] = (xw_on >> i) & 1 ? 2 : 1;
-        led_want[11] = ticks < tw_until ? 3 : 1;
+        if (pv_base(PG_SKY, 5)) { led_want[CLEAR] = (uint8_t)((ticks >> 5) & 1); }   /* WX OFF: only CLEAR, blinking */
+        else {
+            led_want[CLEAR] = wx_on ? 1 : 2; led_want[RAIN] = WON(RAIN) ? 2 : 1; led_want[FOG] = WON(FOG) ? 2 : 1;
+            led_want[7] = auto_weather ? 2 : (uint8_t)((ticks >> 5) & 1);
+            led_want[8 + XW_AURORA] = (xw_on >> XW_AURORA) & 1 ? 2 : 1;
+        }
     } else if (page == PG_SOURCE) {
         led_want[0] = src_loop ? 2 : 1; led_want[1] = src_stars ? 2 : 1; led_want[2] = src_balloons ? 2 : 1;
     } else if (page == PG_STARS) {
@@ -7785,6 +8693,9 @@ static void leds_tick(void)
 #endif
     if (gust) for (int k = 0; k < 16; k++) if (((int)(ticks >> 1) - k) % 16 == 0) led_want[k] = 3;
     if (flash) { for (int k = 0; k < 16; k++) led_want[k] = 3; set_led(38, 2); set_led(39, 2); }
+#ifdef AERIAOS
+    set_led(32, xf_mode() == XM_SCENES ? 2 : 0); set_led(34, xf_mode() == XM_FREEZE ? 2 : 0);   /* the SCENE lamps: what the crossfader does (15 Nov 2026) */
+#endif
     leds_out();
 }
 
@@ -7800,7 +8711,14 @@ static uint32_t diag_word(void)
 }
 
 /* ---- hooks --------------------------------------------------------------------------------------- */
-static void strike(void) { bolt_x = range(16, W - 16); bolt_t = 9; flash = 3; thunder = 200; }
+static void strike(void)
+{
+    bolt_x = range(16, W - 16); bolt_t = 9; flash = 3; thunder = 200;
+#if defined(AERIAOS)
+    wx_struck = 1;
+    for (int sl = 0; sl < N_SLOTS; sl++) for (int k = 0; k < 6; k++) storm_at[sl][k] = 0;   /* a strike throws every knob at once */
+#endif
+}
 static int autoplayed, setup_done;
 /* the screensaver: after WAIT minutes without a key or a knob, SAVR (or a random one) takes the screen */
 static int saver_on;
@@ -7891,9 +8809,12 @@ void module_tick(struct modwerk_runtime_api *api)
     PROF_AT(0);
     usb_tick();
     PROF_AT(1);
-    step_auto();
+    /* 13 Nov 2026: the sky and the sequencer never run together -- in the sequencer the sky's own background work
+     * (the weather and its AUTO, clouds and rain, balloons, birds, knob drift, the chain's picks, the stock pattern's
+     * stars, GUMBALLS / PITCH / MARBLES / PONG) waits; MOD, the master delay and the DJ filter stay (both faces) */
+    const int sky_on = !seq_on;
+    if (sky_on) step_auto();
     PROF_AT(2);
-    if (WON(STORM) && amount > 128 && (rnd() % 420) == 0) strike();
     int want = clouds_wanted(), wind = wind_now();
     for (int i = 0; i < MAX_CLOUDS; i++) {
         Cloud *c = &clouds[i];
@@ -7902,11 +8823,7 @@ void module_tick(struct modwerk_runtime_api *api)
         if (x > W + 2 && wind >= 0) make_cloud(c, -c->w - range(0, i >= want ? 200 : 30));
         if (x < -CLOUD_MAX_W - 2 && wind < 0) make_cloud(c, W + range(0, i >= want ? 200 : 30));
     }
-    move_precip();
-    balloons_tick();
-    birds_tick();
-    drift_tick();
-    picks_tick();
+    if (sky_on) { move_precip(); balloons_tick(); birds_tick(); drift_tick(); picks_tick(); }
     PROF_AT(3);
     if (!setup_done && ticks > 120 && rig_loaded()) { setup_done = 1; setup_start(); }
     setup_tick();
@@ -7914,9 +8831,10 @@ void module_tick(struct modwerk_runtime_api *api)
     loop_tick();
     preview_tick();
     PROF_AT(4);
-    if (!usb_mode) { gum_tick(); pitch_tick(); }
+    if (!usb_mode && sky_on) { gum_tick(); pitch_tick(); }
 #ifdef AERIAOS
-    pan_tick(); cloud_tick(); scale_tick(); master_tick(); marbles_tick(); pong_tick();
+    pan_tick(); mod_tick(); scale_tick(); master_tick();
+    if (sky_on) { cloud_tick(); marbles_tick(); pong_tick(); }
 #endif
     PROF_AT(5);
     if (saver_on) { if (usb_mode || br_mode) { saver_on = 0; ss_stop(); } else ss_tick(); }
@@ -7932,12 +8850,12 @@ void module_tick(struct modwerk_runtime_api *api)
     /* the effects run as soon as the sky opens: start the transport once */
     if (!autoplayed && ticks > 600 && pv(PG_SYSTEM, 3) && rig_loaded() && !playing() && !usb_mode) { transport_start(); autoplayed = 1; }
     PROF_AT(7);
-    sequencer_tick();
+    if (sky_on) sequencer_tick();
     PROF_AT(8);
     if (!usb_mode) sound_tick();
 #ifdef AERIAOS
-    wx_tick();
-    xw_tick();
+    wx_tick();                                                 /* (in the sequencer: only the DJ filter) */
+    if (sky_on) xw_tick();
 #endif
     PROF_AT(9);
     api->value = diag_word();
@@ -7967,6 +8885,7 @@ static void module_draw_body(unsigned char *frame)
     if (intro < INTRO_LEN) { draw_intro(); return; }
     if (saver_on) { ss_draw(); return; }
 #ifdef SEQ_UI
+    if (mod_open) { mod_draw(); return; }
     if (seq_on && !br_mode && sq_view != SV_MASTER) { seq_draw(); return; }
 #endif
     draw_sun_moon();
@@ -7991,9 +8910,23 @@ static void module_draw_body(unsigned char *frame)
     if (flash) for (int x = 0; x < W; x++) span(x, 0, H - 1, 3);
 }
 
+#ifdef AERIAOS
+static uint8_t sky_tempo_held;   /* TEMPO held: LEVEL sets the BPM (15 Nov 2026) */
+static uint8_t ui_was_showing;   /* the page was up when this key came (before the key itself brought it up) */
+static void show_page(int pg) { page = pg; shelf_open = 0; func_latch = 0; out_open = cloud_open = 0; page_until = (int)ticks + 240; say(page_name[pg], 0); }
+/* (15 Nov 2026) a page's key: its page; pressed again while it shows: its second set of knobs (as PAGE does, and as
+ * the sequencer's page keys do) */
+static void page_key(int pg)
+{
+    if (page == pg && !shelf_open && !out_open && !cloud_open && ui_was_showing && (param_page(pg) || pg == PG_CHAIN || pg == PG_SYSTEM)) { func_latch = !func_latch; say(page_name[pg], func_latch ? "2" : "1"); }
+    else show_page(pg);
+}
+#else
 static void show_page(int pg) { page = pg; shelf_open = 0; page_until = (int)ticks + 240; say(page_name[pg], 0); }
+static void page_key(int pg) { show_page(pg); }
+#endif
 static void choose_weather(int w) { auto_weather = 0; P(PG_SKY, 4).value = P(PG_SKY, 4).user = 0; set_weather(w); }
-static void toggle_auto(void) { auto_weather = !auto_weather; P(PG_SKY, 4).value = P(PG_SKY, 4).user = (int16_t)auto_weather; say("AUTO", auto_weather ? "ON" : "OFF"); }
+static void toggle_auto(void) { if (pv_base(PG_SKY, 5)) { say("WEATHER", "OFF"); return; } auto_weather = !auto_weather; P(PG_SKY, 4).value = P(PG_SKY, 4).user = (int16_t)auto_weather; say("AUTO", auto_weather ? "ON" : "OFF"); }
 
 /* bypass: the slot gives its place to NONE and remembers what it held */
 static int16_t bypass_row[N_SLOTS];
@@ -8016,18 +8949,57 @@ int module_key(int code, int pressed)
         if (pressed && code != KEY_FUNC) { saver_on = 0; ss_stop(); ui_until = 0; }
         return 1;
     }
+#ifdef AERIAOS
+    ui_was_showing = ticks <= ui_until;
+#endif
     if (pressed && code != KEY_PLAY && code != KEY_STOP) ui_until = ticks + UI_SHOW;
     if (code == KEY_FUNC) { func_held = pressed; if (pressed) page_until = (int)ticks + 240; }
+#ifdef AERIAOS
+    if (code == KEY_NO && pressed && func_held && !usb_mode && !seq_on && !mod_open && !preset_mode && !br_mode) {   /* (15 Nov 2026) FUNC + NO: a new sky, or new stars (the dark "hidden" screen is gone) */
+        if (page == PG_STARS) { new_constellation(); say("NEW STARS", 0); } else { new_sky(); say("NEW SKY", 0); }
+        return 1;
+    }
+    if ((code == KEY_SCENEA || code == KEY_SCENEB) && func_held && pressed && !mod_open && !preset_mode) {   /* FUNC + SCENE A: the fader moves between the scenes; FUNC + SCENE B: it freezes the master delay at B (15 Nov 2026) */
+        xf_set_mode(code == KEY_SCENEA ? XM_SCENES : XM_FREEZE);
+        return 1;
+    }
+#else
     if (code == KEY_NO && pressed && func_held && !usb_mode) { hidden = !hidden; if (!hidden) show_page(page); return 1; }
+#endif
     if (hidden) return 0;
     if (popup_open() && !usb_mode) return 0; /* a stock or base message: its keys */
     if (usb_mode) { if (pressed && code == KEY_NO) usb_leave(); return 1; }
+#ifdef AERIAOS
+    if (code == KEY_ARR && func_held) { if (pressed) { mod_open = !mod_open; mod_learn = -1; say(mod_open ? "MOD" : "MOD CLOSED", 0); } return 1; }   /* the modulation matrix, in both faces */
+    if (mod_open) return mod_key(code, pressed);
+#endif
 #ifdef SEQ_UI
     if (seq_key(code, pressed)) return 1;                      /* FUNC + MIDI: the sequencer; in it, its own keys */
 #endif
 #ifdef AERIAOS
     if (code == KEY_CUE && !br_mode) { if (pressed) { out_open = !out_open; cloud_open = 0; shelf_open = 0; say(out_open ? "OUT" : page_name[page], 0); } return 1; }
     if (code == KEY_REC && !br_mode) { if (pressed) { cloud_open = !cloud_open; out_open = 0; say(cloud_open ? "GRAIN CLOUD" : page_name[page], 0); } return 1; }
+#endif
+#ifdef AERIAOS
+    /* the transport in the sky (12 Nov 2026): on LOOP, PLAY starts the loop from its start and STOP stops it; on any
+     * other page STOP takes every effect dry (each MIX held at 0) and clears the sky (every weather off, AUTO off) */
+    if ((code == KEY_PLAY || code == KEY_STOP) && !br_mode && !seq_on) {
+        if (!pressed) return 1;
+        if (page == PG_LOOP) {
+            if (code == KEY_PLAY) { src_loop = 1; aos_loop_restart(); say("LOOP", "PLAY"); } else { src_loop = 0; say("LOOP", "STOP"); }
+            return 1;
+        }
+        if (code == KEY_STOP) {
+            for (int s = 0; s < N_SLOTS; s++) if (slots[s].row > 0) for (int k = 0; k < 6; k++) if (knob_is_mix(slots[s].knob[k])) slots[s].user[k] = 0;
+            xw_on = 0; auto_weather = 0; P(PG_SKY, 4).value = P(PG_SKY, 4).user = 0; toggle_weather(CLEAR);
+            say("STOP", "DRY + CLEAR");
+            return 1;
+        }
+        return 0;
+    }
+#endif
+#ifdef AERIAOS
+    if (code == 0x18 && !br_mode) { sky_tempo_held = (uint8_t)pressed; if (pressed) master_tap(); return 1; }   /* TEMPO: tap the tempo; hold it and turn LEVEL (15 Nov 2026) */
 #endif
     if (code == KEY_PLAY || code == KEY_STOP || code == KEY_REC || code == KEY_CUE || code == 0x18) return br_mode ? 1 : 0;
     if (code >= KEY_TRACK0 && code < KEY_TRACK0 + 8) { if (pressed) held_tracks |= 1u << (code - KEY_TRACK0); else held_tracks &= ~(1u << (code - KEY_TRACK0)); }
@@ -8047,7 +9019,7 @@ int module_key(int code, int pressed)
         if (func_held) { if (pressed && n->state != B_EMPTY && n->state != B_FILLING) { n->state = B_POPPING; n->pop = 12; AOS_BALLOON(b, 0); } return 1; }
         set_current_track(n->track);
         if (pressed) {
-            if (n->state == B_FILLING) { n->state = B_FLOATING; balloon_voice = b; AOS_BALLOON(b, 2); say("BALLOON", b == 0 ? "1 UP" : b == 1 ? "2 UP" : "3 UP"); }
+            if (n->state == B_FILLING) { n->state = B_FLOATING; balloon_voice = b; AOS_BALLOON(b, 2); src_balloons = 1; say("BALLOON", b == 0 ? "1 UP" : b == 1 ? "2 UP" : "3 UP"); }   /* (15 Nov 2026: and the BALLOONS source comes on, so it is heard) */
             else { n->state = B_FILLING; n->size = 0; n->y = WATER_Y - 12; AOS_BALLOON(b, 1); say("CATCHING", b == 0 ? "A B" : b == 1 ? "C D" : "SKY"); }
         }
         return 0;
@@ -8082,10 +9054,9 @@ int module_key(int code, int pressed)
         } else if (page == PG_CHAIN) {
             if (k < N_SLOTS) { if (func_held) toggle_bypass(k); else select_slot(k); }
             else if (k == 11 || k == 7) { shelf_open = 1; shelf_build(slot_fx(sel_slot)); shelf_row = shelf_index_of(slots[sel_slot].row); }
-            else if (k == 12) choose_weather(clamp(weather - 1, 0, N_WEATHER - 1));
-            else if (k == 13) choose_weather(clamp(weather + 1, 0, N_WEATHER - 1));
+            else if (k == 12) choose_weather(wx_step(weather, -1));
+            else if (k == 13) choose_weather(wx_step(weather, 1));
             else if (k == 14) toggle_auto();
-            else { strike(); say("LIGHTNING", 0); }
         } else if (page == PG_SOURCE) {
             if (k == 0) { if (func_held) browser_open(BR_LOOP); else { src_loop = !src_loop; say("LOOP", src_loop ? "ON" : "OFF"); } }
             else if (k == 1) { if (func_held) browser_open(BR_STARS); else { src_stars = !src_stars; say("STARS", src_stars ? "ON" : "OFF"); } }
@@ -8097,8 +9068,9 @@ int module_key(int code, int pressed)
         else if (page == PG_MIDI) { if (midi_pitch) pitch_key(code); else gum_key(code); }
         else if (page == PG_LOOP) { Param *p = &P(PG_LOOP, func_held ? 1 : 0); p->value = p->user = (int16_t)(k * 127 / 15); }
         else if (page == PG_BALLOON) { if (k < 3 && balloon[k].state == B_FLOATING) { balloon_quiet ^= (uint8_t)(1u << k); balloon_voice = k; say(k == 0 ? "BALLOON 1" : k == 1 ? "BALLOON 2" : "BALLOON 3", (balloon_quiet >> k) & 1 ? "QUIET" : "SINGING"); } else if (k >= 8) { Param *p = &P(PG_BALLOON, 4); p->value = p->user = (int16_t)((k - 8) * 127 / 7); } }
-        else if (k >= 8 && k <= 11) { if (k == 11) xw_twister(); else xw_toggle(k - 8); }
-        else { if (k < 7) { auto_weather = 0; P(PG_SKY, 4).value = P(PG_SKY, 4).user = 0; toggle_weather(k); } else if (k == 7) toggle_auto(); else if (k == 15) { strike(); say("LIGHTNING", 0); } }
+        else if (k >= 8 && k <= 11) { if (k == 8 + XW_AURORA) xw_toggle(XW_AURORA); }   /* WIND, HAIL, TWISTER: gone (13 Nov 2026) */
+        else { if (k == 0) xw_on = 0;                              /* CLEAR clears the aurora too */
+               if (k < 7) { if (wx_kept(k)) { auto_weather = 0; P(PG_SKY, 4).value = P(PG_SKY, 4).user = 0; toggle_weather(k); } } else if (k == 7) toggle_auto(); }
         return 1;
     }
     if (code >= KEY_TRACK0 && code < KEY_TRACK0 + 8) {
@@ -8112,15 +9084,15 @@ int module_key(int code, int pressed)
         if (k < N_SLOTS) { if (func_held) toggle_bypass(k); else select_slot(k); }
         return 1;
     }
-    if (code == KEY_SRC) { show_page(PG_CHAIN); return 1; }
-    if (code == KEY_AMP) { show_page(PG_SKY); return 1; }
+    if (code == KEY_SRC) { page_key(PG_CHAIN); return 1; }
+    if (code == KEY_AMP) { page_key(PG_SKY); return 1; }
     if (code == KEY_LFO) { show_page(PG_SOURCE); return 1; }
-    if (code == KEY_FX1) { show_page(page == PG_MIX ? PG_GAIN : PG_MIX); return 1; }
-    if (code == 0x30) { show_page(PG_MASTER); return 1; }                       /* the MIX key: the master's freeze delay and the tempo */
-    if (code == KEY_FX2 || code == KEY_PROJ) { show_page(PG_SYSTEM); return 1; }
-    if (code == KEY_PART) { show_page(PG_BALLOON); return 1; }
-    if (code == KEY_AED) { show_page(PG_LOOP); return 1; }
-    if (code == KEY_ARR) { show_page(PG_STARS); return 1; }
+    if (code == KEY_FX1) { show_page(page == PG_MIX ? PG_GAIN : PG_MIX); return 1; }   /* FX1: MIX, and again GAIN */
+    if (code == 0x30) { page_key(PG_MASTER); return 1; }                        /* the MIX key: the master's freeze delay and the tempo */
+    if (code == KEY_FX2 || code == KEY_PROJ) { page_key(PG_SYSTEM); return 1; }
+    if (code == KEY_PART) { page_key(PG_BALLOON); return 1; }
+    if (code == KEY_AED) { page_key(PG_LOOP); return 1; }
+    if (code == KEY_ARR) { page_key(PG_STARS); return 1; }
     if (code >= KEY_PUSH0 && code < KEY_PUSH0 + 6) {
         int k = code - KEY_PUSH0;
         if (page == PG_CHAIN) { slots[sel_slot].user[k] = -1; say(slots[sel_slot].knob[k], "SKY"); }
@@ -8128,12 +9100,15 @@ int module_key(int code, int pressed)
     else if (code == KEY_LEVEL_PUSH) toggle_auto();
     else if (code == KEY_LEFT || code == KEY_RIGHT) {
         if (page == PG_CHAIN) select_slot((sel_slot + (code == KEY_RIGHT ? 1 : N_SLOTS - 1)) % N_SLOTS);
+#ifdef AERIAOS
+        else if (page == PG_MIDI) { midi_mod_set((midi_mod + (code == KEY_RIGHT ? 1 : 3)) % 4); static const char *const mn[4] = {"GUMBALLS", "PITCH", "MARBLES", "PONG"}; say(mn[midi_mod], 0); }   /* (15 Nov 2026) the MIDI modules, either way round */
+#endif
         else show_page((page + (code == KEY_RIGHT ? 1 : N_PAGES - 1)) % N_PAGES);
     }
     else if (code == KEY_PAGE) { func_latch = !func_latch; page_until = (int)ticks + 240; say("LAYER", func_latch ? "2" : "1"); }
-    else if (code == KEY_UP || code == KEY_DOWN) choose_weather(clamp(weather + (code == KEY_UP ? 1 : -1), 0, N_WEATHER - 1));
-    else if (code == KEY_PATTERN) { Param *p = &P(PG_STARS, 10); p->value = p->user = (int16_t)!p->value; say("STARS", p->value ? "BIRDS" : "RING"); }
-    else if (code == KEY_BANK) { if (page == PG_CHAIN) { shelf_open = 1; shelf_build(slot_fx(sel_slot)); shelf_row = shelf_index_of(slots[sel_slot].row); } else { Param *p = &P(PG_STARS, 9); p->value = p->user = (int16_t)((p->value + 1) % 8); char n[6]; num(n, p->value + 1); say("BANK", n); } }
+    else if (code == KEY_UP || code == KEY_DOWN) choose_weather(wx_step(weather, code == KEY_UP ? 1 : -1));
+    else if (code == KEY_PATTERN) { if (page == PG_STARS) { Param *p = &P(PG_STARS, 10); p->value = p->user = (int16_t)!p->value; say("STARS", p->value ? "BIRDS" : "RING"); } }   /* (15 Nov 2026: only on the STARS page) */
+    else if (code == KEY_BANK) { if (page != PG_CHAIN) show_page(PG_CHAIN); shelf_open = 1; shelf_build(slot_fx(sel_slot)); shelf_row = shelf_index_of(slots[sel_slot].row); }   /* BANK: the shelf for the slot in hand, from any page (15 Nov 2026) */
 #ifdef AERIAOS
     else if (code == KEY_MIDI) { if (func_held) { gust = 120; say("GUST", 0); } else if (page == PG_MIDI) { midi_mod = (midi_mod + 1) % 4; midi_pitch = midi_mod == 1; static const char *const mn[4] = {"GUMBALLS", "PITCH", "MARBLES", "PONG"}; say(mn[midi_mod], 0); } else show_page(PG_MIDI); }
 #else
@@ -8141,10 +9116,14 @@ int module_key(int code, int pressed)
 #endif
     else if (code == KEY_YES && page == PG_MIDI && !func_held) { if (midi_pitch) pitch_key(code); else gum_key(code); }
     else if (code == KEY_YES && func_held && page == PG_SYSTEM) os_upgrade();
-    else if (code == KEY_YES && func_held) intro = 0;
+    else if (code == KEY_YES && func_held) { /* (the intro replay that was here is gone, 15 Nov 2026) */ }
     else if (code == KEY_YES && page == PG_SYSTEM) saver_go();
-    else if (code == KEY_YES) { if (page == PG_CHAIN && slots[sel_slot].row <= 0) { shelf_open = 1; shelf_row = 0; } else { Param *p = &P(PG_SKY, 10); p->value = p->user = (int16_t)!p->value; say(p->value ? "NIGHT" : "DAY", 0); } }
-    else if (code == KEY_NO) { if (page == PG_STARS) { new_constellation(); say("NEW STARS", 0); } else { new_sky(); say("NEW SKY", 0); } }
+    else if (code == KEY_YES && page == PG_CHAIN) { shelf_open = 1; shelf_build(slot_fx(sel_slot)); shelf_row = shelf_index_of(slots[sel_slot].row); }   /* YES on the chain: the shelf (15 Nov 2026: a full slot too) */
+    else if (code == KEY_YES && page == PG_SKY) { Param *p = &P(PG_SKY, 10); p->value = p->user = (int16_t)!p->value; say(p->value ? "NIGHT" : "DAY", 0); }   /* day / night: only on the SKY page now */
+    else if (code == KEY_NO) {                                                  /* (15 Nov 2026) NO backs out: the second knob set first, then the page itself (the sky alone) */
+        if (func_latch) { func_latch = 0; say(page_name[page], "1"); }
+        else ui_until = 0;
+    }
     return 1;
 }
 
@@ -8157,11 +9136,21 @@ int module_enc(int encoder, int delta)
     if (popup_open()) return 0;
     if (intro < INTRO_LEN) return 1;
     if (br_mode) { if (encoder == 6 || encoder == 0) browser_enc(delta); return 1; }
+#ifdef AERIAOS
+    if (mod_open) { mod_enc(encoder, delta); return 1; }
+    if (mod_learn >= 0 && !seq_on && encoder >= 0 && encoder < 6) {      /* MOD learning: this knob is the route's destination */
+        if (page == PG_CHAIN && !layer() && slots[sel_slot].row > 0 && slots[sel_slot].knob[encoder][0]) { mod_learn_take((uint16_t)(MK_SLOT << 12 | (sel_slot * 6 + encoder))); return 1; }
+        if (param_page(page) && page != PG_CHAIN) { int i = (layer() ? 6 : 0) + encoder; if (params[page][i].name[0]) { mod_learn_take((uint16_t)(MK_PAGE << 12 | (page * 12 + i))); return 1; } }
+    }
+#endif
 #ifdef SEQ_UI
     if (seq_enc(encoder, delta)) return 1;
 #endif
     if (shelf_open) { shelf_build(slot_fx(sel_slot)); if (encoder == 6 || encoder == 0) shelf_row = clamp(shelf_row + (delta > 0 ? 1 : -1), 0, shelf_n - 1); return 1; }
-    if (encoder == 6) { choose_weather(clamp(weather + (delta > 0 ? 1 : -1), 0, N_WEATHER - 1)); return 1; }
+#ifdef AERIAOS
+    if (encoder == 6 && sky_tempo_held) { Param *p = &P(PG_MASTER, 6); p->value = p->user = (int16_t)clamp(p->value + (delta > 0 ? 1 : -1), 0, 127); char b[8]; num(b, 60 + p->value); say("TEMPO", b); return 1; }   /* TEMPO held: LEVEL is the BPM (15 Nov 2026) */
+#endif
+    if (encoder == 6) { choose_weather(wx_step(weather, delta > 0 ? 1 : -1)); return 1; }
     if (encoder < 0 || encoder > 5) return 1;
 #ifdef AERIAOS
     if (preset_enc(delta)) return 1;                            /* the project page: a name's letters; else it holds the knobs */
@@ -8210,10 +9199,13 @@ int module_enc(int encoder, int delta)
     if (page == PG_MIDI) { if (midi_pitch) pitch_enc(encoder, delta, layer()); else gum_enc(encoder, delta, layer()); return 1; }
     if (page == PG_SYSTEM) {
         if (encoder > 5) return 1;
-        Param *p = &P(PG_SYSTEM, encoder);
-        p->value = p->user = (int16_t)clamp(pv(PG_SYSTEM, encoder) + (delta > 0 ? 1 : -1), p->lo, p->hi);
-        if (encoder == 4) say("SAVER", saver_name(p->value));
-        if (encoder == 0) for (int i = 0; i < 8; i++) for (int k = 0; k < 32; k++) sent[i][k] = 0xff;
+        int i = (layer() ? 6 : 0) + encoder;
+        Param *p = &P(PG_SYSTEM, i);
+        if (!p->name[0]) return 1;
+        p->value = p->user = (int16_t)clamp(pv(PG_SYSTEM, i) + (delta > 0 ? 1 : -1), p->lo, p->hi);
+        if (i == 4) say("SAVER", saver_name(p->value));
+        if (i == 6) say("LANGUAGE", p->value ? "DUTCH" : "ENGLISH");
+        if (i == 0) for (int k = 0; k < 8; k++) for (int q = 0; q < 32; q++) sent[k][q] = 0xff;
         return 1;
     }
     if (!param_page(page)) return 1;
@@ -8229,21 +9221,20 @@ int module_enc(int encoder, int delta)
         return 1;
     }
     int v = clamp(pv_base(page, i) + delta, p->lo, p->hi);
+    if (page == PG_SKY && i == 3) v = wx_step(pv_base(page, i), delta > 0 ? 1 : -1);   /* WTHR steps over the weathers that are gone */
     p->user = p->value = (int16_t)v;
-    if (page == PG_SKY) { if (i == 3) set_weather(v); if (i == 4) auto_weather = v; }
+    if (page == PG_SKY) {
+        if (i == 3) set_weather(v);
+        if (i == 4) auto_weather = v && !pv_base(PG_SKY, 5);
+        if (i == 5 && v) { xw_on = 0; auto_weather = 0; P(PG_SKY, 4).value = P(PG_SKY, 4).user = 0; set_weather(CLEAR); }   /* WX OFF: nothing of the weather runs */
+    }
     page_until = (int)ticks + 240;
-    static const char *const in_names[5] = {"-", "A B", "A", "B", "A+B"};
-    static const char *const cd_names[5] = {"-", "C D", "C", "D", "C+D"};
+    static const char *const in_names[5] = {"OFF", "AB STEREO", "A MONO", "B MONO", "A+B MONO"};
+    static const char *const cd_names[5] = {"OFF", "CD STEREO", "C MONO", "D MONO", "C+D MONO"};
     if (page == PG_SKY && (i == 3 || i == 6)) say(p->name, weather_name[v]);
+    else if (page == PG_SKY && i == 5) say("WEATHER", v ? "OFF" : "ON");
     else if (page == PG_MIX && i == 6) say("IN AB", in_names[v]);
     else if (page == PG_MIX && i == 7) say("IN CD", cd_names[v]);
-    else if (page == PG_GAIN && i >= 6 && i <= 9) { static const char *const bn[4] = {"EQ LOW", "EQ LO MID", "EQ HI MID", "EQ HIGH"}; signed_text(n, v - 13); int k = 0; while (n[k]) k++; n[k++] = 'D'; n[k++] = 'B'; n[k] = 0; say(bn[i - 6], n); }
-    else if (page == PG_GAIN && i >= 10) {       /* a centre: 20 Hz x 1000^(v/127), shown to two figures */
-        static const uint16_t hz[128] = {20,21,22,24,25,26,28,29,31,33,34,36,38,41,43,45,48,50,53,56,59,63,66,70,74,78,82,87,92,97,102,108,114,120,127,134,142,150,158,167,176,186,196,207,219,231,244,258,272,287,303,320,338,357,377,398,421,444,469,495,523,552,583,615,650,686,725,765,808,853,901,951,1004,1060,1120,1182,1248,1318,1392,1470,1552,1638,1730,1827,1929,2037,2150,2271,2398,2532,2673,2823,2980,3147,3323,3509,3705,3912,4130,4361,4605,4862,5134,5421,5724,6044,6382,6739,7116,7513,7933,8377,8845,9339,9862,10413,10995,11609,12258,12944,13667,14431,15238,16089,16989,17938,18941,20000};   /* 20 Hz x 1000^(v/127) */
-        int f = hz[v & 127], k = 0;
-        if (f >= 1000) { num(n, f / 1000); while (n[k]) k++; n[k++] = '.'; n[k++] = (char)('0' + f % 1000 / 100); n[k++] = 'K'; } else { num(n, f); while (n[k]) k++; }
-        n[k++] = 'H'; n[k++] = 'Z'; n[k] = 0; say(i == 10 ? "LO MID AT" : "HI MID AT", n);
-    }
     else if (page == PG_GAIN && i != 5) { int u = i == 3 ? 108 : i == 4 ? 127 : 64; n[0] = v >= u ? '+' : '-'; num(n + 1, iabs(v - u)); say(p->name, n); }
     else if (page == PG_BALLOON && (i == 6 || i >= 9)) { int u = i == 6 ? 3 : 25; n[0] = v > u ? '+' : v < u ? '-' : ' '; num(n + 1, iabs(v - u)); say(i == 6 ? "OCTAVE" : i == 9 ? "TUNE 1" : i == 10 ? "TUNE 2" : "TUNE 3", n); }
     else if (page == PG_BALLOON && i == 0) { int ms = (441 + v * v * 11) * 10 / 441, k = 0; if (ms >= 1000) { num(n, ms / 1000); while (n[k]) k++; n[k++] = '.'; n[k++] = (char)('0' + ms % 1000 / 100); n[k++] = 'S'; } else { num(n, ms); while (n[k]) k++; n[k++] = 'M'; n[k++] = 'S'; } n[k] = 0; say("GRAIN SIZE", n); }

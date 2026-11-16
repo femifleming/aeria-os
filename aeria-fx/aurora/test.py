@@ -1,7 +1,13 @@
 """AURORA gate: tools/run.sh python3 /aeria/aurora/test.py   (writes aurora/test_results.md)
 
 aurora_test.asm (ring at X:$10000) is rendered; aurora.asm (ring base from the word X:$213 points
-to) is assembled and compared with it."""
+to) is assembled and compared with it.
+
+Half rate (13 Nov 2026; the full-rate gate is test.py.prehalf): the float model runs the halfbands and the core at
+22.05 kHz; the decay / TONE theory and the highpass are at 22.05 kHz with the core's line lengths; the alias bands
+are the full-rate ones at half (the anti-alias low-pass keeps its words, so its frequencies halve); a new check
+measures the halfbands (images and folds >= 60 dB down). The long runs are short now (the owner: light tests):
+the rest check at TIME 0, the noise-and-silence and rider runs 6 .. 12 s instead of 40 .. 60 s."""
 import math
 import sys
 from pathlib import Path
@@ -11,15 +17,17 @@ import aeria as A
 import gen as G
 import wxlib as W
 import wxtest as T
+import halfband as HB
 
 FSR = 44100
+FSH = FSR / 2
 for b in G.BUILDS:
     G.build(b)
 rep = A.Report('AURORA')
 DEAR = {'AMT': 127, 'TIME': 127, 'TONE': 127, 'SHFT': 3}
 mod, names, d, mems, init, proc, cost = T.standard(
-    rep, '/aeria/aurora/aurora_test.asm', 'AERIA AURORA', '/aeria/aurora/manifest.py', DEAR, cost_limit=225,
-    build_note='test build, ring at X:$10000')
+    rep, '/aeria/aurora/aurora_test.asm', 'AERIA AURORA', '/aeria/aurora/manifest.py', DEAR, cost_limit=170,
+    build_note='test build, ring at X:$10000', parallel=True, words_limit=1018)
 NUL = A.null_cost()['max_per_frame']
 ON = T.P(names, d, AMT=127)
 
@@ -30,8 +38,9 @@ tw = A.assemble('/aeria/aurora/aurora_test.asm', 'AERIA AURORA')[1]
 body = [l for l in full if l not in ('        move    x:>$213,r4', '        nop', '        move    x:(r4),a')]
 tbody = [l for l in test if l != f'        move    #>${G.TEST_XRING:06x},a' and l != '        nop']
 rep.check('aurora.asm (ring base from the word X:$213 points to) assembles (round-trip, mpysu audit); it differs '
-          'from the rendered test build only in how init gets the base', body == tbody and len(fw) == len(tw) + 2,
-          f'{len(fw)} words (test build {len(tw)})')
+          'from the rendered test build only in how init gets the base; it fits its slot (P:$37800, FILT at P:$37c00: '
+          '1,024 words with the 4-word stub)', body == tbody and len(fw) == len(tw) + 2 and len(fw) + 4 <= 1024,
+          f'{len(fw)} words (test build {len(tw)}); with the stub {len(fw) + 4} of 1,024')
 
 
 def run(tag, p, x, blocks, **kw):
@@ -50,14 +59,17 @@ FIRST = 1 + G.CLR_BLOCKS            # the first running call (call 0 wakes, then
 
 
 def model(x, nblocks, time=64, tone=64, step=1, target=1.0):
-    """-> the four lines' outputs o_j[n] (plugin level, i.e. x 4 of the DSP's lines), from call FIRST on."""
+    """x: the 44.1 kHz input from call FIRST on (L = R = x). -> the four lines' outputs (plugin level, i.e. x 4 of the
+    DSP's lines), each through the interpolator, at 44.1 kHz. The decimator takes (L + R)/4 = x/2 (A1 the even
+    frame, A0 the odd); the core runs on each odd frame; its outputs come out A0 there, A1 the next frame."""
     Wn, H = G.WINDOW, G.HALF
+    d = HB.decimate([0.5 * v for v in x[:nblocks * 16]])
     ring = [0.0] * (Wn + 8)
     lines = [[0.0] * l for l in G.LEN]
     pos = [0] * 4
     lp = [0.0] * 4
     g = [G.line_gain(j, time) for j in range(4)]
-    damp = 1 - math.exp(-2 * math.pi * G.tone_hz(tone) / FSR)
+    damp = 1 - math.exp(-2 * math.pi * G.tone_hz(tone) / FSH)
     amc = W.pole(G.AMT_TAU)
     f, q2 = G.SV_F, 1 / G.HP_Q
     amt = 0.0
@@ -76,10 +88,9 @@ def model(x, nblocks, time=64, tone=64, step=1, target=1.0):
         amt += amc * (target - amt)
         if step == 0:
             c = H
-        dw = (win((c - 16 * step) % Wn) - ww) / 16
-        for i in range(16):
-            m = x[b * 16 + i]
-            fw = fb * 2 * m + 2 * fa1 * fw1 + fa2 * fw2          # the anti-alias low-pass (13 Nov 2026)
+        dw = (win((c - G.CORE_FRAMES * step) % Wn) - ww) / G.CORE_FRAMES
+        for i in range(G.CORE_FRAMES):
+            fw = fb * d[b * G.CORE_FRAMES + i] + 2 * fa1 * fw1 + fa2 * fw2     # the anti-alias low-pass
             fu = fw + 2 * fcc * fw1 + fk * fw2
             fw2, fw1 = fw1, fw
             fv = fu + fpp * fv1
@@ -108,7 +119,7 @@ def model(x, nblocks, time=64, tone=64, step=1, target=1.0):
             for j in range(4):
                 lines[j][pos[j]] = g[j] * h[j] + (-inj if j & 1 else inj)
                 pos[j] = (pos[j] + 1) % G.LEN[j]
-    return outs
+    return [[0.0] + HB.interpolate(o)[:-1] for o in outs]
 
 
 def fit(y, basis, lo, hi):
@@ -168,14 +179,14 @@ for fin in (110.0, 440.0, 1500.0):
     L, R, _ = run(f'oct{int(fin)}', ON, x, blocks)
     w = [a + b - 2 * c for a, b, c in zip(L, R, x)][3 * FSR:3 * FSR + 22050]
     lv = {k: A.db(A.goertzel(w, fin * k) + 1e-12) for k in (1, 2, 3, 4)}
-    ok &= lv[2] == max(lv.values()) and all(lv[k] < -78 for k in (1, 3, 4))
+    ok &= lv[2] == max(lv.values()) and all(lv[k] < -78 or lv[k] < lv[2] - 35 for k in (1, 3, 4))
     rows.append((fin, lv))
 # the highpass: the same input level, 110 Hz (220 Hz in the reverb) against 440 and 1500 Hz
 f_, q_ = G.SV_F, 1 / G.HP_Q
 
 
 def hp_db(fr):
-    z = complex(math.cos(2 * math.pi * fr / FSR), math.sin(2 * math.pi * fr / FSR))
+    z = complex(math.cos(2 * math.pi * fr / FSH), math.sin(2 * math.pi * fr / FSH))
     # Chamberlin: lp[n] = lp[n-1] + f bp[n-1]; hp = x - lp - q bp[n-1]; bp = bp[n-1] + f hp
     # bp = f hp / (1 - z^-1); lp = f z^-1 bp / (1 - z^-1)
     i1 = 1 / (1 - 1 / z)
@@ -187,19 +198,21 @@ def rbj_db(fr):
     w0 = 2 * math.pi * G.HP_HZ / FSR
     al = math.sin(w0) / (2 * G.HP_Q)
     b0 = (1 + math.cos(w0)) / 2
-    z = complex(math.cos(2 * math.pi * fr / FSR), math.sin(2 * math.pi * fr / FSR))
+    z = complex(math.cos(2 * math.pi * fr / FSR), math.sin(2 * math.pi * fr / FSR))   # (the plugin's, at 44.1 kHz)
     return 20 * math.log10(abs((b0 - 2 * b0 / z + b0 / z / z) / (1 + al - 2 * math.cos(w0) / z + (1 - al) / z / z)))
 
 
-dev = max(abs(hp_db(fr) - rbj_db(fr)) for fr in (100, 200, 300, 500, 700, 1000, 2000, 5000, 10000, 15000))
+dev = max(abs(hp_db(fr) - rbj_db(fr)) for fr in (100, 200, 300, 500, 700, 1000, 2000, 5000, 8000, 10000))
 rep.check('a -10 dBFS sine in: the curtains ring at twice its frequency (how loud depends on where it falls between the '
-          'loop\'s modes); the input\'s own frequency and the other multiples stay under -78 dBFS; under 500 Hz the '
+          'loop\'s modes); the input\'s own frequency and the other multiples stay under -78 dBFS or 35 dB under the octave '
+          '(half rate: the core\'s lines are new lengths, so a tone falls between other modes; the window\'s sidebands '
+          'keep their distance from the octave -- 1500 Hz in, float models: full rate 37 dB under, half rate 38); under 500 Hz the '
           'highpass thins it',
           ok and rows[0][1][2] < rows[1][1][2] - 6,
           '; '.join(f'{fin:.0f} Hz in: {2 * fin:.0f} Hz at {lv[2]:.1f} dB, {fin:.0f} Hz {lv[1]:.1f}, {3 * fin:.0f} Hz {lv[3]:.1f}, '
                     f'{4 * fin:.0f} Hz {lv[4]:.1f}' for fin, lv in rows)
           + f'; highpass (state variable) at 220 / 500 / 880 Hz: {hp_db(220):+.1f} / {hp_db(500):+.1f} / {hp_db(880):+.1f} dB, '
-          f'within {dev:.2f} dB of the plugin\'s biquad from 100 Hz to 15 kHz')
+          f'within {dev:.2f} dB of the plugin\'s biquad from 100 Hz to 10 kHz (the state variable at 22.05 kHz)')
 
 # ---- 3. SHFT ------------------------------------------------------------------------------------------------------------
 rows, ok = [], True
@@ -215,15 +228,16 @@ rep.check('SHFT 0..3 on a 440 Hz sine: the reverb rings at 440 / 880 / 1320 / 17
 
 
 # ---- 4. decay --------------------------------------------------------------------------------------------------------------
-def t60_theory(fr, time, lens, damp_hz):
-    a = 1 - math.exp(-2 * math.pi * damp_hz / FSR)
-    w = 2 * math.pi * fr / FSR
+def t60_theory(fr, time, lens, damp_hz, fs=FSH):
+    """lens in samples at fs (this loop: the core's lines at 22.05 kHz; the plugin's at 44.1 kHz)"""
+    a = 1 - math.exp(-2 * math.pi * damp_hz / fs)
+    w = 2 * math.pi * fr / fs
     hd = a / math.sqrt(1 - 2 * (1 - a) * math.cos(w) + (1 - a) ** 2)
-    per_s = 60 / G.t60(time) + -20 * math.log10(hd) * FSR / (sum(lens) / len(lens))
+    per_s = 60 / G.t60(time) + -20 * math.log10(hd) * fs / (sum(lens) / len(lens))
     return 60 / per_s
 
 
-def decay(tag, p, fin, hold, secs):
+def decay(tag, p, fin, hold, secs, deep=40):
     blocks_ = int(secs * FSR / 16)
     n_ = blocks_ * 16
     stop = int(hold * FSR)
@@ -234,7 +248,7 @@ def decay(tag, p, fin, hold, secs):
     for s0 in range(stop + 2205, n_ - 4410, 2205):
         pts.append(((s0 - stop) / FSR, A.db(A.goertzel(ring[s0:s0 + 4410], 2 * fin) + 1e-12)))
     top = pts[0][1]
-    use = [(t, v) for t, v in pts if top - 40 < v < top - 3 and v > -110]
+    use = [(t, v) for t, v in pts if top - deep < v < top - 3 and v > -110]
     mt = sum(t for t, _ in use) / len(use)
     mv = sum(v for _, v in use) / len(use)
     slope = sum((t - mt) * (v - mv) for t, v in use) / sum((t - mt) ** 2 for t, _ in use)
@@ -242,47 +256,48 @@ def decay(tag, p, fin, hold, secs):
 
 
 rows, ok = [], True
-for tv, secs_ in ((32, 9), (64, 14), (96, 22)):
-    got, pts = decay(f'dec{tv}', T.P(names, d, AMT=127, TIME=tv), 440.0, 4.0, secs_)
+for tv in (0, 32, 64):
     want = t60_theory(880.0, tv, G.LEN, G.tone_hz(64))
-    plug = t60_theory(880.0, tv, G.PLUGIN_LEN, G.DAMP_HZ)
+    got, pts = decay(f'dec{tv}', T.P(names, d, AMT=127, TIME=tv), 440.0, 1.5, 1.5 + want / 2 + 0.6, deep=30)
+    plug = t60_theory(880.0, tv, G.PLUGIN_LEN, G.DAMP_HZ, FSR)
     ok &= abs(got / want - 1) < 0.15
     rows.append(f'TIME {tv} (T60 {G.t60(tv):.1f} s): 880 Hz dies away in {got:.2f} s (this loop\'s theory {want:.2f} s; the '
                 f'plugin\'s full-length loop {plug:.2f} s)')
-rep.check('decay: a 440 Hz sine stops, the 880 Hz ring falls 60 dB in the set time less what the damping takes at '
-          '880 Hz (level at 880 Hz in 100 ms windows, slope fitted from -3 to -40 dB), within 15 %', ok, '; '.join(rows))
+rep.check('decay: a 440 Hz sine (1.5 s) stops, the 880 Hz ring falls 60 dB in the set time less what the damping takes at '
+          '880 Hz (level at 880 Hz in 100 ms windows, slope fitted from -3 to -30 dB: short renders), within 15 %', ok, '; '.join(rows))
 rows, ok = [], True
 for tn in (20, 64, 110):
-    got, _ = decay(f'tone{tn}', T.P(names, d, AMT=127, TONE=tn), 1500.0, 4.0, 12)
     want = t60_theory(3000.0, 64, G.LEN, G.tone_hz(tn))
-    plug = t60_theory(3000.0, 64, G.PLUGIN_LEN, G.tone_hz(tn) / G.DAMP_UP)
+    got, _ = decay(f'tone{tn}', T.P(names, d, AMT=127, TONE=tn), 1500.0, 1.5, 1.5 + want / 2 + 0.6, deep=30)
+    plug = t60_theory(3000.0, 64, G.PLUGIN_LEN, G.plugin_hz(tn), FSR)
     ok &= abs(got / want - 1) < 0.3
-    rows.append(f'TONE {tn} (plugin lowpass {G.tone_hz(tn) / G.DAMP_UP:.0f} Hz, this loop\'s {G.tone_hz(tn):.0f} Hz): 3 kHz '
+    rows.append(f'TONE {tn} (plugin lowpass {G.plugin_hz(tn):.0f} Hz, this loop\'s {G.tone_hz(tn):.0f} Hz at 22.05 kHz): 3 kHz '
                 f'dies away in {got:.2f} s (theory {want:.2f}; the plugin\'s loop with that lowpass {plug:.2f})')
 rep.check('TONE: the highs die sooner with the knob down (1.5 kHz sine in, 3 kHz ringing), within 30 % of a rough theory (the set T60 and the mean lowpass loss a turn; single modes differ)',
           ok, '; '.join(rows))
 
 # ---- 5. the curtains wander; AMT down: the tail rings out, then rest ------------------------------------------------------
-secs = 40
+secs = 21
 blocks = secs * FSR // 16
 n = blocks * 16
-off = 20 * FSR // 16
+off = 8 * FSR // 16
 x = A.noise(n, 0.25, 12)
-ev = [(0, ON), (off, T.P(names, d, AMT=0))]
-L, R, _ = run('long', ON, x, blocks, events=ev)
+ON0 = T.P(names, d, AMT=127, TIME=0)
+ev = [(0, ON0), (off, T.P(names, d, AMT=0, TIME=0))]
+L, R, _ = run('long', ON0, x, blocks, events=ev)
 bc = blockcost('long')
 wl = [a - b for a, b in zip(L, x)]
 wr = [a - b for a, b in zip(R, x)]
 bal = []
-for s0 in range(4 * FSR, off * 16 - FSR, FSR // 2):
+for s0 in range(3 * FSR, off * 16 + 4 * FSR, FSR // 2):
     bal.append(A.db(A.rms(wl[s0:s0 + FSR // 2]) / A.rms(wr[s0:s0 + FSR // 2])))
-c = A.corr(wl[5 * FSR:15 * FSR], wr[5 * FSR:15 * FSR])
-lvl = A.db(A.rms(wl[10 * FSR:19 * FSR] + wr[10 * FSR:19 * FSR]) / A.rms(x[10 * FSR:19 * FSR]))
+c = A.corr(wl[3 * FSR:11 * FSR], wr[3 * FSR:11 * FSR])
+lvl = A.db(A.rms(wl[4 * FSR:8 * FSR] + wr[4 * FSR:8 * FSR]) / A.rms(x[4 * FSR:8 * FSR]))
 rest = next((b for b in range(off, blocks) if bc[b] < 2), None)
 exact = rest is not None and all(L[i] == x[i] and R[i] == x[i] for i in range(rest * 16, n))
 before = max(abs(v) for v in wl[rest * 16 - 16:rest * 16] + wr[rest * 16 - 16:rest * 16]) if rest else -1
-rep.check('0.25 FS noise, plugin settings: the curtains sit apart (the plugin pans: +-0.60 and +-0.21, equal power) and their balance wanders; '
-          'AMT to 0 at 20 s: the amount glides out (1.2 s), the tail rings on with the dry sound untouched, and when it '
+rep.check('0.25 FS noise, TIME 0 (T60 2.25 s: a short run), 21 s: the curtains sit apart (the plugin pans: +-0.60 and +-0.21, equal power) and their balance wanders; '
+          'AMT to 0 at 8 s (balance and correlation over 3 .. 12 s): the amount glides out (1.2 s), the tail rings on with the dry sound untouched, and when it '
           'has been under 512 LSB for half a second the routine rests, bit-exact',
           c < 0.9 and max(bal) - min(bal) > 1.0 and exact and before <= 512,
           f'wet {lvl:+.1f} dB re the input; L/R correlation {c:+.2f}; L re R level over 0.5 s steps {min(bal):+.1f} .. '
@@ -293,9 +308,10 @@ L, R, _ = run('sil', ON, None, blocks)
 rep.check('silence in, AMT 127: exactly 0 out', max(abs(v) for v in L + R) == 0)
 
 # ---- 6. a minute of noise and silence ------------------------------------------------------------------------------------------
-T.minute(rep, 'au', mems, init, proc, ON, quiet_db=-80, note='plugin settings: T60 9 s, 20 s of tail')
-T.minute(rep, 'aud', mems, init, proc, T.P(names, d, **DEAR), amp=1.0,
-         note='dearest settings, full-scale noise: T60 35 s (the rider keeps the lines out of their limit: check 7)')
+T.minute(rep, 'au', mems, init, proc, T.P(names, d, AMT=127, TIME=0), secs=12, quiet_db=-80,
+         note='TIME 0: T60 2.25 s, 4 s of tail (short run; the full-rate gate: 60 s at T60 9 s)')
+T.minute(rep, 'aud', mems, init, proc, T.P(names, d, **DEAR), amp=1.0, secs=9,
+         note='dearest settings, full-scale noise: T60 35 s (short run; the full-rate gate: 60 s)')
 
 # ---- 7. quality pass (12 Nov): the rider on what goes into the lines -------------------------------------------------------
 TRK = [G.ST[f'LP{j}'] for j in range(4)] + [G.ST['RIDE']]
@@ -316,15 +332,15 @@ def tracked(tag, p, x, blocks):
 
 rows = []
 ok = True
-for tag, p, amp, secs in (('rq25', ON, 0.25, 10), ('rq90', ON, 0.9, 20),
-                          ('rqd', T.P(names, d, **DEAR), 1.0, 40), ('rqt', T.P(names, d, AMT=127, TIME=127, TONE=127), 1.0, 40)):
+for tag, p, amp, secs in (('rq25', ON, 0.25, 4), ('rq90', ON, 0.9, 6),
+                          ('rqd', T.P(names, d, **DEAR), 1.0, 10), ('rqt', T.P(names, d, AMT=127, TIME=127, TONE=127), 1.0, 10)):
     blocks = int(secs * FSR / 16)
     pk, rmin, sat = tracked(tag, p, A.noise(blocks * 16, amp, 9), blocks)
     rows.append(f'{tag} ({amp} FS noise {secs} s): line peak {pk:.3f}, rider down to {rmin:.3f}, calls with a line at its '
                 f'limit {sat}')
     ok = ok and sat == 0 and (tag != 'rq25' or rmin > 0.999)
 rep.check('the rider: the lines (their damped reads, sampled a call) never reach their limit, even at T60 35 s on full-scale '
-          'noise (before the quality pass, 1.0 FS noise for 40 s at TIME 127 TONE 127: line peak 0.998 / 0.999 and 5 / 4 calls at the limit); at the plugin\'s '
+          'noise (short runs now: 4 .. 10 s, the full-rate gate 10 .. 40 s; before the quality pass, 1.0 FS noise for 40 s at TIME 127 TONE 127: line peak 0.998 / 0.999 and 5 / 4 calls at the limit); at the plugin\'s '
           'settings on 0.25 FS noise it never moves', ok, '; '.join(rows))
 
 # ---- 8. aliasing (13 Nov 2026, "stop aliasing"): the anti-alias low-pass in front of the window ---------------------------
@@ -357,18 +373,43 @@ for sh, r in ((1, 2), (2, 3), (3, 4)):
         x = bandnoise(lo, hi, n)
         L, R, _ = run(f'al{sh}_{tag}', p, x, blocks)
         return A.db(A.rms([a + b - 2 * c for a, b, c in zip(L[FSR:], R[FSR:], x[FSR:])]) + 1e-12)
-    ref = wetdb(2000 / r, 4000 / r, 'ref')
-    low = wetdb((FSR - 16000) / r, 21000, 'low') - ref                  # aliases landing under 16 kHz (mostly)
-    high = wetdb(FSR / 2 / r + 100, (FSR - 16000) / r, 'high') - ref     # aliases landing 16 .. 22 kHz
-    top = wetdb(12000 / r, 14000 / r, 'top') - ref                       # the shimmer's own top (12-14 kHz out)
+    ref = wetdb(1000 / r, 2000 / r, 'ref')
+    low = wetdb((FSH - 8000) / r, 21000, 'low') - ref                   # aliases landing under 8 kHz (and what the
+                                                                         # decimator stops, 12 .. 21 kHz)
+    high = wetdb(FSH / 2 / r + 50, (FSH - 8000) / r, 'high') - ref      # aliases landing 8 .. 11 kHz
+    top = wetdb(6000 / r, 7000 / r, 'top') - ref                         # the shimmer's own top (6-7 kHz out)
     ok &= low < -30 and high < -20 and top > -10
-    rows.append(f'{G.STEPS[sh]}: landing < 16 kHz {low:.1f} dB, 16-22 kHz {high:.1f} dB, wanted 12-14 kHz out {top:+.1f} dB')
-rep.check('aliasing (quality pass 13 Nov 2026): band noise above fs/(2 ratio) in, wet power re the wet of the same power '
-          'in the band that lands at 2-4 kHz (TONE 127): what folds back under 16 kHz is >= 30 dB down, what lands at '
-          '16-22 kHz >= 20 dB down (before the anti-alias low-pass, the same measure: -2.2 .. -2.9 dB and -4.2 .. -6.0 dB, about as loud as '
-          'the shimmer), the wanted top (12-14 kHz out) within 10 dB of 2-4 kHz', ok, '; '.join(rows))
-rep.note('size', f'{len(fw)} words of P; r7 state {len(G.ST.at)} words; X ring {G.RING} words (base a multiple of {G.RING}): '
-                 f'window {G.WINDOW} frames, lines {" ".join(str(v) for v in G.LEN)} frames (the plugin at 44.1 kHz: '
+    rows.append(f'{G.STEPS[sh]}: landing < 8 kHz {low:.1f} dB, 8-11 kHz {high:.1f} dB, wanted 6-7 kHz out {top:+.1f} dB')
+rep.check('aliasing (quality pass 13 Nov 2026; at half rate the full-rate bands halve, the core\'s fs/2 being 11 kHz): band noise above '
+          '22.05 kHz/(2 ratio) in, wet power re the wet of the same power in the band that lands at 1-2 kHz (TONE 127): '
+          'what folds back under 8 kHz is >= 30 dB down, what lands at 8-11 kHz >= 20 dB down, the wanted top (6-7 kHz '
+          'out) within 10 dB of 1-2 kHz. (Full-rate build: under 16 kHz / 16-22 kHz / 12-14 kHz.)', ok, '; '.join(rows))
+
+# ---- 9. the halfbands (half rate, 13 Nov 2026): images of the wet and folds of the input -------------------------------------
+rows, ok = [], True
+secs = 2
+blocks = secs * FSR // 16
+n = blocks * 16
+pu = T.P(names, d, AMT=127, TONE=127, SHFT=0)
+for fin in (3000.0, 7000.0):
+    x = A.sine(fin, 0.3, n)
+    L, R, _ = run(f'hbi{int(fin)}', pu, x, blocks)
+    w = [a + b - 2 * c for a, b, c in zip(L[FSR:], R[FSR:], x[FSR:])]
+    want = A.db(A.goertzel(w, fin) + 1e-12)
+    img = A.db(A.goertzel(w, FSH - fin) + 1e-12)                       # the interpolator's image
+    ok &= want - img >= 60
+    x2 = A.sine(FSH - fin, 0.3, n)                                    # folds onto fin at 22.05 kHz
+    L2, R2, _ = run(f'hbf{int(fin)}', pu, x2, blocks)
+    w2 = [a + b - 2 * c for a, b, c in zip(L2[FSR:], R2[FSR:], x2[FSR:])]
+    fold = A.db(A.goertzel(w2, fin) + 1e-12)
+    ok &= want - fold >= 60
+    rows.append(f'{fin:.0f} Hz in: wet {want:.1f} dB, its image at {FSH - fin:.0f} Hz {img - want:.1f} dB; '
+                f'{FSH - fin:.0f} Hz in, at {fin:.0f} Hz {fold - want:.1f} dB')
+rep.check('the halfbands: UNIS, TONE 127, a -10 dBFS sine in; the wet\'s image (22.05 kHz - f) and what a sine at '
+          '22.05 kHz - f folds onto f are >= 60 dB under the wet at f', ok, '; '.join(rows))
+rep.note('size', f'{len(fw)} words of P; r7 state {len(G.ST.at)} words; X region {G.REGION} words (base a multiple of {G.REGION}): '
+                 f'ring {G.RING} words, halfbands {G.HB_END} words at +${G.HB_AT:x}; '
+                 f'window {G.WINDOW} core frames, lines {" ".join(str(v) for v in G.LEN)} core frames at 22.05 kHz (the plugin at 44.1 kHz: '
                  f'{" ".join(str(v) for v in G.PLUGIN_LEN)}, x {G.SCALE:.4f})')
 rep.note('cost', f'dsp_host mean {cost[0]:.1f}, worst block {cost[1]:.1f} instructions a sample at the dearest settings; '
                  'at rest (AMT 0, tail gone) 7 instructions a call')

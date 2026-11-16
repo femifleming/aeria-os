@@ -37,7 +37,7 @@ static void seq_midi_flush(void)
 }
 static void mq_now(void) { while (mq_r != mq_w) { aos_midi_out(mq[mq_r & 255].st, mq[mq_r & 255].a, mq[mq_r & 255].b); mq_r++; } }
 /* the MIDI notes sounding: each ends by itself */
-#define SQ_MNOTES 32
+#define SQ_MNOTES 64
 static struct { uint8_t ch, note; uint16_t left; } mnote[SQ_MNOTES];
 static const int8_t sq_chord[SQ_CHORDS][4] = {{0, 0, 0, 0}, {0, 12, 0, 0}, {0, 7, 0, 0}, {0, 4, 7, 0}, {0, 3, 7, 0}, {0, 2, 7, 0}, {0, 5, 7, 0}, {0, 4, 7, 11},
     {0, 3, 7, 10}, {0, 4, 7, 10}, {0, 3, 6, 0}, {0, 4, 8, 0}, {0, 3, 7, 14}, {0, 5, 10, 15}, {0, 1, 2, 3}};
@@ -51,15 +51,15 @@ static struct { uint32_t w, per; int32_t last, fb; } ks[SQ_TRACKS];   /* where i
 static struct {
     uint8_t playing, pat, fill, chain_at;
     uint32_t step_len;                   /* samples << 8 */
-    int32_t t_next[SQ_TRACKS], g_next;   /* until the track's next step / the pattern's next step, samples << 8 from this block's start */
-    uint8_t pos[SQ_TRACKS], now_step[SQ_TRACKS], prev[SQ_TRACKS], g_pos, skip[SQ_TRACKS];
-    uint8_t idx[SQ_TRACKS];              /* the step that comes next (pos counts the loop; DIR and ROT say which step that is) */
-    int32_t t_loop[SQ_TRACKS];           /* until the track's loop comes round, by the plain clock: WARP bends the steps inside it only */
-    int32_t dur[SQ_TRACKS];              /* the coming step's own length (RATE, WARP) */
-    uint16_t loops[SQ_TRACKS], slip[SQ_TRACKS];
-    int32_t rat_t[SQ_TRACKS], rat_gap[SQ_TRACKS];
-    uint32_t rat_mul[SQ_TRACKS];         /* each gap times this (16.16): 65536 even, less a bounce coming to rest, more one letting go */
-    uint8_t rat_n[SQ_TRACKS], rat_vel[SQ_TRACKS], rat_rev[SQ_TRACKS], rat_p[SQ_TRACKS][TP_ALL];
+    int32_t t_next[SQ_ALL], g_next;      /* until the track's next step / the pattern's next step, samples << 8 from this block's start */
+    uint8_t pos[SQ_ALL], now_step[SQ_ALL], prev[SQ_ALL], g_pos, skip[SQ_ALL];   /* (the clock's arrays: the audio tracks 0..7, the MIDI tracks 8..15) */
+    uint8_t idx[SQ_ALL];                 /* the step that comes next (pos counts the loop; DIR and ROT say which step that is) */
+    int32_t t_loop[SQ_ALL];              /* until the track's loop comes round, by the plain clock: WARP bends the steps inside it only */
+    int32_t dur[SQ_ALL];                 /* the coming step's own length (RATE, WARP) */
+    uint16_t loops[SQ_ALL], slip[SQ_TRACKS];
+    int32_t rat_t[SQ_ALL], rat_gap[SQ_ALL];
+    uint32_t rat_mul[SQ_ALL];            /* each gap times this (16.16): 65536 even, less a bounce coming to rest, more one letting go */
+    uint8_t rat_n[SQ_ALL], rat_vel[SQ_ALL], rat_rev[SQ_ALL], rat_p[SQ_ALL][TP_ALL];
     uint8_t lkp[SQ_TRACKS][TP_ALL]; uint32_t lk[SQ_TRACKS][2];   /* the last note's parameters, and which of them its step locked */
     int8_t modv[SQ_TRACKS], rndv[SQ_TRACKS];   /* the modulation now (-127..127); the value RND holds since the track's last note */
     int32_t duck;                        /* Q12 */
@@ -75,6 +75,20 @@ static struct {
 } sq;
 int aos_midi_out(unsigned st, unsigned a, unsigned b);
 static void route_write(int s, int on, const uint32_t g[4]);
+static void ph_write(int s, unsigned mono, const uint32_t g[2], int lone);
+static void ph_forget(int s);
+static void rb_send(int t, uint32_t g);
+static void rb_off(void);
+static uint32_t sq_sqr(int v) { v = v < 0 ? 0 : v > 127 ? 127 : v; return (uint32_t)(v * v) * 520u; }   /* 0..127 -> Q23, a square law (127: 0.9997) */
+static uint32_t sq_sat(uint32_t g) { return g > 0x7FFFFFu ? 0x7FFFFFu : g; }
+/* (15 Nov 2026) OUT EACH: a pair's own setting (MAIN, CUE, PHNS): 0 OFF, 1 L, 2 R, 3 L+R, 4 ST. L, R and L+R take the
+ * track summed to mono at full level (PAN does not move it); ST is the stereo track placed by PAN. 1: mono. */
+static unsigned sq_pair(int m, uint32_t gl, uint32_t gr, uint32_t g[2])
+{
+    g[0] = m == 1 || m == 3 ? 0x7FFFFFu : m == 4 ? gl : 0;
+    g[1] = m == 2 || m == 3 ? 0x7FFFFFu : m == 4 ? gr : 0;
+    return m >= 1 && m <= 3;
+}
 
 static void seq_trk2_defaults(int t)
 {
@@ -96,6 +110,7 @@ void aos_seq_defaults(void)
         seq_trk2_defaults(t);
     }
     h->magic[1] = 'E'; h->magic[2] = 'S'; h->magic[3] = 'Q'; h->magic[0] = 'A';
+    aos_seq_rv_defaults();
 }
 static int seq_valid(void)
 {
@@ -104,6 +119,31 @@ static int seq_valid(void)
     if (h->ver == 1) { for (int t = 0; t < SQ_TRACKS; t++) seq_trk2_defaults(t); h->ver = 2; }   /* a sequence of before the second block */
     return h->ver == 2;
 }
+/* ---- the MIDI tracks (15 Nov 2026) ---- */
+static int mt_valid(void) { const MtHead *m = MTH; return m->magic[0] == 'A' && m->magic[1] == 'E' && m->magic[2] == 'M' && m->magic[3] == 'T' && m->ver == 1; }
+void aos_mt_defaults(void)
+{
+    MtHead *m = MTH;
+    volatile uint8_t *b = (volatile uint8_t *)MT_BASE;
+    for (uint32_t i = 0; i < MT_HEAD_SIZE + MT_STEPS_SIZE; i++) b[i] = 0;
+    m->ver = 1;
+    for (int p = 0; p < SQ_PATTERNS; p++) for (int t = 0; t < SQ_TRACKS; t++) m->len[p][t] = 16;
+    for (int t = 0; t < SQ_TRACKS; t++) {
+        uint8_t *p = m->trk[t];
+        p[MP_CH] = (uint8_t)(t + 1); p[MP_NOTE] = 60; p[MP_VEL] = 100; p[MP_GATE] = 4; p[MP_OCT] = 3;
+        uint8_t *q = m->trk2[t];
+        q[TP_DENS - SQ_TP] = 127; q[TP_RATE - SQ_TP] = 5; q[TP_WARP - SQ_TP] = 64;
+    }
+    m->magic[1] = 'E'; m->magic[2] = 'M'; m->magic[3] = 'T'; m->magic[0] = 'A';
+}
+/* the clock side sees sixteen tracks: 0..7 the audio tracks, 8..15 the MIDI tracks */
+static const uint8_t *trk2_of(int t) { return t < SQ_TRACKS ? SQH->trk2[t] : MTH->trk2[t - SQ_TRACKS]; }
+static int len_of(int pat, int t) { int l = t < SQ_TRACKS ? SQH->len[pat][t] : MTH->len[pat][t - SQ_TRACKS]; return l >= 1 && l <= SQ_STEPS ? l : 16; }
+static int free_of(int t) { return t < SQ_TRACKS ? SQH->trk[t][TP_FREE] : MTH->trk[t - SQ_TRACKS][MP_FREE]; }
+static int nei_of(int t) { return t < SQ_TRACKS ? (t + 7) & 7 : SQ_TRACKS + ((t - SQ_TRACKS + 7) & 7); }   /* the track above, in its own bank */
+static uint8_t mt_cc_sent[SQ_TRACKS][2], mt_prog_sent[SQ_TRACKS];
+static uint32_t mt_at[SQ_TRACKS];    /* when the track's last note went (timer ticks): the UI's meter */
+int aos_mt_active(int t) { return t >= 0 && t < SQ_TRACKS && mt_at[t] && now() - mt_at[t] < MS(150); }
 
 /* ---- a voice into its track ---- */
 static inline int32_t sq_sin(uint32_t ph)   /* a sine from a parabola, rounded: -32767..32767 */
@@ -276,7 +316,11 @@ static void sq_trigger(int t, const uint8_t *p, int vel, int rev, uint32_t delay
         }
     }
 }
-static int sq_muted(int t) { const SqHead *h = SQH; return ((h->mutes >> t) & 1) || (h->solo && !((h->solo >> t) & 1)); }
+static int sq_muted(int t)
+{
+    if (t >= SQ_TRACKS) { const MtHead *m = MTH; int k = t - SQ_TRACKS; return ((m->mutes >> k) & 1) || (m->solo && !((m->solo >> k) & 1)); }
+    const SqHead *h = SQH; return ((h->mutes >> t) & 1) || (h->solo && !((h->solo >> t) & 1));
+}
 static int sq_cond(int t, int c)
 {
     if (!c) return 1;
@@ -285,7 +329,7 @@ static int sq_cond(int t, int c)
     case SQC_FILL: return sq.fill; case SQC_NFILL: return !sq.fill;
     case SQC_FIRST: return sq.loops[t] == 0; case SQC_NFIRST: return sq.loops[t] != 0;
     case SQC_PRE: return sq.prev[t]; case SQC_NPRE: return !sq.prev[t];
-    case SQC_NEI: return sq.prev[(t + 7) & 7]; case SQC_NNEI: return !sq.prev[(t + 7) & 7];
+    case SQC_NEI: return sq.prev[nei_of(t)]; case SQC_NNEI: return !sq.prev[nei_of(t)];
     }
     return 1;
 }
@@ -390,10 +434,72 @@ static void sq_fire(int t, int n, uint32_t delay)
         for (int k = 0; k < TP_ALL; k++) sq.rat_p[t][k] = p[k];
     } else sq.rat_n[t] = 0;
 }
+/* a MIDI track's note (15 Nov 2026): p its parameters with the step's lock in; its channel, note and octave, the
+ * chord, a gate of GATE eighths of the step; CC1 / CC2 go out when their value differs from the last one sent */
+static void mt_trigger(int m, const uint8_t *p, int vel, uint32_t delay)
+{
+    if (!p[MP_CH]) return;
+    unsigned ch = (unsigned)((p[MP_CH] - 1) & 15);
+    int t = SQ_TRACKS + m, base = clamp_i((int)p[MP_NOTE] + ((int)p[MP_OCT] - 3) * 12, 0, 127);
+    const int8_t *cv = sq_chord[p[MP_CHRD] < SQ_CHORDS ? p[MP_CHRD] : 0];
+    uint32_t gate = ((uint32_t)(sq.dur[t] > 0 ? sq.dur[t] : (int32_t)sq.step_len) >> 13) * (uint32_t)(p[MP_GATE] ? p[MP_GATE] : 4) >> 3;   /* blocks */
+    if (gate < 2) gate = 2; else if (gate > 60000u) gate = 60000u;
+    for (int k = 0; k < 2; k++) {
+        int cc = p[MP_CC1 + 2 * k], v = p[MP_CC1V + 2 * k];
+        if (cc && v != mt_cc_sent[m][k]) { mt_cc_sent[m][k] = (uint8_t)v; mq_put(delay, 0xB0u | ch, (unsigned)cc, (unsigned)v); }
+    }
+    for (int k = 0; k < 4; k++) {
+        if (k && !cv[k]) break;
+        unsigned note = (unsigned)clamp_i(base + cv[k], 0, 127);
+        int slot = -1;
+        for (int q = 0; q < SQ_MNOTES; q++) { if (mnote[q].left && mnote[q].ch == ch && mnote[q].note == note) { slot = q; mq_put(delay, 0x80u | ch, note, 0); break; } if (slot < 0 && !mnote[q].left) slot = q; }
+        if (slot < 0) { slot = 0; mq_put(delay, 0x80u | mnote[0].ch, mnote[0].note, 0); }
+        mq_put(delay, 0x90u | ch, note, (unsigned)(vel < 1 ? 100 : vel > 127 ? 127 : vel));
+        mnote[slot].ch = (uint8_t)ch; mnote[slot].note = (uint8_t)note; mnote[slot].left = (uint16_t)gate;
+    }
+    mt_at[m] = now() | 1u;
+}
+static void mt_params(int m, const MtStep *s, uint8_t *p)
+{
+    for (int k = 0; k < MP_N; k++) p[k] = MTH->trk[m][k];
+    for (int k = MP_N; k < TP_ALL; k++) p[k] = 0;
+    if (s && s->lp && s->lp <= MP_N) p[s->lp - 1] = s->lv;
+}
+static void mt_fire(int t, int n, uint32_t delay)
+{
+    int m = t - SQ_TRACKS;
+    MtStep s = *MT_STEP(sq.pat, m, n);
+    if (!(s.flags & SF_ON)) return;
+    if (sq.skip[t] == (uint8_t)(n + 1)) { sq.skip[t] = 0; return; }           /* a pad just played and wrote this step */
+    { int pr = (s.prob ? s.prob : 100) * (MTH->trk2[m][TP_DENS - SQ_TP] + 1) / 128;
+      if (pr < 100 && (int)(rnd_u() % 100u) >= pr) { sq.prev[t] = 0; return; } }
+    int ok = sq_cond(t, s.cond);
+    sq.prev[t] = (uint8_t)ok;
+    if (!ok || sq_muted(t)) return;
+    uint8_t p[TP_ALL];
+    mt_params(m, &s, p);
+    int vel = s.vel ? s.vel : 100;
+    mt_trigger(m, p, vel, delay);
+    if (s.ratch > 1) {                                                         /* a ratchet, as the audio tracks' */
+        int r = s.ratch > 64 ? 64 : s.ratch, cv = SQ_CURVE(s.flags);
+        uint32_t L = (uint32_t)(sq.dur[t] > 0 ? sq.dur[t] : (int32_t)sq.step_len) >> 8;
+        uint32_t ratio = 65536u, g0;
+        if (cv) {
+            ratio = cents_step(-(cv > 0 ? cv : -cv) * (r > 16 ? 600 : r > 8 ? 1200 : 2400));
+            uint32_t rn = 65536u; for (int k = 0; k < r; k++) rn = mul16(rn, ratio);
+            g0 = div_u(L * ((65536u - ratio) >> 4), ((65536u - rn) >> 4) + 1u);
+            if (cv < 0) { for (int k = 1; k < r; k++) g0 = mul16(g0, ratio); ratio = div_u(0xFFFFFFFFu, ratio); }
+        } else g0 = div_u(L, (uint32_t)r);
+        if (g0 < 48) g0 = 48;
+        sq.rat_n[t] = (uint8_t)(r - 1); sq.rat_gap[t] = (int32_t)(g0 << 8); sq.rat_mul[t] = ratio; sq.rat_t[t] = (int32_t)(delay << 8) + sq.rat_gap[t];
+        sq.rat_vel[t] = (uint8_t)vel; sq.rat_rev[t] = 0;
+        for (int k = 0; k < TP_ALL; k++) sq.rat_p[t][k] = p[k];
+    } else sq.rat_n[t] = 0;
+}
 /* which step the track's count c is: its direction, then turned round by ROT */
 static int sq_which(int t, int c, int len)
 {
-    const uint8_t *q = SQH->trk2[t];
+    const uint8_t *q = trk2_of(t);
     int i = c;
     switch (q[TP_DIR - SQ_TP]) {
     case 1: i = len - 1 - c; break;                                           /* backward */
@@ -410,7 +516,7 @@ static int sq_which(int t, int c, int len)
 static const uint8_t sq_rate_n[SQ_RATES] = {1, 1, 1, 2, 3, 1, 4, 3, 2, 3, 4}, sq_rate_d[SQ_RATES] = {4, 3, 2, 3, 4, 1, 3, 2, 1, 1, 1};
 static int32_t sq_track_step(int t)
 {
-    int r = SQH->trk2[t][TP_RATE - SQ_TP]; if (r >= SQ_RATES) r = 5;
+    int r = trk2_of(t)[TP_RATE - SQ_TP]; if (r >= SQ_RATES) r = 5;
     return (int32_t)div_u(sq.step_len * sq_rate_d[r], sq_rate_n[r]);
 }
 /* the clock's curve (after norns' clockabout): over each loop of a track the steps speed up or slow down along a
@@ -439,7 +545,7 @@ static int32_t sq_step_dur(int t, int c, int len, int32_t sl)
         uint32_t avg = (uint32_t)(sum / len), ratio = div_u((uint32_t)sq_curve_w(c, len) << 16, avg ? avg : 1u);   /* this step's share, Q16 */
         sl = (int32_t)mul16((uint32_t)sl, ratio);
     }
-    int w = (int)SQH->trk2[t][TP_WARP - SQ_TP] - 64;
+    int w = (int)trk2_of(t)[TP_WARP - SQ_TP] - 64;
     if (!w || len < 2) return sl;
     uint32_t ratio = cents_step(w * 375 / (len - 1));                         /* 2^(2 w / 64) from the first step to the last */
     uint32_t cur = 65536u, sum = 0, at = 65536u;
@@ -495,8 +601,8 @@ __attribute__((optimize("O2"))) static void seq_block(void)
                 if (want != sq.pat) {
                     sq.pat = (uint8_t)want;
                     if (h->pcch) mq_put(0, 0xC0u | (unsigned)((h->pcch - 1) & 15), (unsigned)want, 0);
-                    for (int t = 0; t < SQ_TRACKS; t++) if (!h->trk[t][TP_FREE]) {
-                        int len = h->len[sq.pat][t]; if (len < 1 || len > SQ_STEPS) len = 16;
+                    for (int t = 0; t < SQ_ALL; t++) if (!free_of(t)) {
+                        int len = len_of(sq.pat, t);
                         int32_t ts = sq_track_step(t);
                         sq.pos[t] = 0; sq.loops[t] = 0; sq.t_next[t] = sq.g_next; sq.rat_n[t] = 0; sq.idx[t] = 0; sq.idx[t] = (uint8_t)sq_which(t, 0, len);
                         sq.t_loop[t] = sq.g_next + ts * len; sq.dur[t] = sq_step_dur(t, 0, len, ts);
@@ -506,26 +612,30 @@ __attribute__((optimize("O2"))) static void seq_block(void)
             sq.g_next += sl;
         }
         sq.g_next -= B;
-        for (int t = 0; t < SQ_TRACKS; t++) {
-            int len = h->len[sq.pat][t]; if (len < 1 || len > SQ_STEPS) len = 16;
-            int sw = h->trk[t][TP_SHUF] ? 50 + h->trk[t][TP_SHUF] * 30 / 127 : h->swing;
+        for (int t = 0; t < SQ_ALL; t++) {
+            const int audio = t < SQ_TRACKS;
+            int len = len_of(sq.pat, t);
+            int sw = audio && h->trk[t][TP_SHUF] ? 50 + h->trk[t][TP_SHUF] * 30 / 127 : h->swing;
             const int32_t ts = sq_track_step(t);
             for (int guard = 0; guard < 8; guard++) {
                 int c = sq.pos[t]; if (c >= len) c = 0;
                 int n = sq.idx[t]; if (n >= len) n = 0;
-                const SqStep *s = SQ_STEP(sq.pat, t, n);
+                int s_on, s_micro;
+                if (audio) { const SqStep *s = SQ_STEP(sq.pat, t, n); s_on = s->flags & SF_ON; s_micro = s->micro; }
+                else { const MtStep *s = MT_STEP(sq.pat, t - SQ_TRACKS, n); s_on = s->flags & SF_ON; s_micro = s->micro; }
                 int32_t off = 0;
                 if ((c & 1) && sw > 50) off = (ts / 50) * (sw - 50);
-                if (s->flags & SF_ON) off += (ts / 48) * s->micro;
+                if (s_on) off += (ts / 48) * s_micro;
                 int32_t at = sq.t_next[t] + off;
                 if (at >= B) break;
                 if (at < 0) at = 0;
                 sq.now_step[t] = (uint8_t)n;
                 if (sq.dur[t] <= 0) sq.dur[t] = ts;
-                sq_fire(t, n, (uint32_t)at >> 8);
+                if (audio) sq_fire(t, n, (uint32_t)at >> 8); else mt_fire(t, n, (uint32_t)at >> 8);
                 sq.t_next[t] += sq.dur[t];
                 if (++c >= len) {
-                    c = 0; sq.loops[t]++; ca_tick_loop(t); sq.slip[t] = (uint16_t)(sq.slip[t] + h->trk[t][TP_SLIP]); if (!h->trk[t][TP_SLIP]) sq.slip[t] = 0;
+                    c = 0; sq.loops[t]++;
+                    if (audio) { ca_tick_loop(t); sq.slip[t] = (uint16_t)(sq.slip[t] + h->trk[t][TP_SLIP]); if (!h->trk[t][TP_SLIP]) sq.slip[t] = 0; }
                     sq.t_next[t] = sq.t_loop[t]; sq.t_loop[t] += ts * len;       /* the loop keeps the plain clock's time, whatever WARP did inside it */
                 }
                 sq.pos[t] = (uint8_t)c;
@@ -534,8 +644,9 @@ __attribute__((optimize("O2"))) static void seq_block(void)
             }
             sq.t_next[t] -= B; sq.t_loop[t] -= B;
             while (sq.rat_n[t] && sq.rat_t[t] < B) {
-                if (h->trk[t][TP_SLIP]) sq.slip[t] = (uint16_t)(sq.slip[t] + h->trk[t][TP_SLIP]);   /* the loop point walks while the roll runs */
-                sq_trigger(t, sq.rat_p[t], sq.rat_vel[t], sq.rat_rev[t], (uint32_t)(sq.rat_t[t] < 0 ? 0 : sq.rat_t[t]) >> 8);
+                if (audio && h->trk[t][TP_SLIP]) sq.slip[t] = (uint16_t)(sq.slip[t] + h->trk[t][TP_SLIP]);   /* the loop point walks while the roll runs */
+                if (audio) sq_trigger(t, sq.rat_p[t], sq.rat_vel[t], sq.rat_rev[t], (uint32_t)(sq.rat_t[t] < 0 ? 0 : sq.rat_t[t]) >> 8);
+                else mt_trigger(t - SQ_TRACKS, sq.rat_p[t], sq.rat_vel[t], (uint32_t)(sq.rat_t[t] < 0 ? 0 : sq.rat_t[t]) >> 8);
                 sq.rat_gap[t] = (int32_t)mul16((uint32_t)sq.rat_gap[t], sq.rat_mul[t]); if (sq.rat_gap[t] < (48 << 8)) sq.rat_gap[t] = 48 << 8;
                 sq.rat_t[t] += sq.rat_gap[t]; sq.rat_n[t]--;
                 if (sq.rat_t[t] < B) sq.rat_t[t] = B;                            /* at most one a block (a voice has one start) */
@@ -606,6 +717,11 @@ static void seq_tick(void)
 {
     if (!seq_mode) return;
     if (!seq_valid()) aos_seq_defaults();
+    if (!mt_valid()) aos_mt_defaults();
+    for (int m = 0; m < SQ_TRACKS; m++) {                                      /* the MIDI tracks' programs, when set or changed */
+        int pr = MTH->trk[m][MP_PROG], ch = MTH->trk[m][MP_CH];
+        if (pr && ch && mt_prog_sent[m] != pr) { mt_prog_sent[m] = (uint8_t)pr; aos_midi_out(0xC0u | (unsigned)((ch - 1) & 15), (unsigned)(pr - 1), 0); }
+    }
     const SqHead *h = SQH;
     for (int t = 0; t < SQ_TRACKS; t++) {
         const uint8_t *p = h->trk[t];
@@ -622,13 +738,14 @@ static void seq_tick(void)
         seq_filter(t, clamp_i(hp, 0, 127), clamp_i(lp, 0, 127));
         vol = clamp_i(vol, 0, 127); pan = clamp_i(pan, 0, 127);
         sq.tgain[t] = sq_muted(t) ? 0 : (vol * vol * 65) >> 8;                 /* a square law: 100 is about -4 dB, 127 full */
+        rb_send(t, h->rv_on ? sq_sqr(sq_p(t, TP_RVB)) : 0);                    /* the reverb bus's send (0 while the bus is off) */
         sq.send[t] = (uint8_t)clamp_i(dl, 0, 127); sq.drive[t] = 0; sq.bits[t] = 0;   /* no drive and no bit reduction (12 Nov 2026: the owner wants no distortion) */ sq.duck_d[t] = (uint8_t)(h->duck_src == t ? 0 : sq_p(t, TP_DUCK) & 127);
         if (!sq.ui_route[t]) {
             int i = pan >> 3, f = pan & 7;                                    /* equal power: 64 is 0.71 each side */
             uint32_t r = (uint32_t)(sq_pan_tab[i] + (sq_pan_tab[i + 1 > 16 ? 16 : i + 1] - sq_pan_tab[i]) * f / 8);
             uint32_t l = (uint32_t)(sq_pan_tab[16 - i] + (sq_pan_tab[16 - i - 1 < 0 ? 0 : 16 - i - 1] - sq_pan_tab[16 - i]) * f / 8);
             uint32_t gl = l * 255u > 0x7FFFFFu ? 0x7FFFFFu : l * 255u, gr = r * 255u > 0x7FFFFFu ? 0x7FFFFFu : r * 255u;
-            int out = sq_p(t, TP_OUT);                                              /* the main pair, the cue pair, or both */
+            int out = sq_p(t, TP_OUT);                                              /* the main pair, the cue pair, both, QUAD, or EACH */
             uint32_t g[4] = {out == 1 ? 0 : gl, out == 1 ? 0 : gr, out ? gl : 0, out ? gr : 0};
             if (out == 3) {                                                   /* QUAD: Y places it between the front pair and the back */
                 int y = sq_p(t, TP_Y); if (!y && !h->trk2[t][TP_Y - SQ_TP]) y = 64;
@@ -638,7 +755,16 @@ static void seq_tick(void)
                 uint32_t fr = (uint32_t)(sq_pan_tab[16 - yi] + (sq_pan_tab[16 - yi - 1 < 0 ? 0 : 16 - yi - 1] - sq_pan_tab[16 - yi]) * yf / 8);
                 g[0] = (gl >> 15) * fr; g[1] = (gr >> 15) * fr; g[2] = (gl >> 15) * bk; g[3] = (gr >> 15) * bk;
             }
+            uint32_t ph[2] = {sq_sat(g[0] + g[2]), sq_sat(g[1] + g[3])};   /* the phones hear main + cue (as before) */
+            unsigned mono = 0; int lone = 0;
+            if (out == 4) {                                                   /* EACH: main, cue and phones set apart */
+                uint32_t m2[2], c2[2];
+                mono = sq_pair(sq_p(t, TP_MOUT), gl, gr, m2) | sq_pair(sq_p(t, TP_COUT), gl, gr, c2) << 1 | sq_pair(sq_p(t, TP_HOUT), gl, gr, ph) << 2;
+                g[0] = m2[0]; g[1] = m2[1]; g[2] = c2[0]; g[3] = c2[1];
+                lone = !m2[0] != !m2[1];                                      /* bass mono would pull its lows across */
+            }
             route_write(t, 1, g);
+            ph_write(t, mono, ph, lone);
         }
         sq.peak[t] -= sq.peak[t] / 8;
         { int pr = h->trk2[t][TP_PROG - SQ_TP], mc = p[TP_MCH];                 /* the track's program, when it is set or changed */
@@ -657,9 +783,10 @@ void aos_seq_mode(int on)
 {
     on = on != 0;
     if (on && !seq_valid()) aos_seq_defaults();
+    if (on && !mt_valid()) aos_mt_defaults();
     if (on == seq_mode) return;
     for (int t = 0; t < SQ_TRACKS; t++) {
-        sq.hp_sent[t] = sq.lp_sent[t] = -2; sq.ui_route[t] = 0; sq.prog_sent[t] = 0;
+        sq.hp_sent[t] = sq.lp_sent[t] = -2; sq.ui_route[t] = 0; sq.prog_sent[t] = 0; ph_forget(t);
         sq.lk[t][0] = sq.lk[t][1] = 0;
         tv[t][0].on = tv[t][1].on = 0;
         dsp_write(0x280u + 8u * (uint32_t)t + 7u, 0x220u + 9u * (uint32_t)t, 0);   /* every track has its routing block, slot or none */
@@ -667,12 +794,30 @@ void aos_seq_mode(int on)
         else { static const uint32_t g0[4] = {0, 0, 0, 0}; route_write(t, 0, g0); }
     }
     mnotes_off();
-    if (!on) sq.playing = 0;
+    if (!on) { sq.playing = 0; rb_off(); }
     if (!sq.step_len) aos_seq_tempo(1200);
     seq_mode = on;
     SQH->mode = (uint8_t)on;
 }
 int aos_seq_is(void) { return seq_mode; }
+/* (15 Nov 2026) a project loaded while the sequencer is up: what aos_seq_mode(1) sets up, without leaving the mode --
+ * leaving and coming back drained the stream twice (68 ms of silence) for the format to change and change back */
+void aos_seq_refresh(void)
+{
+    if (!seq_mode) return;
+    if (!seq_valid()) aos_seq_defaults();
+    if (!mt_valid()) aos_mt_defaults();
+    for (int t = 0; t < SQ_TRACKS; t++) {
+        sq.hp_sent[t] = sq.lp_sent[t] = -2; sq.ui_route[t] = 0; sq.prog_sent[t] = 0; ph_forget(t);
+        sq.lk[t][0] = sq.lk[t][1] = 0;
+        tv[t][0].on = tv[t][1].on = 0;
+        dsp_write(0x8900u + 32u * (uint32_t)t + 0xAu, 0, 0); dsp_write(0x8900u + 32u * (uint32_t)t + 0xBu, 0, 0);
+        mt_cc_sent[t][0] = mt_cc_sent[t][1] = 0xFF; mt_prog_sent[t] = 0;
+    }
+    mnotes_off();
+    sq.playing = 0;
+    rb_off();
+}
 void aos_seq_play(int on)
 {
     if (on == 2 && seq_valid() && sq.step_len) {                               /* on from where it stopped (MIDI's Continue) */
@@ -683,28 +828,30 @@ void aos_seq_play(int on)
         if (!seq_valid()) aos_seq_defaults();
         if (SQH->chain_n) SQH->pattern = SQH->chain[0] & 3;
         sq.pat = SQH->pattern & 3;
-        for (int t = 0; t < SQ_TRACKS; t++) {
-            int len = SQH->len[sq.pat][t]; if (len < 1 || len > SQ_STEPS) len = 16;
+        if (!mt_valid()) aos_mt_defaults();
+        for (int t = 0; t < SQ_ALL; t++) {
+            int len = len_of(sq.pat, t);
             int32_t ts = sq_track_step(t);
-            if (SQH->trk2[t][TP_CAR - SQ_TP]) ca_seed(t);
-            sq.pos[t] = 0; sq.t_next[t] = 0; sq.loops[t] = 0; sq.prev[t] = 0; sq.rat_n[t] = 0; sq.slip[t] = 0; sq.skip[t] = 0; sq.now_step[t] = 0;
+            if (t < SQ_TRACKS) { if (SQH->trk2[t][TP_CAR - SQ_TP]) ca_seed(t); sq.slip[t] = 0; }
+            else { mt_cc_sent[t - SQ_TRACKS][0] = mt_cc_sent[t - SQ_TRACKS][1] = 0xFF; }
+            sq.pos[t] = 0; sq.t_next[t] = 0; sq.loops[t] = 0; sq.prev[t] = 0; sq.rat_n[t] = 0; sq.skip[t] = 0; sq.now_step[t] = 0;
             sq.idx[t] = 0; sq.idx[t] = (uint8_t)sq_which(t, 0, len); sq.t_loop[t] = ts * len; sq.dur[t] = sq_step_dur(t, 0, len, ts);
         }
         sq.g_pos = 0; sq.g_next = (int32_t)sq.step_len; sq.chain_at = 0; sq.clk_next = 0;
         mq_base = now() + seq_ahead_now * 2993u + US(1000);                   /* just before the first step is heard */
         if (SQH->pcch) mq_put(0, 0xC0u | (unsigned)((SQH->pcch - 1) & 15), sq.pat, 0);
         if (SQH->sync & 1) mq_put(0, 0xFA, 0, 0);                             /* start */
-        for (int t = 0; t < SQ_TRACKS; t++) sq.prog_sent[t] = 0;
+        for (int t = 0; t < SQ_TRACKS; t++) { sq.prog_sent[t] = 0; mt_prog_sent[t] = 0; }
         sq.playing = 1;
     } else {
         if (sq.playing && (SQH->sync & 1)) aos_midi_out(0xFC, 0, 0);          /* stop */
         sq.playing = 0;
-        for (int t = 0; t < SQ_TRACKS; t++) sq.rat_n[t] = 0;
+        for (int t = 0; t < SQ_ALL; t++) sq.rat_n[t] = 0;
         mnotes_off();
     }
 }
 int aos_seq_playing(void) { return sq.playing; }
-int aos_seq_step(int t) { return sq.now_step[t & 7]; }
+int aos_seq_step(int t) { return sq.now_step[t & 15]; }
 int aos_seq_bar(void) { return sq.g_pos; }
 int aos_seq_pat(void) { return sq.pat; }
 void aos_seq_fill(int on) { sq.fill = (uint8_t)(on != 0); }
@@ -747,6 +894,27 @@ static void seq_hit(int t, int vel, int rec, int note)      /* note: -1 a pad, e
         }
     }
 }
+/* a MIDI track's pad (15 Nov 2026): heard (sent) at once; recording while the pattern runs: into the nearest step */
+void aos_mt_hit(int m, int vel, int rec)
+{
+    if (!seq_mode || m < 0 || m >= SQ_TRACKS || !mt_valid()) return;
+    int t = SQ_TRACKS + m;
+    uint8_t p[TP_ALL];
+    mt_params(m, 0, p);
+    mq_base = now() + seq_ahead * 2993u;
+    if (!sq_muted(t)) mt_trigger(m, p, vel < 1 ? 100 : vel, 0);
+    if (rec && sq.playing && sq.step_len) {
+        int len = len_of(sq.pat, t);
+        int32_t sl = sq_track_step(t), tn = sq.t_next[t] + (int32_t)(((uint32_t)(uint16_t)(stream_written - stream_taken) + 96u) << 8);
+        int n = sq.idx[t], micro, back = 0;
+        if (tn < 0) tn = 0;
+        while (tn >= sl && back < 8) { tn -= sl; n = (n + len - 1) % len; back++; }
+        if (tn < sl / 2) { micro = -(int)div_u((uint32_t)tn * 48u, (uint32_t)sl); if (!back) sq.skip[t] = (uint8_t)(n + 1); }
+        else { n = (n + len - 1) % len; micro = (int)div_u((uint32_t)(sl - tn) * 48u, (uint32_t)sl); }
+        MtStep *s = MT_STEP(sq.pat, m, n);
+        s->flags |= SF_ON; s->vel = (uint8_t)(vel < 1 ? 100 : vel); s->micro = (int8_t)clamp_i(micro, -23, 23);
+    }
+}
 /* a note from MIDI IN: channels 1..8 are tracks 1..8 (never a MIDI track: with a cable from OUT to IN it would play itself) */
 static void seq_midi_note(unsigned ch, unsigned note, unsigned vel)
 {
@@ -784,4 +952,22 @@ static void seq_midi_pc(unsigned ch, unsigned prog)
 {
     if (!seq_mode || !seq_valid()) return;
     if (SQH->pcch && ch == (unsigned)((SQH->pcch - 1) & 15) && prog < SQ_PATTERNS) { SQH->pattern = (uint8_t)prog; SQH->chain_n = 0; }
+}
+/* RESET ALL (13 Nov 2026; the PROJECTS page, FUNC + NO, then FUNC + YES): every buffer and sample emptied -- the
+ * loop, the stars' and the sequencer's samples, the three balloons' recordings, the master delay's lines -- and
+ * nothing read back from the card at the next start. The sequences (patterns, steps) are not touched: their tracks
+ * simply have no sample until one is loaded again. Files on the card stay where they are. */
+void aos_wipe_all(void)
+{
+    for (int i = 0; i < N_VOICES; i++) voice[i].on = 0;
+    loop_v = 0;
+    for (int t = 0; t < SQ_TRACKS; t++) tv[t][0].on = tv[t][1].on = 0;
+    flex_smp.frames = 0; flex_smp.status = 1;
+    for (int i = 0; i < N_STATIC; i++) { st_smp[i].frames = 0; st_smp[i].status = 1; }
+    for (int b = 0; b < 8; b++) bank_used[b] = 0;
+    for (int b = 0; b < 3; b++) aos_balloon(b, 0);
+    for (uint32_t i = 0; i < FZ_N; i++) { FZ_L[i] = 0; FZ_R[i] = 0; if (!(i & 16383)) stream_pump(); }
+    fz.w = 0; fz.iw = fz.ir = 0; fz.lpz = fz.hpz = 0; fz.xf = 0;
+    { volatile uint8_t *b = (volatile uint8_t *)LOADED; for (unsigned i = 0; i < sizeof(Loaded); i++) b[i] = 0; LOADED->magic = LOADED_MAGIC; }
+    restore_at = 129;
 }

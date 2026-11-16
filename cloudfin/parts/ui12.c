@@ -98,6 +98,12 @@ static void draw_system(void)
 {
     panel_clear(10, 61);
     if (usb_mode) { text(20, 20, "USB DISK MODE", 1); text(14, 32, "NO: BACK TO THE SKY", 1); return; }
+    if (layer()) {                                              /* the second knob set (15 Nov 2026): the language */
+        text(4, 11, "FUNC", 1);
+        text(4, 24, "A LANG", 1); text(52, 24, pv(PG_SYSTEM, 6) ? "NEDERLANDS" : "ENGLISH", 1);
+        text(4, 44, "PAGE: BACK", 1);
+        return;
+    }
     text(4, 11, "1 USB DISK MODE", 1);
     text(4, 17, "2 OS UPGRADE  FUNC+YES", 1);
     text(4, 24, "A SOUND", 1); text(52, 24, pv(PG_SYSTEM, 0) == 0 ? "OFF" : pv(PG_SYSTEM, 0) == 1 ? "KNOBS" : "LANE", 1);
@@ -233,6 +239,18 @@ static void draw_hud(void)
         text(1, 58, ab[pv(PG_MIX, 6)], 1); text(18, 58, cd[pv(PG_MIX, 7)], 1);
     }
     if (pv(PG_SYSTEM, 0) != 1) { const char *m = pv(PG_SYSTEM, 0) == 0 ? "SND OFF" : "LANE"; for (int i = W - text_w(m) - 3; i < W; i++) span(i, 57, 63, 0); text(W - text_w(m) - 1, 58, m, 1); }
+#ifdef AERIAOS
+    if (showing && !br_mode && !out_open && !cloud_open && !(page == PG_MIDI && midi_mod >= 2) && !shelf_open) {   /* (15 Nov 2026) what the crossfader does, always in view */
+        char xl[20]; int n = 0; const char *m = master_frozen() ? "FROZEN" : xf_mode_name();
+        xl[n++] = 'X'; xl[n++] = 'F'; xl[n++] = ' ';
+        while (*m && n < 14) xl[n++] = *m++;
+        if (!master_frozen() && xf_mode() == XM_SCENES) { xl[n++] = ' '; num(xl + n, scene_a + 1); while (xl[n]) n++; xl[n++] = '-'; num(xl + n, scene_b + 1); while (xl[n]) n++; }
+        xl[n] = 0;
+        int x = (W - text_w(xl)) / 2, inv = master_frozen();
+        for (int i = x - 2; i < x + text_w(xl) + 2; i++) span(i, 57, 63, inv ? 1 : 0);
+        text(x, 58, xl, !inv);
+    }
+#endif
     if (ticks < toast_until) {
         int x = (W - text_w(toast)) / 2;
         for (int i = x - 3; i < x + text_w(toast) + 3; i++) span(i, 48, 56, 1);
@@ -309,14 +327,14 @@ static void leds_tick(void)
         if (slots[sel_slot].pending >= 0 && (ticks & 8)) led_want[sel_slot] = 3;
         led_want[11] = 1; led_want[12] = 1; led_want[13] = 1; /* shelf, weather down, weather up */
         led_want[14] = auto_weather ? 2 : 0;
-        led_want[15] = thunder ? 3 : 0;
         if (thunder > 150) for (int s = 0; s < N_SLOTS; s++) led_want[s] = 3;
     } else if (page == PG_SKY) {
-        for (int i = 1; i < N_WEATHER; i++) if (WON(i)) led_want[i] = 2;
-        if (!wx_on) led_want[CLEAR] = 2;
-        led_want[7] = auto_weather ? 2 : (uint8_t)((ticks >> 5) & 1);
-        for (int i = 0; i < XW_N; i++) led_want[8 + i] = (xw_on >> i) & 1 ? 2 : 1;
-        led_want[11] = ticks < tw_until ? 3 : 1;
+        if (pv_base(PG_SKY, 5)) { led_want[CLEAR] = (uint8_t)((ticks >> 5) & 1); }   /* WX OFF: only CLEAR, blinking */
+        else {
+            led_want[CLEAR] = wx_on ? 1 : 2; led_want[RAIN] = WON(RAIN) ? 2 : 1; led_want[FOG] = WON(FOG) ? 2 : 1;
+            led_want[7] = auto_weather ? 2 : (uint8_t)((ticks >> 5) & 1);
+            led_want[8 + XW_AURORA] = (xw_on >> XW_AURORA) & 1 ? 2 : 1;
+        }
     } else if (page == PG_SOURCE) {
         led_want[0] = src_loop ? 2 : 1; led_want[1] = src_stars ? 2 : 1; led_want[2] = src_balloons ? 2 : 1;
     } else if (page == PG_STARS) {
@@ -351,6 +369,9 @@ static void leds_tick(void)
 #endif
     if (gust) for (int k = 0; k < 16; k++) if (((int)(ticks >> 1) - k) % 16 == 0) led_want[k] = 3;
     if (flash) { for (int k = 0; k < 16; k++) led_want[k] = 3; set_led(38, 2); set_led(39, 2); }
+#ifdef AERIAOS
+    set_led(32, xf_mode() == XM_SCENES ? 2 : 0); set_led(34, xf_mode() == XM_FREEZE ? 2 : 0);   /* the SCENE lamps: what the crossfader does (15 Nov 2026) */
+#endif
     leds_out();
 }
 
@@ -464,9 +485,12 @@ void module_tick(struct modwerk_runtime_api *api)
     PROF_AT(0);
     usb_tick();
     PROF_AT(1);
-    step_auto();
+    /* 13 Nov 2026: the sky and the sequencer never run together -- in the sequencer the sky's own background work
+     * (the weather and its AUTO, clouds and rain, balloons, birds, knob drift, the chain's picks, the stock pattern's
+     * stars, GUMBALLS / PITCH / MARBLES / PONG) waits; MOD, the master delay and the DJ filter stay (both faces) */
+    const int sky_on = !seq_on;
+    if (sky_on) step_auto();
     PROF_AT(2);
-    if (WON(STORM) && amount > 128 && (rnd() % 420) == 0) strike();
     int want = clouds_wanted(), wind = wind_now();
     for (int i = 0; i < MAX_CLOUDS; i++) {
         Cloud *c = &clouds[i];
@@ -475,11 +499,7 @@ void module_tick(struct modwerk_runtime_api *api)
         if (x > W + 2 && wind >= 0) make_cloud(c, -c->w - range(0, i >= want ? 200 : 30));
         if (x < -CLOUD_MAX_W - 2 && wind < 0) make_cloud(c, W + range(0, i >= want ? 200 : 30));
     }
-    move_precip();
-    balloons_tick();
-    birds_tick();
-    drift_tick();
-    picks_tick();
+    if (sky_on) { move_precip(); balloons_tick(); birds_tick(); drift_tick(); picks_tick(); }
     PROF_AT(3);
     if (!setup_done && ticks > 120 && rig_loaded()) { setup_done = 1; setup_start(); }
     setup_tick();
@@ -487,9 +507,10 @@ void module_tick(struct modwerk_runtime_api *api)
     loop_tick();
     preview_tick();
     PROF_AT(4);
-    if (!usb_mode) { gum_tick(); pitch_tick(); }
+    if (!usb_mode && sky_on) { gum_tick(); pitch_tick(); }
 #ifdef AERIAOS
-    pan_tick(); mod_tick(); cloud_tick(); scale_tick(); master_tick(); marbles_tick(); pong_tick();
+    pan_tick(); mod_tick(); scale_tick(); master_tick();
+    if (sky_on) { cloud_tick(); marbles_tick(); pong_tick(); }
 #endif
     PROF_AT(5);
     if (saver_on) { if (usb_mode || br_mode) { saver_on = 0; ss_stop(); } else ss_tick(); }
@@ -505,12 +526,12 @@ void module_tick(struct modwerk_runtime_api *api)
     /* the effects run as soon as the sky opens: start the transport once */
     if (!autoplayed && ticks > 600 && pv(PG_SYSTEM, 3) && rig_loaded() && !playing() && !usb_mode) { transport_start(); autoplayed = 1; }
     PROF_AT(7);
-    sequencer_tick();
+    if (sky_on) sequencer_tick();
     PROF_AT(8);
     if (!usb_mode) sound_tick();
 #ifdef AERIAOS
-    wx_tick();
-    xw_tick();
+    wx_tick();                                                 /* (in the sequencer: only the DJ filter) */
+    if (sky_on) xw_tick();
 #endif
     PROF_AT(9);
     api->value = diag_word();
@@ -565,9 +586,23 @@ static void module_draw_body(unsigned char *frame)
     if (flash) for (int x = 0; x < W; x++) span(x, 0, H - 1, 3);
 }
 
+#ifdef AERIAOS
+static uint8_t sky_tempo_held;   /* TEMPO held: LEVEL sets the BPM (15 Nov 2026) */
+static uint8_t ui_was_showing;   /* the page was up when this key came (before the key itself brought it up) */
+static void show_page(int pg) { page = pg; shelf_open = 0; func_latch = 0; out_open = cloud_open = 0; page_until = (int)ticks + 240; say(page_name[pg], 0); }
+/* (15 Nov 2026) a page's key: its page; pressed again while it shows: its second set of knobs (as PAGE does, and as
+ * the sequencer's page keys do) */
+static void page_key(int pg)
+{
+    if (page == pg && !shelf_open && !out_open && !cloud_open && ui_was_showing && (param_page(pg) || pg == PG_CHAIN || pg == PG_SYSTEM)) { func_latch = !func_latch; say(page_name[pg], func_latch ? "2" : "1"); }
+    else show_page(pg);
+}
+#else
 static void show_page(int pg) { page = pg; shelf_open = 0; page_until = (int)ticks + 240; say(page_name[pg], 0); }
+static void page_key(int pg) { show_page(pg); }
+#endif
 static void choose_weather(int w) { auto_weather = 0; P(PG_SKY, 4).value = P(PG_SKY, 4).user = 0; set_weather(w); }
-static void toggle_auto(void) { auto_weather = !auto_weather; P(PG_SKY, 4).value = P(PG_SKY, 4).user = (int16_t)auto_weather; say("AUTO", auto_weather ? "ON" : "OFF"); }
+static void toggle_auto(void) { if (pv_base(PG_SKY, 5)) { say("WEATHER", "OFF"); return; } auto_weather = !auto_weather; P(PG_SKY, 4).value = P(PG_SKY, 4).user = (int16_t)auto_weather; say("AUTO", auto_weather ? "ON" : "OFF"); }
 
 /* bypass: the slot gives its place to NONE and remembers what it held */
 static int16_t bypass_row[N_SLOTS];
@@ -590,9 +625,23 @@ int module_key(int code, int pressed)
         if (pressed && code != KEY_FUNC) { saver_on = 0; ss_stop(); ui_until = 0; }
         return 1;
     }
+#ifdef AERIAOS
+    ui_was_showing = ticks <= ui_until;
+#endif
     if (pressed && code != KEY_PLAY && code != KEY_STOP) ui_until = ticks + UI_SHOW;
     if (code == KEY_FUNC) { func_held = pressed; if (pressed) page_until = (int)ticks + 240; }
+#ifdef AERIAOS
+    if (code == KEY_NO && pressed && func_held && !usb_mode && !seq_on && !mod_open && !preset_mode && !br_mode) {   /* (15 Nov 2026) FUNC + NO: a new sky, or new stars (the dark "hidden" screen is gone) */
+        if (page == PG_STARS) { new_constellation(); say("NEW STARS", 0); } else { new_sky(); say("NEW SKY", 0); }
+        return 1;
+    }
+    if ((code == KEY_SCENEA || code == KEY_SCENEB) && func_held && pressed && !mod_open && !preset_mode) {   /* FUNC + SCENE A: the fader moves between the scenes; FUNC + SCENE B: it freezes the master delay at B (15 Nov 2026) */
+        xf_set_mode(code == KEY_SCENEA ? XM_SCENES : XM_FREEZE);
+        return 1;
+    }
+#else
     if (code == KEY_NO && pressed && func_held && !usb_mode) { hidden = !hidden; if (!hidden) show_page(page); return 1; }
+#endif
     if (hidden) return 0;
     if (popup_open() && !usb_mode) return 0; /* a stock or base message: its keys */
     if (usb_mode) { if (pressed && code == KEY_NO) usb_leave(); return 1; }
@@ -625,6 +674,9 @@ int module_key(int code, int pressed)
         return 0;
     }
 #endif
+#ifdef AERIAOS
+    if (code == 0x18 && !br_mode) { sky_tempo_held = (uint8_t)pressed; if (pressed) master_tap(); return 1; }   /* TEMPO: tap the tempo; hold it and turn LEVEL (15 Nov 2026) */
+#endif
     if (code == KEY_PLAY || code == KEY_STOP || code == KEY_REC || code == KEY_CUE || code == 0x18) return br_mode ? 1 : 0;
     if (code >= KEY_TRACK0 && code < KEY_TRACK0 + 8) { if (pressed) held_tracks |= 1u << (code - KEY_TRACK0); else held_tracks &= ~(1u << (code - KEY_TRACK0)); }
     if (code == KEY_SCENEA || code == KEY_SCENEB) {
@@ -643,7 +695,7 @@ int module_key(int code, int pressed)
         if (func_held) { if (pressed && n->state != B_EMPTY && n->state != B_FILLING) { n->state = B_POPPING; n->pop = 12; AOS_BALLOON(b, 0); } return 1; }
         set_current_track(n->track);
         if (pressed) {
-            if (n->state == B_FILLING) { n->state = B_FLOATING; balloon_voice = b; AOS_BALLOON(b, 2); say("BALLOON", b == 0 ? "1 UP" : b == 1 ? "2 UP" : "3 UP"); }
+            if (n->state == B_FILLING) { n->state = B_FLOATING; balloon_voice = b; AOS_BALLOON(b, 2); src_balloons = 1; say("BALLOON", b == 0 ? "1 UP" : b == 1 ? "2 UP" : "3 UP"); }   /* (15 Nov 2026: and the BALLOONS source comes on, so it is heard) */
             else { n->state = B_FILLING; n->size = 0; n->y = WATER_Y - 12; AOS_BALLOON(b, 1); say("CATCHING", b == 0 ? "A B" : b == 1 ? "C D" : "SKY"); }
         }
         return 0;
@@ -678,10 +730,9 @@ int module_key(int code, int pressed)
         } else if (page == PG_CHAIN) {
             if (k < N_SLOTS) { if (func_held) toggle_bypass(k); else select_slot(k); }
             else if (k == 11 || k == 7) { shelf_open = 1; shelf_build(slot_fx(sel_slot)); shelf_row = shelf_index_of(slots[sel_slot].row); }
-            else if (k == 12) choose_weather(clamp(weather - 1, 0, N_WEATHER - 1));
-            else if (k == 13) choose_weather(clamp(weather + 1, 0, N_WEATHER - 1));
+            else if (k == 12) choose_weather(wx_step(weather, -1));
+            else if (k == 13) choose_weather(wx_step(weather, 1));
             else if (k == 14) toggle_auto();
-            else { strike(); say("LIGHTNING", 0); }
         } else if (page == PG_SOURCE) {
             if (k == 0) { if (func_held) browser_open(BR_LOOP); else { src_loop = !src_loop; say("LOOP", src_loop ? "ON" : "OFF"); } }
             else if (k == 1) { if (func_held) browser_open(BR_STARS); else { src_stars = !src_stars; say("STARS", src_stars ? "ON" : "OFF"); } }
@@ -693,9 +744,9 @@ int module_key(int code, int pressed)
         else if (page == PG_MIDI) { if (midi_pitch) pitch_key(code); else gum_key(code); }
         else if (page == PG_LOOP) { Param *p = &P(PG_LOOP, func_held ? 1 : 0); p->value = p->user = (int16_t)(k * 127 / 15); }
         else if (page == PG_BALLOON) { if (k < 3 && balloon[k].state == B_FLOATING) { balloon_quiet ^= (uint8_t)(1u << k); balloon_voice = k; say(k == 0 ? "BALLOON 1" : k == 1 ? "BALLOON 2" : "BALLOON 3", (balloon_quiet >> k) & 1 ? "QUIET" : "SINGING"); } else if (k >= 8) { Param *p = &P(PG_BALLOON, 4); p->value = p->user = (int16_t)((k - 8) * 127 / 7); } }
-        else if (k >= 8 && k <= 11) { if (k == 11) xw_twister(); else xw_toggle(k - 8); }
-        else { if (k == 0) xw_on = 0;                              /* CLEAR clears the new weathers too */
-               if (k < 7) { auto_weather = 0; P(PG_SKY, 4).value = P(PG_SKY, 4).user = 0; toggle_weather(k); } else if (k == 7) toggle_auto(); else if (k == 15) { strike(); say("LIGHTNING", 0); } }
+        else if (k >= 8 && k <= 11) { if (k == 8 + XW_AURORA) xw_toggle(XW_AURORA); }   /* WIND, HAIL, TWISTER: gone (13 Nov 2026) */
+        else { if (k == 0) xw_on = 0;                              /* CLEAR clears the aurora too */
+               if (k < 7) { if (wx_kept(k)) { auto_weather = 0; P(PG_SKY, 4).value = P(PG_SKY, 4).user = 0; toggle_weather(k); } } else if (k == 7) toggle_auto(); }
         return 1;
     }
     if (code >= KEY_TRACK0 && code < KEY_TRACK0 + 8) {
@@ -709,15 +760,15 @@ int module_key(int code, int pressed)
         if (k < N_SLOTS) { if (func_held) toggle_bypass(k); else select_slot(k); }
         return 1;
     }
-    if (code == KEY_SRC) { show_page(PG_CHAIN); return 1; }
-    if (code == KEY_AMP) { show_page(PG_SKY); return 1; }
+    if (code == KEY_SRC) { page_key(PG_CHAIN); return 1; }
+    if (code == KEY_AMP) { page_key(PG_SKY); return 1; }
     if (code == KEY_LFO) { show_page(PG_SOURCE); return 1; }
-    if (code == KEY_FX1) { show_page(page == PG_MIX ? PG_GAIN : PG_MIX); return 1; }
-    if (code == 0x30) { show_page(PG_MASTER); return 1; }                       /* the MIX key: the master's freeze delay and the tempo */
-    if (code == KEY_FX2 || code == KEY_PROJ) { show_page(PG_SYSTEM); return 1; }
-    if (code == KEY_PART) { show_page(PG_BALLOON); return 1; }
-    if (code == KEY_AED) { show_page(PG_LOOP); return 1; }
-    if (code == KEY_ARR) { show_page(PG_STARS); return 1; }
+    if (code == KEY_FX1) { show_page(page == PG_MIX ? PG_GAIN : PG_MIX); return 1; }   /* FX1: MIX, and again GAIN */
+    if (code == 0x30) { page_key(PG_MASTER); return 1; }                        /* the MIX key: the master's freeze delay and the tempo */
+    if (code == KEY_FX2 || code == KEY_PROJ) { page_key(PG_SYSTEM); return 1; }
+    if (code == KEY_PART) { page_key(PG_BALLOON); return 1; }
+    if (code == KEY_AED) { page_key(PG_LOOP); return 1; }
+    if (code == KEY_ARR) { page_key(PG_STARS); return 1; }
     if (code >= KEY_PUSH0 && code < KEY_PUSH0 + 6) {
         int k = code - KEY_PUSH0;
         if (page == PG_CHAIN) { slots[sel_slot].user[k] = -1; say(slots[sel_slot].knob[k], "SKY"); }
@@ -725,12 +776,15 @@ int module_key(int code, int pressed)
     else if (code == KEY_LEVEL_PUSH) toggle_auto();
     else if (code == KEY_LEFT || code == KEY_RIGHT) {
         if (page == PG_CHAIN) select_slot((sel_slot + (code == KEY_RIGHT ? 1 : N_SLOTS - 1)) % N_SLOTS);
+#ifdef AERIAOS
+        else if (page == PG_MIDI) { midi_mod_set((midi_mod + (code == KEY_RIGHT ? 1 : 3)) % 4); static const char *const mn[4] = {"GUMBALLS", "PITCH", "MARBLES", "PONG"}; say(mn[midi_mod], 0); }   /* (15 Nov 2026) the MIDI modules, either way round */
+#endif
         else show_page((page + (code == KEY_RIGHT ? 1 : N_PAGES - 1)) % N_PAGES);
     }
     else if (code == KEY_PAGE) { func_latch = !func_latch; page_until = (int)ticks + 240; say("LAYER", func_latch ? "2" : "1"); }
-    else if (code == KEY_UP || code == KEY_DOWN) choose_weather(clamp(weather + (code == KEY_UP ? 1 : -1), 0, N_WEATHER - 1));
-    else if (code == KEY_PATTERN) { Param *p = &P(PG_STARS, 10); p->value = p->user = (int16_t)!p->value; say("STARS", p->value ? "BIRDS" : "RING"); }
-    else if (code == KEY_BANK) { if (page == PG_CHAIN) { shelf_open = 1; shelf_build(slot_fx(sel_slot)); shelf_row = shelf_index_of(slots[sel_slot].row); } else { Param *p = &P(PG_STARS, 9); p->value = p->user = (int16_t)((p->value + 1) % 8); char n[6]; num(n, p->value + 1); say("BANK", n); } }
+    else if (code == KEY_UP || code == KEY_DOWN) choose_weather(wx_step(weather, code == KEY_UP ? 1 : -1));
+    else if (code == KEY_PATTERN) { if (page == PG_STARS) { Param *p = &P(PG_STARS, 10); p->value = p->user = (int16_t)!p->value; say("STARS", p->value ? "BIRDS" : "RING"); } }   /* (15 Nov 2026: only on the STARS page) */
+    else if (code == KEY_BANK) { if (page != PG_CHAIN) show_page(PG_CHAIN); shelf_open = 1; shelf_build(slot_fx(sel_slot)); shelf_row = shelf_index_of(slots[sel_slot].row); }   /* BANK: the shelf for the slot in hand, from any page (15 Nov 2026) */
 #ifdef AERIAOS
     else if (code == KEY_MIDI) { if (func_held) { gust = 120; say("GUST", 0); } else if (page == PG_MIDI) { midi_mod = (midi_mod + 1) % 4; midi_pitch = midi_mod == 1; static const char *const mn[4] = {"GUMBALLS", "PITCH", "MARBLES", "PONG"}; say(mn[midi_mod], 0); } else show_page(PG_MIDI); }
 #else
@@ -738,10 +792,14 @@ int module_key(int code, int pressed)
 #endif
     else if (code == KEY_YES && page == PG_MIDI && !func_held) { if (midi_pitch) pitch_key(code); else gum_key(code); }
     else if (code == KEY_YES && func_held && page == PG_SYSTEM) os_upgrade();
-    else if (code == KEY_YES && func_held) intro = 0;
+    else if (code == KEY_YES && func_held) { /* (the intro replay that was here is gone, 15 Nov 2026) */ }
     else if (code == KEY_YES && page == PG_SYSTEM) saver_go();
-    else if (code == KEY_YES) { if (page == PG_CHAIN && slots[sel_slot].row <= 0) { shelf_open = 1; shelf_row = 0; } else { Param *p = &P(PG_SKY, 10); p->value = p->user = (int16_t)!p->value; say(p->value ? "NIGHT" : "DAY", 0); } }
-    else if (code == KEY_NO) { if (page == PG_STARS) { new_constellation(); say("NEW STARS", 0); } else { new_sky(); say("NEW SKY", 0); } }
+    else if (code == KEY_YES && page == PG_CHAIN) { shelf_open = 1; shelf_build(slot_fx(sel_slot)); shelf_row = shelf_index_of(slots[sel_slot].row); }   /* YES on the chain: the shelf (15 Nov 2026: a full slot too) */
+    else if (code == KEY_YES && page == PG_SKY) { Param *p = &P(PG_SKY, 10); p->value = p->user = (int16_t)!p->value; say(p->value ? "NIGHT" : "DAY", 0); }   /* day / night: only on the SKY page now */
+    else if (code == KEY_NO) {                                                  /* (15 Nov 2026) NO backs out: the second knob set first, then the page itself (the sky alone) */
+        if (func_latch) { func_latch = 0; say(page_name[page], "1"); }
+        else ui_until = 0;
+    }
     return 1;
 }
 
@@ -765,7 +823,10 @@ int module_enc(int encoder, int delta)
     if (seq_enc(encoder, delta)) return 1;
 #endif
     if (shelf_open) { shelf_build(slot_fx(sel_slot)); if (encoder == 6 || encoder == 0) shelf_row = clamp(shelf_row + (delta > 0 ? 1 : -1), 0, shelf_n - 1); return 1; }
-    if (encoder == 6) { choose_weather(clamp(weather + (delta > 0 ? 1 : -1), 0, N_WEATHER - 1)); return 1; }
+#ifdef AERIAOS
+    if (encoder == 6 && sky_tempo_held) { Param *p = &P(PG_MASTER, 6); p->value = p->user = (int16_t)clamp(p->value + (delta > 0 ? 1 : -1), 0, 127); char b[8]; num(b, 60 + p->value); say("TEMPO", b); return 1; }   /* TEMPO held: LEVEL is the BPM (15 Nov 2026) */
+#endif
+    if (encoder == 6) { choose_weather(wx_step(weather, delta > 0 ? 1 : -1)); return 1; }
     if (encoder < 0 || encoder > 5) return 1;
 #ifdef AERIAOS
     if (preset_enc(delta)) return 1;                            /* the project page: a name's letters; else it holds the knobs */
@@ -814,10 +875,13 @@ int module_enc(int encoder, int delta)
     if (page == PG_MIDI) { if (midi_pitch) pitch_enc(encoder, delta, layer()); else gum_enc(encoder, delta, layer()); return 1; }
     if (page == PG_SYSTEM) {
         if (encoder > 5) return 1;
-        Param *p = &P(PG_SYSTEM, encoder);
-        p->value = p->user = (int16_t)clamp(pv(PG_SYSTEM, encoder) + (delta > 0 ? 1 : -1), p->lo, p->hi);
-        if (encoder == 4) say("SAVER", saver_name(p->value));
-        if (encoder == 0) for (int i = 0; i < 8; i++) for (int k = 0; k < 32; k++) sent[i][k] = 0xff;
+        int i = (layer() ? 6 : 0) + encoder;
+        Param *p = &P(PG_SYSTEM, i);
+        if (!p->name[0]) return 1;
+        p->value = p->user = (int16_t)clamp(pv(PG_SYSTEM, i) + (delta > 0 ? 1 : -1), p->lo, p->hi);
+        if (i == 4) say("SAVER", saver_name(p->value));
+        if (i == 6) say("LANGUAGE", p->value ? "DUTCH" : "ENGLISH");
+        if (i == 0) for (int k = 0; k < 8; k++) for (int q = 0; q < 32; q++) sent[k][q] = 0xff;
         return 1;
     }
     if (!param_page(page)) return 1;
@@ -833,21 +897,20 @@ int module_enc(int encoder, int delta)
         return 1;
     }
     int v = clamp(pv_base(page, i) + delta, p->lo, p->hi);
+    if (page == PG_SKY && i == 3) v = wx_step(pv_base(page, i), delta > 0 ? 1 : -1);   /* WTHR steps over the weathers that are gone */
     p->user = p->value = (int16_t)v;
-    if (page == PG_SKY) { if (i == 3) set_weather(v); if (i == 4) auto_weather = v; }
+    if (page == PG_SKY) {
+        if (i == 3) set_weather(v);
+        if (i == 4) auto_weather = v && !pv_base(PG_SKY, 5);
+        if (i == 5 && v) { xw_on = 0; auto_weather = 0; P(PG_SKY, 4).value = P(PG_SKY, 4).user = 0; set_weather(CLEAR); }   /* WX OFF: nothing of the weather runs */
+    }
     page_until = (int)ticks + 240;
     static const char *const in_names[5] = {"OFF", "AB STEREO", "A MONO", "B MONO", "A+B MONO"};
     static const char *const cd_names[5] = {"OFF", "CD STEREO", "C MONO", "D MONO", "C+D MONO"};
     if (page == PG_SKY && (i == 3 || i == 6)) say(p->name, weather_name[v]);
+    else if (page == PG_SKY && i == 5) say("WEATHER", v ? "OFF" : "ON");
     else if (page == PG_MIX && i == 6) say("IN AB", in_names[v]);
     else if (page == PG_MIX && i == 7) say("IN CD", cd_names[v]);
-    else if (page == PG_GAIN && i >= 6 && i <= 9) { static const char *const bn[4] = {"EQ LOW", "EQ LO MID", "EQ HI MID", "EQ HIGH"}; signed_text(n, v - 13); int k = 0; while (n[k]) k++; n[k++] = 'D'; n[k++] = 'B'; n[k] = 0; say(bn[i - 6], n); }
-    else if (page == PG_GAIN && i >= 10) {       /* a centre: 20 Hz x 1000^(v/127), shown to two figures */
-        static const uint16_t hz[128] = {20,21,22,24,25,26,28,29,31,33,34,36,38,41,43,45,48,50,53,56,59,63,66,70,74,78,82,87,92,97,102,108,114,120,127,134,142,150,158,167,176,186,196,207,219,231,244,258,272,287,303,320,338,357,377,398,421,444,469,495,523,552,583,615,650,686,725,765,808,853,901,951,1004,1060,1120,1182,1248,1318,1392,1470,1552,1638,1730,1827,1929,2037,2150,2271,2398,2532,2673,2823,2980,3147,3323,3509,3705,3912,4130,4361,4605,4862,5134,5421,5724,6044,6382,6739,7116,7513,7933,8377,8845,9339,9862,10413,10995,11609,12258,12944,13667,14431,15238,16089,16989,17938,18941,20000};   /* 20 Hz x 1000^(v/127) */
-        int f = hz[v & 127], k = 0;
-        if (f >= 1000) { num(n, f / 1000); while (n[k]) k++; n[k++] = '.'; n[k++] = (char)('0' + f % 1000 / 100); n[k++] = 'K'; } else { num(n, f); while (n[k]) k++; }
-        n[k++] = 'H'; n[k++] = 'Z'; n[k] = 0; say(i == 10 ? "LO MID AT" : "HI MID AT", n);
-    }
     else if (page == PG_GAIN && i != 5) { int u = i == 3 ? 108 : i == 4 ? 127 : 64; n[0] = v >= u ? '+' : '-'; num(n + 1, iabs(v - u)); say(p->name, n); }
     else if (page == PG_BALLOON && (i == 6 || i >= 9)) { int u = i == 6 ? 3 : 25; n[0] = v > u ? '+' : v < u ? '-' : ' '; num(n + 1, iabs(v - u)); say(i == 6 ? "OCTAVE" : i == 9 ? "TUNE 1" : i == 10 ? "TUNE 2" : "TUNE 3", n); }
     else if (page == PG_BALLOON && i == 0) { int ms = (441 + v * v * 11) * 10 / 441, k = 0; if (ms >= 1000) { num(n, ms / 1000); while (n[k]) k++; n[k++] = '.'; n[k++] = (char)('0' + ms % 1000 / 100); n[k++] = 'S'; } else { num(n, ms); while (n[k]) k++; n[k++] = 'M'; n[k++] = 'S'; } n[k] = 0; say("GRAIN SIZE", n); }
