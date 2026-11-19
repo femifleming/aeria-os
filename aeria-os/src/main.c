@@ -393,7 +393,10 @@ static int seq_mode;
 static int stems_sent;
 static int stem_left, stem_at, stem_trk, stem_wide; static int32_t stem_blk[256]; static uint32_t stem_blocks, stem_have;
 static uint8_t stem_stereo;   /* a bit a track: it has an effect, so its stem comes as pairs (else its left alone, doubled here) */   /* sampler.c: the sequencer's stems, 256 words a frame */
-static void dsp_poll(void)
+static uint8_t polling;
+static void dsp_poll_in(void);
+static void dsp_poll(void) { if (polling) return; polling = 1; dsp_poll_in(); polling = 0; }   /* (15 Nov 2026) never twice at once: the words come three bytes at a time */
+static void dsp_poll_in(void)
 {
     REG8(DSP_SELECT) = 0;
     /* everything the engine sends comes through its ring: meters, the stream's count, recorded audio -- drain it */
@@ -602,7 +605,10 @@ static uint8_t lamp_lv[N_LAMPS], lamp_sent[N_LAMPS];
  * lamp above ARR (64) as the main output's level -- found on 12 Nov 2026 by lighting the unmapped ids one by one.
  * A lamp's brightness is its level: 3.5 dB a step, the last step 1 dB under full scale. */
 extern uint32_t vu_now[6]; extern uint32_t card_act_n; extern int card_ok;
-static int vu_level(uint32_t v) { uint32_t t = 0xE0000u; int lv = 15; while (lv > 0 && v < t) { t = t * 2u / 3u; lv--; } return lv; }
+/* (19 Nov 2026) the ladder's top was 0xE0000 -- twice what the meter can ever say (a peak arrives as its top 19 bits:
+ * full scale is 0x7FFFF), so the two brightest steps never lit and nothing showed an input near clipping. Now the top
+ * step is 1 dB under full scale, as the note above always said. */
+static int vu_level(uint32_t v) { uint32_t t = 0x72000u; int lv = 15; while (lv > 0 && v < t) { t = t * 2u / 3u; lv--; } return lv; }
 static const uint8_t vu_id[5] = {62, 60, 56, 58, 36};
 static uint8_t vu_sent[5] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static int vu_out;   /* the main pair's level, 0..15 */
@@ -783,12 +789,12 @@ static void rfrz_tick(int s, int row)
     if (fx_named(row, "PT2399")) dsp_write(slot_knobs[s] + 6u, b, 0);
     else if (fx_named(row, "TAPE")) { dsp_write(slot_knobs[s] + 6u, b & 1, 0); dsp_write(slot_knobs[s] + 7u, b >> 1, 0); }
 }
-static int p2_raw(int s, int k) { return seq_mode ? SQH->fx_knob[s & 7][6 + k] & 0x7F : preview_slot_p2[s][k] & 0x7F; }
+static int p2_raw(int s, int k) { return seq_mode ? fxk_of(s & 7, 6 + k) & 0x7F : preview_slot_p2[s][k] & 0x7F; }   /* (a step's lock on the knob counts: fxk_of) */
 static uint32_t p2_word(int s, int w)
 {
-    if (w == 1 && (rfrz_sent[s] & 1) && fx_named(seq_mode ? SQH->fx_row[s & 7] : slot_row[s], "ECHO")) return (seq_mode ? (uint32_t)(SQH->fx_knob[s & 7][8] & 0x7F) << 16 | (uint32_t)(SQH->fx_knob[s & 7][9] & 0x7F) << 8
+    if (w == 1 && (rfrz_sent[s] & 1) && fx_named(seq_mode ? SQH->fx_row[s & 7] : slot_row[s], "ECHO")) return (seq_mode ? (uint32_t)(fxk_of(s & 7, 8) & 0x7F) << 16 | (uint32_t)(fxk_of(s & 7, 9) & 0x7F) << 8
                                                 : (uint32_t)(preview_slot_p2[s][2] & 0x7F) << 16 | (uint32_t)(preview_slot_p2[s][3] & 0x7F) << 8) | 1u;
-    if (seq_mode) return (uint32_t)(SQH->fx_knob[s & 7][6 + 2 * w] & 0x7F) << 16 | (uint32_t)(SQH->fx_knob[s & 7][7 + 2 * w] & 0x7F) << 8;
+    if (seq_mode) return (uint32_t)(fxk_of(s & 7, 6 + 2 * w) & 0x7F) << 16 | (uint32_t)(fxk_of(s & 7, 7 + 2 * w) & 0x7F) << 8;
     return (uint32_t)(preview_slot_p2[s][2 * w] & 0x7F) << 16 | (uint32_t)(preview_slot_p2[s][2 * w + 1] & 0x7F) << 8;
 }
 static uint32_t route_sent[FX_SLOTS][5];
@@ -875,7 +881,7 @@ static void fx_configure(int s, int row)
 /* the routing a slot's panner wants (out.c): out of the chain or not, and four gains L->main R->main L->cue R->cue
  * (Q23); the engine glides to them. Only changes go to the DSP. */
 static void usb_iso_side(void);
-static void stream_side(void) { if (dsp_running) { dsp_poll(); stream_pump(); } usb_iso_side(); }   /* ... and the computer's packets: a redraw under full load once left their queue empty */
+static void stream_side(void) { if (dsp_running) { dsp_poll(); stream_pump(); } usb_iso_side(); midi_tx(); }   /* (19 Nov 2026) ... and MIDI that is due: a screen's worth of blocks kept it waiting up to 6 ms (measured in the simulator), so the notes wandered against their sounds */   /* ... and the computer's packets: a redraw under full load once left their queue empty */
 static void route_write(int s, int on, const uint32_t g[4]);
 /* the UI's panner. In the sequencer a track's place is the sequencer's own (its PAN) unless the panner is on for it */
 void aos_route(int s, int on, const uint32_t g[4])
@@ -1020,7 +1026,7 @@ static void seq_fx(void)
         if (row != slot_row[s] || (row && (h->fx_core[s] == 1) != (slot_on_core[s] == 1))) { slot_row[s] = (uint8_t)row; fx_configure(s, row); }
         if (!row) continue;
         for (int k = 0; k < 6; k++) {
-            int v = (h->fx_knob[s][k] & 0x7F) + aos_mod_fxk[s][k]; v = v < 0 ? 0 : v > 127 ? 127 : v;
+            int v = (fxk_of(s, k) & 0x7F) + aos_mod_fxk[s][k]; v = v < 0 ? 0 : v > 127 ? 127 : v;   /* a step's lock on the knob holds until the next note */
             if (v == knob_sent[s][k]) continue;
             knob_sent[s][k] = (uint8_t)v;
             dsp_write(slot_knobs[s] + (uint32_t)k, (uint32_t)v << 16, 0);
@@ -1049,6 +1055,7 @@ static void fx_slots(void)
     for (int s = 0; s < CHAIN_SLOTS; s++) {
         int t = slot_t(s), f = slot_f(s), row = preview_live_fx[f * 8 + t];
         if (row > 0 && row <= FX_COUNT && !fx_words[row - 1]) row = 0;   /* a removed effect (BBD): an empty slot */
+        if (row && fx_named(row, "DIST")) row = 0;   /* (19 Nov 2026) no distortion (the owner, 12 Nov): as seq_fx already does -- the default chain and older saved states still put DIST in slot 2 */
         if (row != slot_row[s]) { slot_row[s] = (uint8_t)row; aos_place(s, row); fx_configure(s, row); }
         else if (row > 0 && row <= FX_COUNT && aos_slot_core(s) != slot_on_core[s]) fx_configure(s, row);   /* moved across to make room */
         if (row <= 0 || row > FX_COUNT) continue;
@@ -1085,7 +1092,7 @@ static void fx_slots(void)
 /* the rig AERIA has played with until now: PITCH, DIST, GRAINS, RING, SMEAR (rows = fx_table order + 1) */
 static void fx_default_chain(void)
 {
-    static const uint8_t rig[CHAIN_SLOTS] = {1, 2, 3, 4, 6, 0, 0};
+    static const uint8_t rig[CHAIN_SLOTS] = {1, 0, 3, 4, 6, 0, 0};   /* (19 Nov 2026) slot 2 was DIST: banned since 12 Nov */
     for (int s = 0; s < CHAIN_SLOTS; s++) {
         int t = slot_t(s), f = slot_f(s), row = rig[s];
         preview_live_fx[f * 8 + t] = (uint8_t)row;
@@ -1094,6 +1101,11 @@ static void fx_default_chain(void)
     }
 }
 
+#ifdef PROBE_DRAW
+#define PRB(k, x) do { uint32_t t0_ = now(); x; uint32_t d_ = now() - t0_; volatile uint32_t *pr_ = (volatile uint32_t *)0x100FBE00u; if (d_ > pr_[k]) pr_[k] = d_; } while (0)
+#else
+#define PRB(k, x) do { x; } while (0)
+#endif
 void aeria_main(void)
 {
     /* (the caches are on since start.S: before .bss was cleared) */
@@ -1180,6 +1192,15 @@ void aeria_main(void)
         dsp1_running = dsp_boot_core1();
         if (!dsp1_running) { LOG->uart_regs[5] |= 0x200u | (uint32_t)dsp_repark(1) << 1; dsp1_running = dsp_boot_core1(); }
     }
+    /* (19 Nov 2026) Only now may the engine start the audio port: host flag 1 (engine.asm gowait). Core 1's first
+     * stage has written the shared PLL; the engine lines its rings up with the converter's frame at full speed, on a
+     * clock that will not change again. Until now it did so before the PLL was set, on a power-on only -- see
+     * engine.asm. 20 ms for the lock (core 1's own upload already took a few after the write). */
+    if (dsp_running) {
+        uint32_t t = now(); while (now() - t < MS(20)) {}
+        REG8(DSP_SELECT) = 0;
+        REG16(HI_ICR) = 0x11;                /* HF1 | RREQ */
+    }
 dsp_skipped:
     REG32(0xFC008020u) = 0x00000180u;        /* then no wait states, as stock after its uploads (the stream needs it) */
     LOG->uart_regs[3] = (uint32_t)dsp1_running;
@@ -1202,11 +1223,11 @@ dsp_skipped:
     if (dsp_running) { dsp_write(0x2f2, 0x400000, 0); stream_on = 1; intro_start(); }
     uint32_t prev = now(), ms = 0, tick_at = prev, draw_at = prev;
     for (;;) {
-        poll_panel();
+        PRB(4, poll_panel());
         { uint32_t d = now() - prev; uint32_t whole = d / 132000u; ms += whole; prev += whole * 132000u; LOG->ms_run = ms; }
-        if (dsp_running) { dsp_poll(); stream_pump(); }
-        usb_poll();
-        CRUMB(0x08); midi_poll();
+        PRB(5, if (dsp_running) { dsp_poll(); stream_pump(); });
+        PRB(6, usb_poll());
+        CRUMB(0x08); PRB(7, midi_poll());
         { static uint32_t fast_at; uint32_t tn = now(); if (tn - fast_at >= US(250)) { uint32_t us = (tn - fast_at) / 132u; fast_at = tn; if (us < 100000u) { CRUMB(0x09); module_fast(us); } } }
         if ((LOG->loops & 1023) == 0) {      /* bring-up: the sampler's report, card log +0x400 */
             volatile uint32_t *r = (volatile uint32_t *)(CARDLOG + 0x200);
@@ -1233,17 +1254,25 @@ dsp_skipped:
 #ifndef AERIA_FLASH
         { volatile uint32_t *dg = (volatile uint32_t *)0x100FBEF4u; dg[0] = ms; dg[1] = LOG->loops; dg[2] = LOG->dsp_timeouts; }   /* test builds: last seen */
 #endif
-        CRUMB(0x02); aeria_ui_events();
-        if (now() - tick_at >= US(16393)) { tick_at += US(16393); aeria_ui_tick(); }    /* 61 a second, as stock's UI tick */
+        CRUMB(0x02); PRB(8, aeria_ui_events());
+        if (now() - tick_at >= US(16393)) { tick_at += US(16393); PRB(9, aeria_ui_tick()); }    /* 61 a second, as stock's UI tick */
         if (now() - draw_at >= MS(stems_sent ? 100 : 33)) {                              /* 30 frames a second (10 while the stems stream: every bit of time goes to them) */
             draw_at = now();
-            CRUMB(0x05); aeria_ui_draw();
+            CRUMB(0x05);
+#ifdef PROBE_DRAW
+            { uint32_t t0 = now(); aeria_ui_draw(); uint32_t d = now() - t0; volatile uint32_t *pr = (volatile uint32_t *)0x100FBE00u; if (d > pr[0]) pr[0] = d; pr[1] += d; pr[2]++; }
+#else
+            aeria_ui_draw();
+#endif
             if (ms < 30000 && (ms / 1000) % 2) px(W - 1, 0);   /* bring-up: a blink so a frozen OS is obvious */
         }
-        CRUMB(0x03); lcd_flush(6);
-        aeria_ui_leds();
-        led_flush(0);
-        CRUMB(0x04); aeria_ui_sound();
-        fx_either(); bass_mono_tick(); filt_lorenz_tick();
+        CRUMB(0x03); PRB(10, lcd_flush(6));
+        PRB(11, aeria_ui_leds());
+        PRB(12, led_flush(0));
+#ifdef PROBE_DRAW
+        { static uint32_t lt; uint32_t t = now(); volatile uint32_t *pr = (volatile uint32_t *)0x100FBE00u; if (lt && t - lt > pr[3]) pr[3] = t - lt; lt = t; }
+#endif
+        CRUMB(0x04); PRB(13, aeria_ui_sound());
+        PRB(14, fx_either()); PRB(15, bass_mono_tick(); filt_lorenz_tick());
     }
 }

@@ -37,11 +37,17 @@ def rd(d, addr, n):
     return bytes(out)
 
 
+WR_CHUNK = [4096]   # falls back to 64-byte pieces when a bigger control write times out (seen 15 Nov 2026: one boot took only 64)
 def wr(d, addr, data):
-    for o in range(0, len(data), 4096):
-        chunk = data[o:o + 4096]
-        a = addr + o
-        d.ctrl_transfer(0x40, 0x02, a >> 16, a & 0xFFFF, chunk, timeout=3000)
+    o = 0
+    while o < len(data):
+        n = WR_CHUNK[0]; chunk = data[o:o + n]; a = addr + o
+        try:
+            d.ctrl_transfer(0x40, 0x02, a >> 16, a & 0xFFFF, chunk, timeout=3000)
+        except usb.core.USBTimeoutError:
+            if n <= 64: raise
+            WR_CHUNK[0] = 64; sys.stderr.write('aos: control writes fall back to 64-byte pieces\n'); continue
+        o += n
 
 
 # the running OS's own variables (SDRAM, cached): read and write them THROUGH the cache; rd / wr go round it

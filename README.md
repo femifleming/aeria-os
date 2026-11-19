@@ -17,7 +17,7 @@ Effects (hand-written DSP56300 assembly): PITCH, GRAINS, RING, RESO, SMEAR (FFT)
 
 ## Manuals
 
-The full manual (165 pages) and an 18-page quick start guide, in English (dark), are attached to the [beta release](../../releases). Their sources are in `cloudfin/preview/manual_src/` (`python3 build_all.py`).
+The full manual (171 pages) and a 20-page quick start guide, in English (dark), are attached to the [beta release](../../releases). Their sources are in `cloudfin/preview/manual_src/` (`python3 build_all.py`).
 
 ## In this repository
 
@@ -59,7 +59,9 @@ AERIA Flasher (`aeria-os/flasher`) expects the same layout, the Modwerk venv and
 
 ## Beta notes
 
-- Latest (v0.9.3): more DSP room — the engine runs from the first DSP core's private memory (its load halved; filters 3x cheaper); PT2399 at half rate (cost 970 -> 630); BBD removed; effect placement tries both cores; the card preview starts at once.
+- Latest (v0.9.5): a repair release — the headphones carry the main mix from a cold start (the DSP waits for its clock before lining up its outputs; MKII left/right fixed), level lamps reach full scale, NO always backs out, sequencer locks and MIDI timing fixed, kits load A to Z. Tested in the new simulator (`aeria-os/sim`), not yet on the unit.
+- v0.9.4 (not released separately): eight MIDI tracks, crossfader modes, Dutch, streamlined navigation; 8 patterns, song mode, slicing and resampling onto tracks.
+- v0.9.3: more DSP room — the engine runs from the first DSP core's private memory (its load halved; filters 3x cheaper); PT2399 at half rate (cost 970 -> 630); BBD removed; effect placement tries both cores; the card preview starts at once.
 - v0.9.2: less aliasing — PITCH, GRAINS and AURORA filter before shifting up, RING's carrier stays below Nyquist; the MOD page shows its routing in columns.
 - Before that: a quality pass on fifteen effects, and BBD, PT2399 and TAPE are in (a DSP crash found in testing is fixed).
 - Never press TRIG 2 (EMPTY RESET) in the Startup Menu unless you mean to wipe the unit.

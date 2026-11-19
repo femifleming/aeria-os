@@ -12,6 +12,7 @@
 #endif
 enum { BR_OFF, BR_LOOP, BR_STARS, BR_PONG, BR_SEQ };   /* SEQ: a folder dealt to the sequencer's kit (static slots 97-112, bank 7) */   /* PONG: a folder dealt to the balls (static slots 112-127) */
 static int br_mode, br_count, br_top, br_cur, br_depth, br_busy, br_preview;
+static int br_rest, br_heard = -1;       /* (15 Nov 2026) ticks the cursor has rested on an entry; the entry heard by itself (-1 none) */
 static char br_path[0x104];
 static char br_names[BR_MAX][BR_NAME];
 static uint8_t br_dir[BR_MAX];
@@ -138,9 +139,11 @@ static void path_with(const char *name, char *out)
 }
 static int is_wav(int i) { return !br_dir[i]; }
 
+static int sq_single_sample(int slot);   /* seqmode.c: the track in hand plays that slot */
+int aos_bank5_take(int frames);          /* aeria-os sampler.c: the next slot of bank 6 (index 5) with room */
 static void browser_open(int mode)
 {
-    br_mode = mode; br_cur = br_top = br_depth = 0; br_preview = 0;
+    br_mode = mode; br_cur = br_top = br_depth = 0; br_preview = 0; br_rest = 0; br_heard = -1;
     set_path_root();
     br_scan();
     say(mode == BR_LOOP ? "PICK A SAMPLE" : "PICK A FOLDER", 0);
@@ -208,8 +211,21 @@ static void loop_tick(void)
     say(st == 0 ? "LOADED" : "LOAD FAILED", 0);
 }
 static int preview_waiting;
+/* the WAV under the cursor into the preview slot and playing, at once when the card gave it (its first 0.1 s) */
+static void preview_now(void)
+{
+    static char full[0x104];
+    if (br_preview) { wav_preview_stop(); br_preview = 0; }
+    path_with(br_names[br_cur], full); slot_load(0, 128, full);
+    if (slot_status(0, 128) == 0) { wav_preview_play(); br_preview = 1; preview_waiting = 0; }
+    else preview_waiting = 1;
+    br_heard = br_cur;
+}
 static void preview_tick(void)
 {
+    if (br_mode && br_count && !br_dir[br_cur] && is_wav(br_cur) && br_heard != br_cur) {   /* a WAV the cursor rests on is heard by itself */
+        if (++br_rest >= 6) { br_rest = 0; preview_now(); }
+    } else br_rest = 0;
     if (!preview_waiting) return;
     int st = slot_status(0, 128);
     if (st == 2 && preview_waiting < 600) { preview_waiting++; return; }
@@ -220,22 +236,29 @@ static void preview_tick(void)
 static void browser_key(int code)
 {
     if (br_busy) return;
-    if (code == KEY_UP) { if (br_cur > 0) br_cur--; }
-    else if (code == KEY_DOWN) { if (br_cur < br_count - 1) br_cur++; }
+    if (code == KEY_UP) { if (br_cur > 0) { br_cur--; if (br_preview) { wav_preview_stop(); br_preview = 0; } br_rest = 0; } }
+    else if (code == KEY_DOWN) { if (br_cur < br_count - 1) { br_cur++; if (br_preview) { wav_preview_stop(); br_preview = 0; } br_rest = 0; } }
     else if (code == KEY_LEFT || code == KEY_NO) {
         if (br_preview) { wav_preview_stop(); br_preview = 0; }
         if (br_depth > 0) { path_pop(); br_depth--; br_cur = br_top = 0; br_scan(); }
         else browser_close();
     } else if (code == KEY_RIGHT && br_count) {
         if (br_dir[br_cur]) { path_push(br_names[br_cur]); br_depth++; br_cur = br_top = 0; br_scan(); }
-        else { static char full[0x104]; if (br_preview) wav_preview_stop(); path_with(br_names[br_cur], full); slot_load(0, 128, full); preview_waiting = 1; }
+        else preview_now();
     } else if (code == KEY_YES && br_count) {
         /* YES opens a folder or loads (a WAV for LOOP; for STARS, the folder it sits in).
          * FUNC+YES plays the WAV in the headphones; on a folder in STARS it deals that folder. */
         static char full[0x104];
-        if (func_held && !br_dir[br_cur]) { if (br_preview) wav_preview_stop(); path_with(br_names[br_cur], full); slot_load(0, 128, full); preview_waiting = 1; }
+        if (func_held && !br_dir[br_cur] && br_mode != BR_SEQ) preview_now();
         else if (br_dir[br_cur] && !(func_held && (br_mode >= BR_STARS))) { path_push(br_names[br_cur]); br_depth++; br_cur = br_top = 0; br_scan(); }
-        else if (br_mode >= BR_STARS) {
+        else if (br_mode == BR_SEQ && !br_dir[br_cur] && !func_held) {   /* (15 Nov 2026) the sequencer's browser: YES on a file puts that one file (bank 6) on the track in hand; FUNC+YES deals the folder as the kit; RIGHT hears it */
+            if (br_preview) { wav_preview_stop(); br_preview = 0; }
+            path_with(br_names[br_cur], full);
+            int slot = aos_bank5_take(0);
+            if (slot < 0) say("NO ROOM", "BANK 6");
+            else if (!aos_slot_load(0, slot, full)) say("LOAD FAILED", 0);
+            else { sq_single_sample(slot); browser_close(); }
+        } else if (br_mode >= BR_STARS) {
             if (br_preview) { wav_preview_stop(); br_preview = 0; }
             if (br_dir[br_cur]) { path_push(br_names[br_cur]); br_depth++; br_cur = br_top = 0; br_scan(); }
             if (wav_count()) { deal_folder(br_mode == BR_PONG ? 7 : br_mode == BR_SEQ ? 6 : pv(PG_STARS, 9)); browser_close(); } else say("NO WAVS HERE", 0);
@@ -268,6 +291,6 @@ static void draw_browser(void)
         else text(2, y, line, 1);
     }
     if (!br_count) text(2, 24, "EMPTY", 1);
-    text(2, 57, br_mode != BR_LOOP ? "YES DEAL  FUNC+YES HEAR" : "YES LOAD  FUNC+YES HEAR", 1);
+    text(2, 57, br_mode == BR_SEQ ? "YES ONE  FUNC+YES KIT  > HEAR" : br_mode != BR_LOOP ? "YES DEAL  FUNC+YES HEAR" : "YES LOAD  FUNC+YES HEAR", 1);
 }
 

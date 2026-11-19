@@ -390,7 +390,7 @@ static void usb_tap(int ch, int32_t v)
     if (++tap_ch == 6) {
         int32_t *f = tap[tap_w % TAP_FRAMES];
         aos_pitch_sample(f[0], f[1], f[2], f[3]);
-        resample_frame(f[4], f[5]);
+        resample_frame6(f);
         tap_ch = 0;
         if (usb_alt_audio == 2) {               /* the stems' setting outside the sequencer: the main pair, the stems silent */
             if (stem_w - stem_r < STEM_FRAMES - 1) { int32_t *g = stem_ring[stem_w % STEM_FRAMES]; g[0] = f[4]; g[1] = f[5]; for (int k = 2; k < 18; k++) g[k] = 0; stem_w++; }

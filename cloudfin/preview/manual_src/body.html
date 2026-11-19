@@ -8,7 +8,8 @@
 
 <div style="page: front">
 <div class="fh">About this edition</div>
-<p>This manual describes the build that names itself <b><i>AERIA OS Nov 15 2026 10:15:09</i></b>: the multi-effect, called <b>the sky</b> in this manual, and the <b>sequencer</b>. It replaces the edition of 13 November.</p>
+<p>This manual describes the build that names itself <b><i>AERIA OS Nov 19 2026 17:50:56</i></b>: the multi-effect, called <b>the sky</b> in this manual, and the <b>sequencer</b>. It replaces the edition of 15 November.</p>
+<div class="tip"><b>New on 19 November 2026.</b> <b>The headphones</b> are a copy of the main mix from the moment the unit is switched on: the sound processor now waits for its clock to settle before it lines its outputs up with the converter (at a cold start they could come out on the wrong sockets), and on the MKII the headphones' left and right are the right way round. <b>The level lamps</b> above [REC1] and [REC2] reach full brightness near clipping (their top two steps never lit before). <b>[NO] always backs out:</b> on MASTER it no longer taps the tempo (tap [TEMPO]); closing OUT or the grain cloud goes back to exactly what was on the screen; the STARS and BALLOON pictures go when their page does. <b>The card browser</b> lists folders first, then files, each A to Z, and a kit loads in that order (samples you saved in a project before keep their places). <b>Sequencer:</b> a step's VOL lock is heard on that step, not the next; a MIDI track's VEL is used when a step has no velocity of its own; MIDI notes leave within a millisecond or two of their sound. DIST is no longer loaded into the chain at a first start.</div>
 <div class="tip"><b>New in the builds of 13 to 15 Nov.</b> <b>Less weather:</b> RAIN, FOG and the AURORA are left, on trigs 3, 7 and 11, with CLEAR on trig 1 and AUTO on trig 8. AUTO moves between clear, rain and fog ({{pg:wxauto}}). CLOUDY, STORM, SNOW, HEAT, WIND, HAIL, the TWISTER and lightning have been taken out, and so have the WIND, HAIL and TWISTER effects ({{pg:wxgone}}). <b>WX</b>, a sixth knob on the SKY page, switches the weather off altogether ({{pg:wxoff}}). <b>The master EQ has been removed</b>: GAIN's FUNC layer is empty. <b>A blank start:</b> [FUNC] + [PROJ] asks, and gives INIT or RESET ALL ({{pg:blank}}). In the sequencer: each output on its own, OUT EACH ({{pg:trackeach}}), and a reverb bus ({{pg:rvbus}}).</div>
 <div class="tip"><b>New in the builds of 08:03 to 09:26 (13 Nov).</b> <b>More room in the DSP:</b> the engine (mixer, outputs, filters, samples) now runs from the first core's own fast memory instead of the memory both cores share, so it takes half the time it did. The first core has room for 1,280 of effects in the sky (was 990) and 1,060 in the sequencer (was 560); the weather's filters and the sequencer's track filters cost a third of what they did. <b>PT2399 runs at half rate</b> inside (22.05 kHz): it costs 630 (was 970), and its top end now stops near 10 kHz, like the real chip. <b>BBD has been removed</b>: a saved chain or pattern that had it loads that slot empty. A big effect is no longer refused because of the order effects were picked in: AERIA tries both cores. The card browser's preview starts playing after half a second instead of loading the whole file first.</div>
 <div class="tip"><b>New in the build of 07:10 (13 Nov).</b> <b>Less aliasing:</b> PITCH, GRAINS and AURORA filter the sound before they shift it up, so high notes no longer fold back as harsh tones below them (37 to 65 dB quieter); RING's carrier stays below half the sample rate, and its input is filtered when the carrier is high. The cost: PITCH 336, GRAINS 330, AURORA 216 ({{pg:dsproom}}). The MOD page shows ROUT, SRC, DPTH and the source's settings in columns.</div>
@@ -292,7 +293,7 @@ intro3 | The logo fades and the sea rises
 <p><b>Go to the sequencer.</b> Press [FUNC] + [MIDI]. The popup says ``SEQUENCER``. Eight rows of dots: eight empty tracks. Track 1 is in hand: its row is the tall one.</p>
 [[/STEP]]
 [[STEP 2 | SRC FUNC YES UP DOWN | seq_kit]]
-<p><b>Load a kit.</b> Press [SRC], then [FUNC] + [YES]. The card opens. Move to your folder with [UP] [DOWN] and press [FUNC] + [YES] on it. Its first sixteen files become samples 7.1 to 7.16; tracks 1 to 8 play the first eight.</p>
+<p><b>Load a kit.</b> Press [SRC], then [FUNC] + [YES]. The card opens. Move to your folder with [UP] [DOWN] and press [FUNC] + [YES] on it. Its first sixteen files, A to Z, become samples 7.1 to 7.16; tracks 1 to 8 play the first eight.</p>
 [[/STEP]]
 [[STEP 3 | T1 TRIG1 TRIG5 TRIG9 TRIG13 | qs_seq_kick]]
 <p><b>Set a kick.</b> Press [T1]; while stopped you hear the track as you pick it. Tap [TRIG 1], [TRIG 5], [TRIG 9] and [TRIG 13]: a kick on every beat.</p>
@@ -370,7 +371,7 @@ intro3 | The logo fades and the sea rises
 <tr><td class="k">FUNC</td><td>While held, the six knobs are the page's FUNC layer</td><td></td></tr>
 <tr><td class="k">PAGE</td><td>Latches the FUNC layer on or off, so you need not hold FUNC. The popup says LAYER 2 or LAYER 1</td><td>the same</td></tr>
 <tr><td class="k">YES</td><td>Depends on the page:<br>CHAIN: opens the shelf for the selected slot, full or empty<br>Shelf: puts the chosen effect in the slot<br>OUT: switches the slot between CHAIN and QUAD<br>GUMBALLS, PITCH, MARBLES: the module on or off<br>PONG: adds a ball<br>SYSTEM: starts the screensaver now<br>PROJECTS: loads the picked project<br>Card browser: opens a folder, loads a file or deals a folder<br>SKY: day or night<br>Anywhere else: nothing</td><td>On SYSTEM: OS UPGRADE (not built yet; it answers NOT YET)<br>On PONG: opens the card<br>On PROJECTS: saves into the picked project, after asking for its name<br>In the card browser: hear the file<br>Anywhere else: nothing</td></tr>
-<tr><td class="k">NO</td><td>Backs out, one level at a time:<br>Closes OUT, GRAIN CLOUD, PROJECTS, the shelf; goes back in the card browser; leaves USB DISK MODE; ends a screensaver<br>Then: the second set of knobs gives way to the first<br>Then: the page hides, and the sky is alone<br>PONG: removes the last ball<br>MASTER: taps the tempo<br>With SCENE A or SCENE B held: clears that scene</td><td>A new sky (new clouds). On STARS: a new constellation</td></tr>
+<tr><td class="k">NO</td><td>Backs out, one level at a time:<br>Closes OUT, GRAIN CLOUD, PROJECTS, the shelf; goes back in the card browser; leaves USB DISK MODE; ends a screensaver<br>Then: the second set of knobs gives way to the first<br>Then: the page hides, and the sky is alone<br>PONG: removes the last ball<br>With SCENE A or SCENE B held: clears that scene</td><td>A new sky (new clouds). On STARS: a new constellation</td></tr>
 <tr><td class="k">UP DOWN</td><td>The next or the previous weather, by itself: the others go off. In the shelf and the card browser: move through the list</td><td>the same</td></tr>
 <tr><td class="k">REC1</td><td>Starts catching balloon 1 from inputs A B. Press again: it floats</td><td>Pops balloon 1</td></tr>
 <tr><td class="k">REC2</td><td>The same for balloon 2, from inputs C D</td><td>Pops balloon 2</td></tr>
@@ -1208,18 +1209,19 @@ browser_stars | Choosing a folder of stars
 <tr><td class="k">YES</td><td>On a folder: open it. On a file, for LOOP: load it. On a file, for STARS, PONG and KIT: deal the folder you are in</td></tr>
 <tr><td class="k">FUNC+YES</td><td>On a file: hear it first. On a folder, for STARS, PONG and KIT: deal that folder without opening it</td></tr>
 </table>
-<p>STARS and PONG take sixteen of the folder's files at random. A kit takes the first sixteen in the order listed.</p>
+<p>The browser lists folders first, then files, each A to Z (capitals and small letters alike), whatever order they were copied to the card in. STARS and PONG take sixteen of the folder's files at random. A kit takes the first sixteen in that order, so name its files 01, 02 .. to choose which track gets which.</p>
 <p>AERIA reads any FAT16 or FAT32 CompactFlash card. Long file names are shown. Put your sounds anywhere, for example in <small>/AERIA/LOOPS</small> and <small>/AERIA/STARS/&lt;folder&gt;</small>.</p>
 
 <h2 id="mix">MIX, GAIN and MASTER</h2>
-[[PANEL FX1=MIX MIX=MASTER KNOBS FUNC PAGE TRIGS XFADER=freeze NO=tap | The output end's controls
+[[PANEL FX1=MIX MIX=MASTER KNOBS FUNC PAGE TRIGS XFADER=freeze NO TEMPO=tap | The output end's controls
 [FX1] :: MIX; again: GAIN
 [MIX] :: MASTER: the freeze delay
 ((A)) to ((F)) :: The page's six knobs
 [FUNC] held, or [PAGE] :: The second set: inputs, scale and limiter (MIX), tempo (MASTER). GAIN has none
 [TRIG 1] to [TRIG 16] :: On MASTER: the delay's time. On MIX and GAIN: the weathers
 Crossfader at B :: Freezes the delay
-[NO] :: On MASTER: taps the tempo
+[TEMPO] :: Taps the tempo
+[NO] :: Back to the sky
 ]]
 <p>These three pages are the output end of AERIA. MIX holds the weather's sound switches, the inputs, the scale and the limiter's switch. GAIN holds the levels. MASTER holds the freeze delay.</p>
 <p>The <b>master section</b> is what happens to the main mix after the chain, or after the sequencer's tracks: the freeze delay, then bass mono, then the limiter. The weather never moves any of it. It is the same in both faces of AERIA OS.</p>
@@ -1305,7 +1307,7 @@ master_tempo | Turning TMPO: 150 BPM
 <li><b>Trigs 1 to 16</b> set TIME. The lamps show it as a bar.</li>
 <li><b>The crossfader freezes</b> when it is the freeze: press [FUNC] + [SCENE B] (the popup says CROSSFADER FREEZE, the SCENE B lamp lights, the bottom line reads XF FREEZE). Push it past about three quarters of the way to B and the popup says FREEZE ON. Nothing more goes in, and what is in the delay goes round without loss and without the filters. FDBK, HPF, LPF and SEND do nothing while it is frozen; WET still sets how loud it is. Bring the crossfader back under about two thirds and the popup says FREEZE OFF: the delay lets go. [FUNC] + [SCENE A] gives the crossfader back to the scenes.</li>
 <li><b>YES does not freeze any more.</b> It was too easy to press by accident; on MASTER it does nothing.</li>
-<li><span class="key">NO</span> <b>taps the tempo</b>. Tap two to four times on the beat. AERIA takes the average of the last taps. Wait more than two seconds and the count starts again.</li>
+<li><span class="key">TEMPO</span> <b>taps the tempo</b>. Tap two to four times on the beat. AERIA takes the average of the last taps. Wait more than two seconds and the count starts again. [NO] leaves the page, as everywhere.</li>
 </ul>
 <p>A frozen delay is heard only if WET is up. The freeze is not saved: after a restart the delay is frozen only if the crossfader is standing at B.</p>
 [[S master_freeze | The crossfader pushed to B: the delay is frozen]]
@@ -2172,7 +2174,7 @@ seq_chain | A chain is set: CH in the top line
 [PAGE], then ((D)) :: TMPO on the PTN page
 ]]
 <ul>
-<li>Tap [TEMPO] two to four times on the beat; AERIA OS takes the average of the last taps. Wait more than two seconds and the count starts again. On the MASTER page, [NO] taps too.</li>
+<li>Tap [TEMPO] two to four times on the beat; AERIA OS takes the average of the last taps. Wait more than two seconds and the count starts again.</li>
 <li>TMPO on the PTN page and TMPO on the second set of MASTER are one value, 60 to 187 BPM.</li>
 <li>The freeze delay's time follows the same tempo.</li>
 <li>&lt;&lt;TEMPO&gt;&gt; flashes on every beat while the sequencer plays.</li>
@@ -2192,8 +2194,8 @@ seq_ext | Three dots before the tempo: a MIDI clock from outside has it
 <p>A kit is a folder of WAV files on the card.</p>
 <ol class="steps">
 <li>Press [SRC], then [FUNC] + [YES]. The card browser opens, titled KIT ({{ch:card}}).</li>
-<li>Go to the folder. Press [YES] on any file in it, or [FUNC] + [YES] on the folder itself.</li>
-<li>The folder's first sixteen WAV files, in the order the browser lists them, become samples 7.1 to 7.16. With fewer than sixteen, they repeat.</li>
+<li>Go into the folder and press [FUNC] + [YES], or press [FUNC] + [YES] on the folder itself. ([YES] on one file puts just that file on the track in hand.)</li>
+<li>The folder's first sixteen WAV files, A to Z as the browser lists them, become samples 7.1 to 7.16. With fewer than sixteen, they repeat.</li>
 </ol>
 [[G2]]
 seq_kit | Choosing a kit: [FUNC] + [YES] here loads the folder under the bar
@@ -2705,7 +2707,7 @@ ss_clock | CLOCK at 645:833, half past three in the afternoon. Made on a compute
 <tr><td>[FUNC] + [MIDI]</td><td>From the sky to the sequencer, and back</td></tr>
 <tr><td>[PROJ]</td><td>PROJECTS: [TRIG 1] to [TRIG 16] pick, [YES] loads, [FUNC] + [YES] saves (and asks for a name), [NO] or [PROJ] closes</td></tr>
 <tr><td>[FUNC] + [PROJ]</td><td>A blank start: then [YES] INIT, [FUNC] + [YES] RESET ALL, [NO] back ({{pg:blank}})</td></tr>
-<tr><td>[MIX]</td><td>The MASTER page: trigs set the delay's time, [NO] taps the tempo. Again: its second set</td></tr>
+<tr><td>[MIX]</td><td>The MASTER page: trigs set the delay's time. Again: its second set</td></tr>
 <tr><td>[FUNC] + [SCENE A]</td><td>The crossfader is the scenes' fader (XMOD SCENES)</td></tr>
 <tr><td>[FUNC] + [SCENE B]</td><td>The crossfader is the freeze (XMOD FREEZE)</td></tr>
 <tr><td>Crossfader to B</td><td>As the scenes' fader: blends scene A into scene B. As the freeze: freezes the master's delay</td></tr>
@@ -2738,7 +2740,7 @@ ss_clock | CLOCK at 645:833, half past three in the afternoon. Made on a compute
 <tr><td>[PTN]</td><td>On STARS: RING or BIRDS</td></tr>
 <tr><td>[YES]</td><td>Confirms on the page that needs it (shelf, OUT, modules, PONG, SYSTEM, PROJECTS, browser). CHAIN: the shelf. SKY: day or night</td></tr>
 <tr><td>[FUNC] + [YES]</td><td>PONG: opens the card. PROJECTS: save. Browser: hear the file. SYSTEM: OS UPGRADE (not built yet)</td></tr>
-<tr><td>[NO]</td><td>Backs out one level: closes what is open, then the second set of knobs, then the page. PONG: one ball fewer. MASTER: tap tempo</td></tr>
+<tr><td>[NO]</td><td>Backs out one level: closes what is open, then the second set of knobs, then the page. PONG: one ball fewer</td></tr>
 <tr><td>[FUNC] + [NO]</td><td>A new sky. On STARS: a new constellation</td></tr>
 <tr><td>[REC1] / [REC2] / [REC3]</td><td>Catch balloon 1 / 2 / 3; again: it floats</td></tr>
 <tr><td>[FUNC] + [REC1] / [REC2] / [REC3]</td><td>Pop balloon 1 / 2 / 3</td></tr>

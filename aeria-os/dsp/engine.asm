@@ -6,7 +6,8 @@
 ;   A frame is 16 samples. The loop waits for DSR2 = $80f0 (fill $8000) or $8070 (fill $8080).
 ; Each frame: the newest complete 16-sample input block -> the stereo work buffer X:$900 (32 words L,R),
 ;   through the effect chain (stock's FX ABI: r0 block, n7 frames, r6 knob block, r7 state, X:$213 -> a word
-;   holding the Y buffer base, a = 1), then out to every output pair (cue 0/1, main 2/3, phones 4/5).
+;   holding the Y buffer base, a = 1), then out to every output pair (ring words: cue 0/1, main 2/3, phones 4/5 --
+;   the phones' pair right first on the MKII; 6/7 nothing).
 ; Inputs (words of x:$200-$203, 24-bit gains, $7fffff = 1.0, set by the ColdFire):
 ;   L = A*g(A->L) + C*g(C->L) + ...  -- a 4x2 matrix at X:$210 (row per input: to L, to R).
 ; Master gain X:$218. Chain: 8 slots at X:$280, 8 words each:
@@ -56,6 +57,19 @@ pcout:
 ; (one frame, 0.36 ms, later), then asks for the next.
 start:
         move    #>$300,sr
+; (19 Nov 2026) Nothing of the audio port is touched until the ColdFire raises host flag 1. On a power-on both cores
+; run from the 11.2896 MHz crystal until core 1's first stage writes the shared PLL (x:$ffff7d) -- and that came
+; AFTER this engine had started the ESAI and lined its two rings up with the converter's frame, at a seventeenth of
+; the speed (32 clocks a slot: the lines between the last primed slot and the DMA's start take longer than that),
+; and then the PLL's lock stopped the core for a while with the converter's clock running on. The output ring's
+; eight words then sat in the converter's eight slots any of eight ways, new at every power-on, and only one has
+; main on main and the phones on the phones (two of the eight put the two unused, silent words there); the input
+; ring likewise, any of four ways. Started from RAM, as every measurement of this engine was, the PLL was long
+; locked and the rings were always right -- which is why the owner's "random left / right / mono / nothing in the
+; headphones" (12, 13, 17 Nov) was never seen on the bench. Now the ColdFire loads both cores, waits for the lock
+; and only then lets the engine line up (main.c, after dsp_boot_core1).
+gowait:
+        jclr    #4,x:<<$ffffc3,gowait
         movep   #>$3fff,y:<<$ffffe4
         bset    #$e,y:<<$fffffd
         bset    #$e,y:<<$fffffe
@@ -269,6 +283,8 @@ frame:
         add     x0,a
 inok:
         move    a1,r1
+        move    a1,x:>$8a44
+; (X:$8a44 remembers this frame's input block: the sequencer's THRU machine reads the inputs raw from it)
         move    #>$900,r0
 ; per sample: C D A B in, L R out (the matrix rows: A $2e0/$2e1, B $2e2/$2e3, C $2e4/$2e5, D $2e6/$2e7)
         do      #16,mixend
@@ -603,11 +619,14 @@ pzdr:
         move    x:>$2f9,x0
         move    x0,x:(r5)+
         move    x0,x:(r6)+
-; the phones' pair: L then R, as the other pairs (15 Nov 2026: the 12 Nov splitter test that put R first was fooled
-; by the phones' broken multiply -- measured again through the cable loop with it fixed, the tip carried slot 5)
-        move    x:>$2fc,x0
-        move    x0,x:(r5)+
+; the phones' pair: RIGHT in word 4, LEFT in word 5 (19 Nov 2026). That is the MKII's wiring: stock's own output
+; loop writes the pair the other way round when the level page's word $2b says MKII (payload A P:$33f-$359: r1 =
+; ring + 5, left to (r1)-, right after it; on the first Octatrack ring + 4, left first), the 12 Nov splitter test
+; on this unit found the right first, and the 15 Nov note itself says the tip carried word 5 -- while the code it
+; left wrote the left to word 4.
         move    x:>$2fd,x0
+        move    x0,x:(r5)+
+        move    x:>$2fc,x0
         move    x0,x:(r5)+
         clr     a
         move    a,x:(r5)+
@@ -1369,6 +1388,37 @@ tlcp:
         move    #>$1,x0
         add     x0,a
         move    a1,x:>$8a01
+; THRU (15 Nov 2026): two gain words in the track's filter block (+$c for inputs A B, +$d for C D) open the raw inputs
+; of this frame (X:$8a44 the block: C D A B a sample) into the track, summed to mono (the ColdFire halves the gain),
+; before its filters and effect
+        move    x:>$8a00,r1
+        nop
+        move    x:(r1+$c),y0
+        move    x:(r1+$d),y1
+        move    y0,a
+        tst     a
+        bne     >tlgo
+        move    y1,a
+        tst     a
+        beq     >tlnt
+tlgo:
+        move    x:>$8a44,r2
+        move    #>$900,r0
+        do      #16,tlth
+        move    x:(r2)+,x0
+        move    x:(r0),a
+        mac     x0,y1,a
+        move    x:(r2)+,x0
+        mac     x0,y1,a
+        move    x:(r2)+,x0
+        mac     y0,x0,a
+        move    x:(r2)+,x0
+        mac     y0,x0,a
+        move    a,x:(r0)+
+        move    (r0)+
+tlth:
+        nop
+tlnt:
         move    x:>$8a00,r1
         nop
         move    x:(r1+$a),a

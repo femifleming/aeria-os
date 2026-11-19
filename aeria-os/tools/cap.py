@@ -3,9 +3,14 @@ cap.py SECONDS [name]   (files go to ~/octa/aeria-os/build/cap/)"""
 import sys,subprocess,wave,numpy as np,os
 S=os.path.expanduser('~/octa/aeria-os/build/cap'); os.makedirs(S,exist_ok=True)
 def rec(secs,name='cap'):
+    """a capture of `secs` seconds; CoreAudio drops data now and then (its buffer overruns): a short take is recorded again, up to three times"""
     f=S+'/'+name+'.wav'
-    subprocess.run(['sox','-q','-t','coreaudio','AERIA audio','-c','6','-b','24',f,'trim','0',str(secs)],check=True)
-    return load(f)
+    for tries in range(3):
+        subprocess.run(['sox','-q','--buffer','262144','-t','coreaudio','AERIA audio','-c','6','-b','24',f,'trim','0',str(secs)],check=True)
+        x=load(f)
+        if len(x)>=int(secs*44100*0.95): return x
+        sys.stderr.write('cap: short take (%d frames of %d), again\n'%(len(x),int(secs*44100)))
+    return x
 def load(f):
     w=wave.open(f); n=w.getnframes(); b=np.frombuffer(w.readframes(n),dtype=np.uint8).reshape(-1,6,3)
     return (b[:,:,0].astype(np.int32)|(b[:,:,1].astype(np.int32)<<8)|(b[:,:,2].astype(np.int8).astype(np.int32)<<16))/8388608.0

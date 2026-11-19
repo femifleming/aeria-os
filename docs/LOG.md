@@ -5963,3 +5963,40 @@ While the KIT browser (FUNC+YES on SRC) was open it took every key, PLAY and STO
 - Eight MIDI tracks beside the audio tracks (the MIDI key switches banks), each on its own channel with note, velocity, gate, chord, program, octave, two CCs, free run, one lock a step; saved with projects.
 - Long card reads no longer run the stream dry (the pump never read the engine's progress); a project load keeps the sequencer's stream and says LOADING, then LOADED when its samples are back.
 - Releases AERIA OS Nov 15 2026 23:11:36 and 23:49:58, both tested on the unit and flashed. Manual, quick guide and both tutorial videos brought up to date.
+
+---
+
+### 250. 16 Nov (early)
+
+**Asks:** the eight suggestions the owner approved from the list offered at the end of 15 Nov (patterns and song mode, humanise, velocity routing, effect-knob locks, slicing and resampling onto tracks, a bigger kit bank, the THRU machine, projects that keep everything).
+
+**What was done / reported:**
+
+- Release AERIA OS Nov 16 2026 02:45:01, tested on the unit and flashed (see the changelog for the list).
+
+---
+
+### 251. 17 to 19 Nov
+
+**Asks:**
+
+> The aeira os project is getting messy. There are still a lot of bugs on the os, and your audio testing doest seem to solve the audio problems. there is still no sound out of the headphone output of the octatrack. [...] dont add any more features, make sure all the features work. most importanly the sewuencer needs to work, menu diving needs to be easy, the default for the output is stereo out of L R and a copy of that in the headphone out LR with control over the headhone out volume with the knob for headphone out. THe vu meters need to work to show the imput. [...]
+
+> look through the log of this project and consolidate all of my requensts and ideas so they make sense.
+
+> youve done enouph hardware testing to know how things work just make all the fixes, test them in an emulator or something. dont worry about git or the manual or video until you know it works. after youre done, i will test the firmware and report back.
+
+> here is the sdk and this guys custom fimrware as a reference https://github.com/sambanks/octabam
+
+> (a full repair brief: audit the whole project, consolidate the history into one specification, use the original Octatrack, the Modwerk SDK and Octabam as references, fix audio, headphones, VU meters, the sequencer, menus and CPU without adding features, test in an emulator, and deliver a build for the AERIA Flasher)
+
+> do it now from the simulated test build (the manual and the hour video) / when youre done, push this beta to github / you can push it without the video, just make sure it has the pdf manual
+
+**What was done / reported:**
+
+- The whole history consolidated into one record of requests and decisions, and docs/AERIA_PROJECT_SPECIFICATION.md written as the reference for what AERIA OS should do.
+- A simulator built (aeria-os/sim): the real firmware image and both DSP programs run on Octabam's ColdFire and DSP56300 emulators, with the panel, codec, card, MIDI and battery RAM modelled; ten automated test suites (outputs, headphones, level lamps, sequencer timing and step features, MIDI tracks, kits, projects and power cycles, every menu, CPU load).
+- The likely cause of the silent headphones: at a cold start the DSP engine lined its outputs up with the converter before its clock was set, so the outputs could land shifted (every bench test was a RAM boot, where the clock was already set). The engine now waits for the clock first. The headphones' left and right are now the right way round on the MKII.
+- Fixed: level lamps never reached full brightness; NO on MASTER tapped the tempo; closing OUT or the grain cloud brought back a page already put away; a step's volume lock was heard on the next step; MIDI tracks ignored VEL; MIDI notes wandered up to 10 ms against their sound; kits loaded in the card's copy order instead of A to Z; DIST was still in the default chain.
+- Release AERIA OS Nov 19 2026 17:50:56 (v0.9.5-beta): every simulator test passes; not yet run on the unit. Manual and quick guide updated; the long tutorial video updated (kept off GitHub).
+

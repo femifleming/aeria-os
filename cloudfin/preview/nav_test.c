@@ -9,14 +9,14 @@
 #include <string.h>
 static uint8_t fake_battery[0x4800] __attribute__((aligned(4)));
 static uint8_t fake_old_store[0x2400] __attribute__((aligned(4)));
-static uint8_t fake_proj[16 * 0x8000] __attribute__((aligned(4)));
-static uint8_t fake_seq[0x6400] __attribute__((aligned(4)));
-static uint8_t fake_mt[0x4400] __attribute__((aligned(4)));
-static uint8_t fake_proj_midi[16 * 0x4000] __attribute__((aligned(4)));
+static uint8_t fake_proj[8 * 0x18000] __attribute__((aligned(4)));
+static uint8_t fake_mark[16] __attribute__((aligned(4)));
+static uint8_t fake_seq[0xC400] __attribute__((aligned(4)));
+static uint8_t fake_mt[0x8400] __attribute__((aligned(4)));
 static uint8_t fake_scenes[0x1000] __attribute__((aligned(4)));
 static uint8_t fake_loaded[0x300] __attribute__((aligned(4)));
 static uint8_t fake_mods[0x100] __attribute__((aligned(4)));
-static int8_t fake_sqsc[16 * 8 * 48] __attribute__((aligned(4)));
+static int8_t fake_sqsc[16 * 8 * 64] __attribute__((aligned(4)));
 static uint8_t fake_sqsc_head[16] __attribute__((aligned(4)));
 #include "aeria_nav_ui.c"
 #include "fuzz_stubs_base.inc"
@@ -50,14 +50,15 @@ int aos_seq_ca(int t, int n) { (void)t; (void)n; return -1; } void aos_seq_tempo
 void aos_seq_fill(int on) { (void)on; } void aos_seq_defaults(void) { memset(fake_seq, 0, sizeof fake_seq); SQH->magic[0] = 'A'; SQH->magic[1] = 'E'; SQH->magic[2] = 'S'; SQH->magic[3] = 'Q'; SQH->ver = 2; for (int p = 0; p < 4; p++) { SQH->mlen[p] = 16; for (int t = 0; t < 8; t++) SQH->len[p][t] = 16; } }
 int aos_verb_row(void) { return 9; } void aos_seq_rv_defaults(void) { SQH->rv_ok = 1; }
 void aos_seq_refresh(void) {}
-static int mt_hits; void aos_mt_defaults(void) { memset(fake_mt, 0, sizeof fake_mt); MTH->magic[0] = 'A'; MTH->magic[1] = 'E'; MTH->magic[2] = 'M'; MTH->magic[3] = 'T'; MTH->ver = 1; for (int p = 0; p < 4; p++) for (int t = 0; t < 8; t++) MTH->len[p][t] = 16; for (int t = 0; t < 8; t++) { MTH->trk[t][MP_CH] = (uint8_t)(t + 1); MTH->trk[t][MP_NOTE] = 60; MTH->trk[t][MP_VEL] = 100; MTH->trk[t][MP_GATE] = 4; MTH->trk[t][MP_OCT] = 3; MTH->trk2[t][TP_DENS - SQ_TP] = 127; MTH->trk2[t][TP_RATE - SQ_TP] = 5; MTH->trk2[t][TP_WARP - SQ_TP] = 64; } }
+static int mt_hits; void aos_mt_defaults(void) { memset(fake_mt, 0, sizeof fake_mt); MTH->magic[0] = 'A'; MTH->magic[1] = 'E'; MTH->magic[2] = 'M'; MTH->magic[3] = 'T'; MTH->ver = 2; for (int p = 0; p < 4; p++) for (int t = 0; t < 8; t++) MTH->len[p][t] = 16; for (int t = 0; t < 8; t++) { MTH->trk[t][MP_CH] = (uint8_t)(t + 1); MTH->trk[t][MP_NOTE] = 60; MTH->trk[t][MP_VEL] = 100; MTH->trk[t][MP_GATE] = 4; MTH->trk[t][MP_OCT] = 3; MTH->trk2[t][TP_DENS - SQ_TP] = 127; MTH->trk2[t][TP_RATE - SQ_TP] = 5; MTH->trk2[t][TP_WARP - SQ_TP] = 64; } }
 void aos_mt_hit(int t, int vel, int rec) { (void)t; (void)vel; (void)rec; mt_hits++; }
 int aos_mt_active(int t) { (void)t; return 0; }
 void aos_seq_mod(int t, int w, int v) { (void)t; (void)w; (void)v; } int aos_seq_ext(void) { return 0; } int aos_seq_bpm10(void) { return 1200; }
-void aos_resample(int s, int n) { (void)s; (void)n; } int aos_resampling(void) { return 0; }
+int aos_resample(int n) { (void)n; return 80; } int aos_resampling(void) { return 0; }
+int aos_balloon_to_slot(int b) { (void)b; return 81; } int aos_slice(int b, uint8_t *st) { (void)b; (void)st; return 5; } int aos_bank5_free(void) { return 80; } int aos_bank5_take(int f) { (void)f; return 80; }
 void aos_seq_cushion(int b) { (void)b; } void aos_breathe(void) {}
 static int ready_slots[128];
-int16_t aos_mod_tp[8][48], aos_mod_fxk[8][6];
+int16_t aos_mod_tp[8][64], aos_mod_fxk[8][6];
 int aos_slot_ready_test(int slot) { return slot >= 0 && slot < 128 && ready_slots[slot]; }
 
 int main(void)
@@ -120,9 +121,9 @@ int main(void)
     CHECK(!(SQ_STEP(0, 0, 0)->flags & SF_ON) || 1, "(audio steps untouched)");
     /* a project keeps the MIDI tracks */
     hold(KEY_FUNC, 1); key(KEY_MIDI); hold(KEY_FUNC, 0); run(3);
-    key(KEY_PROJ); key(KEY_TRIG0 + 15); hold(KEY_FUNC, 1); key(KEY_YES); hold(KEY_FUNC, 0); key(KEY_YES); run(5); CHECK(proj_saved(15), "project 16 saved");
+    key(KEY_PROJ); key(KEY_TRIG0 + 7); hold(KEY_FUNC, 1); key(KEY_YES); hold(KEY_FUNC, 0); key(KEY_YES); run(5); CHECK(proj_saved(7), "project 8 saved");
     MT_STEP(0, 2, 0)->flags = 0; MTH->trk[2][MP_CH] = 1;
-    key(KEY_TRIG0 + 15); key(KEY_YES); run(5); CHECK((MT_STEP(0, 2, 0)->flags & SF_ON) && MTH->trk[2][MP_CH] == 4, "loading it brings the MIDI tracks back"); CHECK(!preset_mode, "the page closes after a load");
+    key(KEY_TRIG0 + 7); key(KEY_YES); run(5); CHECK((MT_STEP(0, 2, 0)->flags & SF_ON) && MTH->trk[2][MP_CH] == 4, "loading it brings the MIDI tracks back"); CHECK(!preset_mode, "the page closes after a load");
     /* ---- Dutch */
     key(KEY_FX2); CHECK(page == PG_SYSTEM, "FX2: SYSTEM"); key(KEY_FX2); CHECK(func_latch, "FX2 again: the second set"); module_enc(0, 1); CHECK(pv(PG_SYSTEM, 6) == 1, "knob A: LANG Dutch");
     CHECK(!strcmp(T("NEW SKY"), "NIEUWE LUCHT") && !strcmp(T("XYZ"), "XYZ"), "T(): translated, or itself");

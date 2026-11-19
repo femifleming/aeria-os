@@ -14,14 +14,15 @@ static uint8_t fake_battery[0x4800] __attribute__((aligned(4)));   /* the store:
 static uint8_t fake_old_store[0x2400] __attribute__((aligned(4)));  /* the older store it looks in once (empty here) */
 #define SNAP_BASE ((uintptr_t)fake_battery)
 /* 12 Nov 2026: more battery RAM the UI reads at fixed addresses; manual_shots.sh points each at one of these in its copy */
-static uint8_t fake_proj[16 * 0x8000] __attribute__((aligned(4)));   /* PROJ_BASE 0x10040000: sixteen projects of 32 KB */
-static uint8_t fake_seq[0x6400] __attribute__((aligned(4)));         /* SEQ_BASE 0x100C0000: the sequencer's head and steps */
-static uint8_t fake_mt[0x4400] __attribute__((aligned(4)));          /* MT_BASE 0x100C8000: the MIDI tracks' head and steps (15 Nov 2026) */
+static uint8_t fake_proj[8 * 0x18000] __attribute__((aligned(4)));
+static uint8_t fake_mark[16] __attribute__((aligned(4)));   /* PROJ_BASE 0x10040000: sixteen projects of 32 KB */
+static uint8_t fake_seq[0xC400] __attribute__((aligned(4)));         /* SEQ_BASE 0x100C0000: the sequencer's head and steps */
+static uint8_t fake_mt[0x8400] __attribute__((aligned(4)));          /* MT_BASE 0x100C8000: the MIDI tracks' head and steps (15 Nov 2026) */
 static uint8_t fake_proj_midi[16 * 0x4000] __attribute__((aligned(4)));   /* PROJ_MIDI_BASE: each project's MIDI steps */
 static uint8_t fake_scenes[0x1000] __attribute__((aligned(4)));      /* SCENE_STORE 0x100E8000 */
 static uint8_t fake_loaded[0x300] __attribute__((aligned(4)));       /* LOADED_AT 0x100FBA00 */
 static uint8_t fake_mods[0x100] __attribute__((aligned(4)));         /* MODS 0x100EC000: the MOD matrix */
-static int8_t fake_sqsc[16 * 8 * 48] __attribute__((aligned(4)));    /* SQSC: the sequencer's scenes */
+static int8_t fake_sqsc[16 * 8 * 64] __attribute__((aligned(4)));    /* SQSC: the sequencer's scenes */
 static uint8_t fake_sqsc_head[16] __attribute__((aligned(4)));
 #include "aeria_manual_ui.c"
 void aos_route(int s, int on, const uint32_t g[4]) { (void)s; (void)on; (void)g; }
@@ -29,13 +30,14 @@ void aos_lorenz(int l, int r) { (void)l; (void)r; }
 void aos_wipe_all(void) {}
 void aos_seq_refresh(void) {}
 void aos_loop_restart(void) {}
-void aos_resample(int slot, int steps) { (void)slot; (void)steps; }
+int aos_resample(int steps) { (void)steps; return 80; }
 int aos_resampling(void) { return 0; }
+int aos_balloon_to_slot(int b) { (void)b; return 81; } int aos_slice(int b, uint8_t *st) { (void)b; (void)st; return 5; } int aos_bank5_free(void) { return 80; } int aos_bank5_take(int f) { (void)f; return 80; }
 int aos_seq_ca(int t, int n) { (void)t; (void)n; return -1; }
 int aos_verb_row(void) { return 0; }
 int aos_restoring(void) { return 0; }
-int16_t aos_mod_tp[8][48], aos_mod_fxk[8][6];
-void aos_mt_defaults(void) { memset(fake_mt, 0, sizeof fake_mt); fake_mt[0] = 'A'; fake_mt[1] = 'E'; fake_mt[2] = 'M'; fake_mt[3] = 'T'; fake_mt[4] = 1; for (int p = 0; p < 4; p++) for (int t = 0; t < 8; t++) fake_mt[8 + p * 8 + t] = 16; for (int t = 0; t < 8; t++) { fake_mt[40 + t * 16 + 0] = (uint8_t)(t + 1); fake_mt[40 + t * 16 + 1] = 60; fake_mt[40 + t * 16 + 2] = 100; fake_mt[40 + t * 16 + 3] = 4; fake_mt[40 + t * 16 + 6] = 3; fake_mt[168 + t * 16 + 2] = 127; fake_mt[168 + t * 16 + 7] = 5; fake_mt[168 + t * 16 + 8] = 64; } }
+int16_t aos_mod_tp[8][64], aos_mod_fxk[8][6];
+void aos_mt_defaults(void) { memset(fake_mt, 0, sizeof fake_mt); fake_mt[0] = 'A'; fake_mt[1] = 'E'; fake_mt[2] = 'M'; fake_mt[3] = 'T'; fake_mt[4] = 2; for (int p = 0; p < 4; p++) for (int t = 0; t < 8; t++) fake_mt[8 + p * 8 + t] = 16; for (int t = 0; t < 8; t++) { fake_mt[40 + t * 16 + 0] = (uint8_t)(t + 1); fake_mt[40 + t * 16 + 1] = 60; fake_mt[40 + t * 16 + 2] = 100; fake_mt[40 + t * 16 + 3] = 4; fake_mt[40 + t * 16 + 6] = 3; fake_mt[168 + t * 16 + 2] = 127; fake_mt[168 + t * 16 + 7] = 5; fake_mt[168 + t * 16 + 8] = 64; } }
 void aos_mt_hit(int t, int vel, int rec) { (void)t; (void)vel; (void)rec; }
 int aos_mt_active(int t) { (void)t; return 0; }
 void aos_cue_chain(int on) { (void)on; }
@@ -93,8 +95,8 @@ void aos_seq_defaults(void)   /* as seq.c's */
 {
     SqHead *h = SQH;
     memset((void *)(uintptr_t)SEQ_BASE, 0, SEQ_HEAD_SIZE + SEQ_STEPS_SIZE);
-    h->ver = 2; h->swing = 50; h->duck_rel = 40;
-    for (int p = 0; p < SQ_PATTERNS; p++) { h->mlen[p] = 16; for (int t = 0; t < SQ_TRACKS; t++) h->len[p][t] = 16; }
+    h->ver = 3; h->swing = 50; h->duck_rel = 40;
+    for (int p = 0; p < SQ_PATTERNS; p++) { *sq_mlen_p(p) = 16; for (int t = 0; t < SQ_TRACKS; t++) *sq_len_p(p, t) = 16; }
     for (int t = 0; t < SQ_TRACKS; t++) {
         uint8_t *p = h->trk[t];
         p[TP_SMPL] = (uint8_t)(96 + t); p[TP_PTCH] = 64; p[TP_DEC] = 127; p[TP_VOL] = 100; p[TP_LP] = 127; p[TP_PAN] = 64;

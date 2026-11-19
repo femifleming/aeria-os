@@ -30,12 +30,20 @@ static uint32_t lfo_ph[3]; static int lfo_sh[3], lfo_sh_to[3];
 static void mod_init(void)
 {
     volatile ModStore *m = MODS;
-    if (m->magic[0] == 'A' && m->magic[1] == 'E' && m->magic[2] == 'M' && m->magic[3] == 'D' && m->ver == 1) return;
+    if (m->magic[0] == 'A' && m->magic[1] == 'E' && m->magic[2] == 'M' && m->magic[3] == 'D') {
+        if (m->ver == 2) return;
+        if (m->ver == 1) {                                                   /* (15 Nov 2026) TP_ALL grew from 48 to 64: a route to a track's knob keeps its knob */
+#ifdef SEQ_UI
+            for (int r = 0; r < N_ROUTES; r++) { uint16_t d = m->r[r].dest; if ((d >> 12) == MK_TRK) { int i = d & 0xFFF; m->r[r].dest = (uint16_t)(MK_TRK << 12 | ((i / 48) * TP_ALL + i % 48)); } }
+#endif
+            m->ver = 2; return;
+        }
+    }
     for (unsigned i = 0; i < sizeof(ModStore); i++) ((volatile uint8_t *)m)[i] = 0;
     for (int i = 0; i < 3; i++) { m->lfo[i][0] = (uint8_t)(40 + 15 * i); m->lfo[i][1] = (uint8_t)i; }
     m->lz[0] = 44; m->lz[1] = 38; m->lz[2] = 76;
     m->flk[0] = 50; m->flk[1] = 64; m->flk[2] = 40;
-    m->magic[0] = 'A'; m->magic[1] = 'E'; m->magic[2] = 'M'; m->magic[3] = 'D'; m->ver = 1;
+    m->magic[0] = 'A'; m->magic[1] = 'E'; m->magic[2] = 'M'; m->magic[3] = 'D'; m->ver = 2;
 }
 /* ---- the sources ---- */
 static uint32_t pow2_q8(int e) { uint32_t w = 1u << (e >> 8); return w + (w * (uint32_t)(e & 255)) / 256u; }   /* 2^(e/256), between octaves a line */
@@ -167,6 +175,10 @@ static void sqsc_init(void)
 {
     volatile uint8_t *h = SQSC_HEAD;
     if (h[0] == 'A' && h[1] == 'E' && h[2] == 'S' && h[3] == 'C' && h[4] == TP_ALL) return;
+    if (h[0] == 'A' && h[1] == 'E' && h[2] == 'S' && h[3] == 'C' && h[4] == 48 && TP_ALL == 64) {   /* (15 Nov 2026) the scenes of before, widened from the back */
+        for (int i = N_SCENES * SQ_TRACKS - 1; i >= 0; i--) { for (int tp = 63; tp >= 48; tp--) SQSC[i * 64 + tp] = -1; for (int tp = 47; tp >= 0; tp--) SQSC[i * 64 + tp] = SQSC[i * 48 + tp]; }
+        h[4] = TP_ALL; return;
+    }
     for (int i = 0; i < N_SCENES * SQ_TRACKS * TP_ALL; i++) SQSC[i] = -1;
     h[0] = 'A'; h[1] = 'E'; h[2] = 'S'; h[3] = 'C'; h[4] = TP_ALL;
 }

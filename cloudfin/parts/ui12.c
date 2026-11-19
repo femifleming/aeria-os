@@ -579,8 +579,10 @@ static void module_draw_body(unsigned char *frame)
 #ifdef DREAM_SKY
     dream_sky_draw();                                          /* a visit from the dream log, now and then */
 #endif
-    if (page == PG_STARS && !br_mode) draw_stars();
-    if (src_balloons || page == PG_BALLOON) draw_balloons();
+    /* (19 Nov 2026) a page's own view only while the page is up: after NO the constellation (and its BANK / RING line)
+     * stayed on the screen in place of the sky -- found in the simulator. Balloons that sing as a source stay. */
+    if (page == PG_STARS && !br_mode && ticks <= ui_until) draw_stars();
+    if (src_balloons || (page == PG_BALLOON && ticks <= ui_until)) draw_balloons();
     draw_page();
     draw_hud();
     if (flash) for (int x = 0; x < W; x++) span(x, 0, H - 1, 3);
@@ -614,6 +616,9 @@ static void toggle_bypass(int s)
 }
 static void select_slot(int s) { sel_slot = s; shelf_open = 0; page = PG_CHAIN; say(slots[s].row > 0 ? slots[s].name : "EMPTY", 0); }
 
+#ifdef AERIAOS
+static uint8_t overlay_on_page;   /* OUT / the GRAIN CLOUD opened over a page that was up (1) or over the sky alone (0) */
+#endif
 int module_key(int code, int pressed)
 {
     last_input = ticks;
@@ -653,8 +658,11 @@ int module_key(int code, int pressed)
     if (seq_key(code, pressed)) return 1;                      /* FUNC + MIDI: the sequencer; in it, its own keys */
 #endif
 #ifdef AERIAOS
-    if (code == KEY_CUE && !br_mode) { if (pressed) { out_open = !out_open; cloud_open = 0; shelf_open = 0; say(out_open ? "OUT" : page_name[page], 0); } return 1; }
-    if (code == KEY_REC && !br_mode) { if (pressed) { cloud_open = !cloud_open; out_open = 0; say(cloud_open ? "GRAIN CLOUD" : page_name[page], 0); } return 1; }
+    /* (19 Nov 2026) OUT and the GRAIN CLOUD open over the page that was up -- or over the sky alone; closing them (the key
+     * again, or NO) goes back to exactly that. They used to bring back the last page even when NO had already put it
+     * away (found in the simulator: NO from OUT showed SYSTEM or GUMBALLS). */
+    if (code == KEY_CUE && !br_mode) { if (pressed) { if (!out_open && !cloud_open) overlay_on_page = ui_was_showing; out_open = !out_open; cloud_open = 0; shelf_open = 0; if (!out_open && !overlay_on_page) ui_until = 0; say(out_open ? "OUT" : page_name[page], 0); } return 1; }
+    if (code == KEY_REC && !br_mode) { if (pressed) { if (!out_open && !cloud_open) overlay_on_page = ui_was_showing; cloud_open = !cloud_open; out_open = 0; if (!cloud_open && !overlay_on_page) ui_until = 0; say(cloud_open ? "GRAIN CLOUD" : page_name[page], 0); } return 1; }
 #endif
 #ifdef AERIAOS
     /* the transport in the sky (12 Nov 2026): on LOOP, PLAY starts the loop from its start and STOP stops it; on any
@@ -702,7 +710,7 @@ int module_key(int code, int pressed)
     }
 #ifdef AERIAOS
     if (intro >= INTRO_LEN && preset_key(code, pressed)) return 1;
-    if ((out_open || cloud_open) && pressed && code == KEY_NO && !func_held) { out_open = cloud_open = 0; say(page_name[page], 0); return 1; }
+    if ((out_open || cloud_open) && pressed && code == KEY_NO && !func_held) { out_open = cloud_open = 0; if (!overlay_on_page) ui_until = 0; say(page_name[page], 0); return 1; }
     if (out_open && out_key(code, pressed)) return 1;
     if (page == PG_MIDI && midi_mod >= 2 && pressed && !out_open && !cloud_open && (midi_mod == 2 ? marbles_key(code) : pong_key(code))) return 1;
     if (page == PG_MASTER && pressed && !out_open && !cloud_open && !br_mode && master_key(code)) return 1;

@@ -26,20 +26,20 @@
 #if defined(AERIAOS) && (defined(__m68k__) || defined(SEQ_HOST))
 static int layer(void);
 static void upper(const char *in, char *out, int max);
-enum { SV_GRID, SV_MIXER, SV_MASTER };
+enum { SV_GRID, SV_MIXER, SV_MASTER, SV_SONG };   /* SONG (16 Nov 2026): the rows of the arrangement, FUNC + PAGE */
 enum { SQP_SRC, SQP_AMP, SQP_MOD, SQP_FLT, SQP_GEN, SQP_MIDI, SQP_FX, SQP_PTN, SQP_STEP, SQP_RVB, SQP_N };   /* RVB: FUNC + FX2, the reverb bus (15 Nov 2026) */   /* SRC..MIDI can be locked on a step */
 static const char *const sq_page_name[SQP_N] = {"SRC", "AMP", "MOD", "FLT", "GEN", "MIDI", "FX", "PTN", "STEP", "RVB"};
 enum { SP_NONE = -1, SP_LEN = -2, SP_MLEN = -3, SP_SWNG = -4, SP_TMPO = -5, SP_DSRC = -6, SP_DREL = -7,
        SP_VEL = -8, SP_MICR = -9, SP_PROB = -10, SP_COND = -11, SP_RTCH = -12, SP_SREV = -13, SP_CURV = -14 };
 enum { SP_SYNC = -3 - 100, SP_PCCH = -4 - 100, SP_NIN = -5 - 100, SP_CLK = -6 - 100, SP_CAMT = -7 - 100, SP_CSED = -8 - 100,
-       SP_RON = -9 - 100, SP_RDEC = -10 - 100, SP_RTON = -11 - 100, SP_RMOD = -12 - 100, SP_RLEV = -13 - 100 };   /* the reverb bus: on, VERB's DECY TONE MOD, the return */   /* (kept apart from the step's own: these are the pattern page's kind) */
+       SP_RON = -9 - 100, SP_RDEC = -10 - 100, SP_RTON = -11 - 100, SP_RMOD = -12 - 100, SP_RLEV = -13 - 100, SP_RSRC = -14 - 100 };   /* RSRC: what resampling records */   /* the reverb bus: on, VERB's DECY TONE MOD, the return */   /* (kept apart from the step's own: these are the pattern page's kind) */
 typedef struct { const char *lab; int8_t tp; uint8_t lo, hi; } SqP;
 static const SqP sq_par[SQP_N][12] = {
-    {{"SMPL", TP_SMPL, 0, 127}, {"PTCH", TP_PTCH, 28, 100}, {"STRT", TP_STRT, 0, 127}, {"REV", TP_REV, 0, 1}, {"MACH", TP_MACH, 0, SQM_N - 1}, {"SLIP", TP_SLIP, 0, 127}, {"RTIO", TP_FMR, 1, 127}, {"INDX", TP_FMI, 0, 127}, {"IDEC", TP_FMD, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"SMPL", TP_SMPL, 0, 127}, {"PTCH", TP_PTCH, 28, 100}, {"STRT", TP_STRT, 0, 127}, {"REV", TP_REV, 0, 1}, {"MACH", TP_MACH, 0, SQM_N - 1}, {"SLIP", TP_SLIP, 0, 127}, {"RTIO", TP_FMR, 1, 127}, {"INDX", TP_FMI, 0, 127}, {"IDEC", TP_FMD, 0, 127}, {"VLP", TP_VLP, 0, 127}, {"VPT", TP_VPT, 0, 127}, {"RSRC", SP_RSRC, 0, 2}},
     {{"ATK", TP_ATK, 0, 127}, {"DEC", TP_DEC, 0, 127}, {"VOL", TP_VOL, 0, 127}, {"PAN", TP_PAN, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"PENV", TP_PENV, 0, 127}, {"PDEC", TP_PDEC, 0, 127}, {"DUCK", TP_DUCK, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
-    {{"WAVE", TP_MODW, 0, 2}, {"DEST", TP_LFOD, 0, 8}, {"RATE", TP_LFOR, 0, 127}, {"DPTH", TP_LFOA, 0, 127}, {"PENV", TP_PENV, 0, 127}, {"PDEC", TP_PDEC, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"WAVE", TP_MODW, 0, 2}, {"DEST", TP_LFOD, 0, 8}, {"RATE", TP_LFOR, 0, 127}, {"DPTH", TP_LFOA, 0, 127}, {"PENV", TP_PENV, 0, 127}, {"PDEC", TP_PDEC, 0, 127}, {"FENV", TP_FENV, 0, 127}, {"FDEC", TP_FDEC, 0, 127}, {"EUC", TP_EUC, 0, 64}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},   /* (16 Nov 2026) the filter envelope; EUC hits over the track's length */
     {{"HP", TP_HP, 0, 127}, {"LP", TP_LP, 0, 127}, {"DLY", TP_DLY, 0, 127}, {"OUT", TP_OUT, 0, 4}, {"DUCK", TP_DUCK, 0, 127}, {"Y", TP_Y, 1, 127}, {"MAIN", TP_MOUT, 0, 4}, {"CUE", TP_COUT, 0, 4}, {"PHNS", TP_HOUT, 0, 4}, {"RVB", TP_RVB, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
-    {{"DENS", TP_DENS, 0, 127}, {"DIR", TP_DIR, 0, 4}, {"ROT", TP_ROT, 0, 63}, {"WARP", TP_WARP, 0, 127}, {"RATE", TP_RATE, 0, SQ_RATES - 1}, {"SHUF", TP_SHUF, 0, 127}, {"RULE", TP_CAR, 0, 127}, {"SEED", TP_CSD, 0, 127}, {"CAMD", TP_CAM, 0, 3}, {"FREE", TP_FREE, 0, 1}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+    {{"DENS", TP_DENS, 0, 127}, {"DIR", TP_DIR, 0, 4}, {"ROT", TP_ROT, 0, 63}, {"WARP", TP_WARP, 0, 127}, {"RATE", TP_RATE, 0, SQ_RATES - 1}, {"SHUF", TP_SHUF, 0, 127}, {"RULE", TP_CAR, 0, 127}, {"SEED", TP_CSD, 0, 127}, {"CAMD", TP_CAM, 0, 3}, {"FREE", TP_FREE, 0, 1}, {"HUMT", TP_HUMT, 0, 127}, {"HUMV", TP_HUMV, 0, 127}},
     {{"MCH", TP_MCH, 0, 16}, {"NOTE", TP_MNOT, 0, 127}, {"CHRD", TP_CHRD, 0, SQ_CHORDS - 1}, {"GATE", TP_GATE, 1, 127}, {"PROG", TP_PROG, 0, 128}, {"", SP_NONE, 0, 0},
      {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
     {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
@@ -56,7 +56,7 @@ static const SqP mt_par[SQP_N][12] = {
     {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
     {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
     {{"DENS", MP2(TP_DENS), 0, 127}, {"DIR", MP2(TP_DIR), 0, 4}, {"ROT", MP2(TP_ROT), 0, 63}, {"WARP", MP2(TP_WARP), 0, 127}, {"RATE", MP2(TP_RATE), 0, SQ_RATES - 1}, {"", SP_NONE, 0, 0},
-     {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
+     {"HUMT", MP_HUMT, 0, 127}, {"HUMV", MP_HUMV, 0, 127}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
     {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
     {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
     {{"LEN", SP_LEN, 1, 64}, {"PLEN", SP_MLEN, 1, 64}, {"SWNG", SP_SWNG, 50, 80}, {"TMPO", SP_TMPO, 60, 187}, {"DSRC", SP_DSRC, 0, 7}, {"DREL", SP_DREL, 0, 127}, {"CLK", SP_CLK, 0, 6}, {"CAMT", SP_CAMT, 0, 127}, {"CSED", SP_CSED, 0, 127}, {"SYNC", SP_SYNC, 0, 2}, {"PCCH", SP_PCCH, 0, 16}, {"NIN", SP_NIN, 0, 1}},
@@ -64,7 +64,21 @@ static const SqP mt_par[SQP_N][12] = {
     {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},
 };
 static uint8_t sq_bank;                  /* 0 the audio tracks, 1 the MIDI tracks */
-static const SqP *sq_param(int pg, int i) { return sq_bank ? &mt_par[pg][i] : &sq_par[pg][i]; }
+/* (16 Nov 2026) the SRC page's second set begins with the machine's own three knobs */
+static const SqP mk_par[SQM_N][3] = {
+    {{"SLCS", TP_SLCS, 0, 64}, {"SLIC", TP_SLIC, 0, 64}, {"LEN", TP_LEN, 0, 127}},     /* SMPL: equal slices, which one, how much of it */
+    {{"WAVE", TP_WAVE, 0, 3}, {"DTUN", TP_DTUN, 0, 127}, {"SUB2", TP_SUB2, 0, 127}},   /* SUB: the wave, a second oscillator's detune and level */
+    {{"RTIO", TP_FMR, 1, 127}, {"INDX", TP_FMI, 0, 127}, {"IDEC", TP_FMD, 0, 127}},    /* FM */
+    {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},                   /* NOIS: PTCH is its colour */
+    {{"BRGT", TP_FMI, 0, 127}, {"DAMP", TP_FMD, 0, 127}, {"", SP_NONE, 0, 0}},         /* PLUK */
+    {{"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},                   /* MIDI */
+    {{"TIN", TP_TIN, 0, 2}, {"", SP_NONE, 0, 0}, {"", SP_NONE, 0, 0}},                 /* THRU: which inputs */
+};
+static const SqP *sq_param(int pg, int i)
+{
+    if (!sq_bank && pg == SQP_SRC && i >= 6 && i < 9) { int m = SQH->trk[SQH->sel & 7][TP_MACH]; return &mk_par[m < SQM_N ? m : 0][i - 6]; }
+    return sq_bank ? &mt_par[pg][i] : &sq_par[pg][i];
+}
 static uint8_t *sq_val_ptr(int t, int tp) { return sq_bank ? (tp < 16 ? &MTH->trk[t & 7][tp & 15] : &MTH->trk2[t & 7][(tp - 16) & 15]) : sq_tp(t, tp); }
 /* a MIDI step read as an audio step (its one lock in the first place) and written back (the first lock kept) */
 static SqStep sq_tmp_step;
@@ -91,13 +105,15 @@ static const uint8_t sq_rtch[14] = {1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 24, 32, 48, 
 static int sq_rtch_i(int r) { int i = 0; while (i < 13 && sq_rtch[i] < r) i++; return i; }
 static uint8_t sq_page, sq_view, sq_rec, sq_spage, sq_pat_held, sq_cue_held, sq_fxlist, sq_fxrow, sq_turned, sq_lockpage = SQP_STEP, sq_restored;
 static uint16_t sq_held;                 /* the trigs held in GRID */
-static uint8_t sq_chain_n, sq_chain[8], sq_tempo_held, sq_scn_held;
+static uint8_t sq_chain_n, sq_chain[16], sq_tempo_held, sq_scn_held;
+static uint8_t sq_song_cur;              /* the song view's row in hand */
+static int16_t sq_rs_slot = -1; static uint8_t sq_rs_track;   /* a resample on its way: the slot it fills, the track that gets it */
 static SqStep sq_clip[SQ_TRACKS][SQ_STEPS]; static uint8_t sq_clip_len[SQ_TRACKS], sq_clip_kind;   /* copied: 1 a track, 2 a pattern */
 static int sq_sel(void) { return (sq_bank ? MTH->sel : SQH->sel) & 7; }
 static void sq_sel_set(int t) { if (sq_bank) MTH->sel = (uint8_t)(t & 7); else SQH->sel = (uint8_t)(t & 7); }
-static int sq_pat(void) { return SQH->pattern & 3; }
-static int sq_len(int t) { int l = sq_bank ? MTH->len[sq_pat()][t & 7] : SQH->len[sq_pat()][t & 7]; return l >= 1 && l <= SQ_STEPS ? l : 16; }
-static void sq_len_set(int t, int v) { if (sq_bank) MTH->len[sq_pat()][t & 7] = (uint8_t)v; else SQH->len[sq_pat()][t & 7] = (uint8_t)v; }
+static int sq_pat(void) { return SQH->pattern & 7; }
+static int sq_len(int t) { int l = sq_bank ? *mt_len_p(sq_pat(), t) : *sq_len_p(sq_pat(), t); return l >= 1 && l <= SQ_STEPS ? l : 16; }
+static void sq_len_set(int t, int v) { if (sq_bank) *mt_len_p(sq_pat(), t) = (uint8_t)v; else *sq_len_p(sq_pat(), t) = (uint8_t)v; }
 static void sq_tempo_set(int bpm) { Param *p = &P(PG_MASTER, 6); p->value = p->user = (int16_t)(clamp(bpm, 60, 187) - 60); }
 
 /* ---- what a value reads as ---- */
@@ -140,7 +156,14 @@ static void sq_text(int tp, int v, char *n)
     case TP_HP: if (!v) sq_cat(n, "OFF"); else { int h = sq_hz(v); if (h >= 1000) { num(n, h / 1000); sq_cat(n, "K"); { char d[4]; num(d, h % 1000 / 100); sq_cat(n, d); } } else num(n, h); } break;
     case TP_LP: if (v >= 127) sq_cat(n, "OPEN"); else { int h = sq_hz(v); if (h >= 1000) { num(n, h / 1000); sq_cat(n, "K"); { char d[4]; num(d, h % 1000 / 100); sq_cat(n, d); } } else num(n, h); } break;
     case TP_REV: case TP_FREE: case SP_SREV: sq_cat(n, v ? "ON" : "OFF"); break;
-    case TP_MACH: { static const char *const m[SQM_N] = {"SMPL", "SUB", "FM", "NOIS", "PLUK", "MIDI"}; sq_cat(n, m[clamp(v, 0, SQM_N - 1)]); } break;
+    case TP_MACH: { static const char *const m[SQM_N] = {"SMPL", "SUB", "FM", "NOIS", "PLUK", "MIDI", "THRU"}; sq_cat(n, m[clamp(v, 0, SQM_N - 1)]); } break;
+    case SP_RSRC: { static const char *const r[3] = {"MAIN", "IN AB", "IN CD"}; sq_cat(n, r[clamp(v, 0, 2)]); } break;
+    case TP_TIN: { static const char *const r[3] = {"IN AB", "IN CD", "BOTH"}; sq_cat(n, r[clamp(v, 0, 2)]); } break;
+    case TP_WAVE: { static const char *const r[4] = {"SINE", "TRI", "SAW", "SQR"}; sq_cat(n, r[clamp(v, 0, 3)]); } break;
+    case TP_FENV: if (!v || v == 64) sq_cat(n, "NONE"); else { n[0] = v > 64 ? '+' : '-'; n[1] = 0; num(n + 1, v > 64 ? v - 64 : 64 - v); } break;
+    case TP_EUC: if (!v) sq_cat(n, "OFF"); else num(n, v); break;
+    case TP_SLCS: if (v < 2) sq_cat(n, "OFF"); else num(n, v); break;
+    case TP_LEN: if (!v) sq_cat(n, "ALL"); else num(n, v); break;
     case TP_OUT: sq_cat(n, v == 1 ? "CUE" : v == 2 ? "BOTH" : v == 3 ? "QUAD" : v == 4 ? "EACH" : "MAIN"); break;
     case TP_MOUT: case TP_COUT: case TP_HOUT: { static const char *const o[5] = {"OFF", "L", "R", "L+R", "ST"}; sq_cat(n, o[clamp(v, 0, 4)]); } break;
     case TP_Y: if (!v) v = 64; if (v == 64) sq_cat(n, "MID"); else { n[0] = v < 64 ? 'F' : 'B'; num(n + 1, v < 64 ? 64 - v : v - 64); } break;
@@ -244,7 +267,7 @@ static void sq_fx_text(int t, int k, int v, char *n)
 }
 
 /* ---- reading and writing a knob ---- */
-static int sq_lockable(int pg) { return sq_bank ? pg == SQP_SRC : (pg == SQP_SRC || pg == SQP_AMP || pg == SQP_FLT || pg == SQP_MIDI); }   /* MOD and GEN are the whole track's */
+static int sq_lockable(int pg) { return sq_bank ? pg == SQP_SRC : (pg == SQP_SRC || pg == SQP_AMP || pg == SQP_FLT || pg == SQP_MIDI || pg == SQP_FX); }   /* MOD and GEN are the whole track's; FX: the effect's knobs (15 Nov 2026) */
 static int sq_shown_page(void) { return sq_held ? sq_lockpage : sq_page; }
 static int sq_first_held(void) { for (int k = 0; k < 16; k++) if ((sq_held >> k) & 1) return sq_spage * 16 + k; return -1; }
 static int sq_lock_of(const SqStep *s, int tp) { for (int k = 0; k < SQ_LOCKS; k++) if (s->lp[k] == tp + 1) return s->lv[k]; return -1; }
@@ -254,11 +277,12 @@ static int sq_get(int pg, int i)
     const SqP *p = sq_param(pg, i);
     int st = sq_first_held();
     const SqStep *s = st >= 0 ? sq_step_get(sq_pat(), t, st) : 0;
-    if (pg == SQP_FX) return sq_bank ? 0 : h->fx_knob[t][i];
+    if (pg == SQP_FX) { if (sq_bank) return 0; if (s) { int l = sq_lock_of(s, TP_FXK + i); if (l >= 0) return l; } return h->fx_knob[t][i]; }
     switch (p->tp) {
     case SP_NONE: return 0;
     case SP_LEN: return sq_len(t);
-    case SP_MLEN: return h->mlen[sq_pat()] ? h->mlen[sq_pat()] : 16;
+    case SP_MLEN: { int v = *sq_mlen_p(sq_pat()); return v >= 1 && v <= SQ_STEPS ? v : 16; }
+    case SP_RSRC: return h->rs_src > 2 ? 0 : h->rs_src;
     case SP_SWNG: return clamp(h->swing, 50, 80);
     case SP_CLK: return h->curv > 6 ? 0 : h->curv;
     case SP_CAMT: return h->camt & 127;
@@ -281,6 +305,7 @@ static int sq_get(int pg, int i)
     case SP_SREV: return s ? (s->flags & SF_REV) != 0 : 0;
     }
     if (s) { int l = sq_lock_of(s, p->tp); if (l >= 0) return l; }
+    if (p->tp == TP_FENV && !*sq_val_ptr(t, p->tp)) return 64;             /* none sits in the middle */
     return *sq_val_ptr(t, p->tp);
 }
 static void sq_say(int pg, int i, int v)
@@ -317,7 +342,16 @@ static void sq_turn(int pg, int i, int delta)
         const FxInfo *fi = &fx_info[row - 1];
         if (i >= 6 && !fi->knob2[i - 6][0]) return;
         int c = i < 6 ? fi->count[i] : fi->count2[i - 6]; if (c < 2) c = 128;
-        int v = clamp(h->fx_knob[t][i] + (c <= 16 ? (delta > 0 ? 1 : -1) : delta), 0, c - 1);
+        int v = clamp(sq_get(pg, i) + (c <= 16 ? (delta > 0 ? 1 : -1) : delta), 0, c - 1);
+        if (sq_held) {                                             /* (15 Nov 2026) the held steps: a lock on the effect's knob */
+            sq_turned = 1;
+            for (int k = 0; k < 16; k++) if ((sq_held >> k) & 1) {
+                int n = sq_spage * 16 + k; SqStep *s = sq_step_get(sq_pat(), t, n); s->flags |= SF_ON;
+                if (!sq_lock_set(s, TP_FXK + i, v)) { say("3 LOCKS", "A STEP"); return; }
+                sq_step_put(sq_pat(), t, n, s);
+            }
+            sq_say(pg, i, v); return;
+        }
         h->fx_knob[t][i] = (uint8_t)v; sq_say(pg, i, v);
         return;
     }
@@ -352,7 +386,8 @@ static void sq_turn(int pg, int i, int delta)
     }
     switch (p->tp) {
     case SP_LEN: sq_len_set(t, v); if (sq_spage * 16 >= v) sq_spage = (uint8_t)((v - 1) / 16); break;
-    case SP_MLEN: h->mlen[sq_pat()] = (uint8_t)v; break;
+    case SP_MLEN: *sq_mlen_p(sq_pat()) = (uint8_t)v; break;
+    case SP_RSRC: h->rs_src = (uint8_t)v; break;
     case SP_SWNG: h->swing = (uint8_t)v; break;
     case SP_CLK: h->curv = (uint8_t)v; break;
     case SP_CAMT: h->camt = (uint8_t)v; break;
@@ -400,11 +435,37 @@ static void seq_ui_tick(void)
         if (h->magic[0] == 'A' && h->magic[1] == 'E' && h->magic[2] == 'S' && h->magic[3] == 'Q' && h->mode == 1) { seq_on = 1; aos_seq_mode(1); }
     }
     aos_seq_tempo(master_bpm() * 10);
+    if (sq_rs_slot >= 0 && !aos_resampling()) {                   /* the take is in: the track plays it */
+        if (aos_slot_ready(sq_rs_slot)) { SQH->trk[sq_rs_track & 7][TP_SMPL] = (uint8_t)sq_rs_slot; static char n[8]; sq_text(TP_SMPL, sq_rs_slot, n); say("TRACK HAS", n); }
+        sq_rs_slot = -1;
+    }
     aos_seq_cushion(br_mode || preset_mode);
     aos_seq_live(sq_rec);
     if (seq_on && !aos_seq_is()) aos_seq_mode(1);
 }
 
+/* (15 Nov 2026) a sample of bank 5 goes onto the track in hand (the browser's single file, a balloon, a resample) */
+static int sq_single_sample(int slot)
+{
+    if (sq_bank || slot < 80 || slot > 95) return 0;
+    SQH->trk[sq_sel()][TP_SMPL] = (uint8_t)slot;
+    static char n[8]; sq_text(TP_SMPL, slot, n); say("TRACK HAS", n);
+    return 1;
+}
+/* found sound: balloon b cut into bank 5; the track in hand plays the slices in a row, one a step */
+static void sq_slice_balloon(int b)
+{
+    if (sq_bank) { say("AUDIO TRACKS", "ONLY"); return; }
+    int n = aos_slice(b, 0);
+    if (!n) { say("NOTHING", "TO SLICE"); return; }
+    int t = sq_sel(), p = sq_pat();
+    SQH->trk[t][TP_SMPL] = 80; SQH->trk[t][TP_MACH] = SQM_SMPL;
+    for (int k = 0; k < SQ_STEPS; k++) { SqStep *s = SQ_STEP(p, t, k); for (unsigned q = 0; q < sizeof(SqStep); q++) ((uint8_t *)s)[q] = 0; }
+    int steps = n > 16 ? 16 : n;
+    for (int k = 0; k < steps; k++) { SqStep *s = SQ_STEP(p, t, k); s->flags = SF_ON; s->vel = 100; s->lp[0] = TP_SMPL + 1; s->lv[0] = (uint8_t)(80 + k); }
+    *sq_len_p(p, t) = (uint8_t)steps; sq_spage = 0;
+    static char nn[6]; num(nn, n); say("SLICES", nn);
+}
 /* ---- keys ---- */
 static void sq_step_tap(int n)
 {
@@ -415,6 +476,29 @@ static void sq_step_tap(int n)
 }
 static int seq_key(int code, int pressed)
 {
+    if (seq_on && sq_view == SV_SONG && !preset_mode && !br_mode) {        /* (16 Nov 2026) the song's rows */
+        SqHead *h = SQH; int n = h->song_n;
+        if (code == KEY_FUNC || code == KEY_PLAY || code == KEY_STOP || code == KEY_PATTERN || code == 0x18 || code == KEY_LEVEL_PUSH) { /* as always */ }
+        else if (!pressed) return 1;
+        else if (code == KEY_NO || code == KEY_PAGE) { sq_view = SV_GRID; say("SEQUENCER", 0); return 1; }
+        else if (code == KEY_UP) { if (sq_song_cur > 0) sq_song_cur--; if (!aos_seq_playing()) h->song_row = sq_song_cur; return 1; }
+        else if (code == KEY_DOWN) { if (sq_song_cur + 1 < n) sq_song_cur++; if (!aos_seq_playing()) h->song_row = sq_song_cur; return 1; }
+        else if (code == KEY_YES && !func_held) {
+            if (n >= SQ_SONG_MAX) { say("SONG FULL", 0); return 1; }
+            int at = n ? sq_song_cur + 1 : 0;
+            for (int k = n; k > at; k--) { h->song[k][0] = h->song[k - 1][0]; h->song[k][1] = h->song[k - 1][1]; }
+            h->song[at][0] = n ? h->song[at - 1][0] : (uint8_t)sq_pat(); h->song[at][1] = n ? h->song[at - 1][1] : 4;
+            h->song_n = (uint8_t)(n + 1); sq_song_cur = (uint8_t)at; if (!aos_seq_playing()) h->song_row = sq_song_cur;
+            say("ROW ADDED", 0); return 1;
+        }
+        else if (code == KEY_YES && func_held) {
+            if (n) { for (int k = sq_song_cur; k + 1 < n; k++) { h->song[k][0] = h->song[k + 1][0]; h->song[k][1] = h->song[k + 1][1]; } h->song_n = (uint8_t)(n - 1); if (sq_song_cur >= h->song_n && sq_song_cur) sq_song_cur--; if (h->song_row >= h->song_n) h->song_row = 0; say("ROW REMOVED", 0); }
+            return 1;
+        }
+        else if (code >= KEY_TRIG0 && code < KEY_TRIG0 + SQ_PATTERNS) { if (n) { h->song[sq_song_cur][0] = (uint8_t)((h->song[sq_song_cur][0] & ~7) | (code - KEY_TRIG0)); static char nn[2]; nn[0] = (char)('A' + code - KEY_TRIG0); nn[1] = 0; say("ROW PATTERN", nn); } return 1; }
+        else if (code == KEY_SRC || code == KEY_AMP || code == KEY_LFO || code == KEY_FX1 || code == KEY_FX2 || code == KEY_ARR || code == KEY_BANK || code == KEY_MIDI || code == 0x30 || (code >= KEY_TRACK0 && code < KEY_TRACK0 + 8)) sq_view = SV_GRID;   /* a page key leaves the view and goes on to its page */
+        else return 1;                                                      /* the view holds the other keys */
+    }
     if (code == KEY_MIDI && func_held) { if (pressed) seq_enter(!seq_on); return 1; }
     if (!seq_on) return 0;
     if (code == KEY_MIDI && !pressed) return 1;
@@ -432,7 +516,20 @@ static int seq_key(int code, int pressed)
         else return 0;
     }
     if (code == KEY_YES && !pressed) { aos_seq_fill(0); return 1; }
-    if (code == KEY_PATTERN) { sq_pat_held = (uint8_t)pressed; if (pressed) { sq_chain_n = 0; say("PATTERN", "TRIG 1-4"); } else if (sq_chain_n > 1) { h->chain_n = sq_chain_n; for (int k = 0; k < 8; k++) h->chain[k] = sq_chain[k]; say("CHAIN", "SET"); } return 1; }
+    if (code == KEY_PATTERN) { sq_pat_held = (uint8_t)pressed; if (pressed) { sq_chain_n = 0; say("PATTERN", "TRIG 1-8"); } else if (sq_chain_n > 1) { h->chain_n = sq_chain_n; for (int k = 0; k < 16; k++) *sq_chain_p(k) = sq_chain[k]; say("CHAIN", "SET"); } return 1; }
+    if (code == KEY_REC_AB || code == KEY_REC_CD || code == KEY_REC3) {           /* (15 Nov 2026) balloons in the sequencer: catch, let float; FUNC: slice it onto the track; CUE: into the track whole */
+        int b = code == KEY_REC_AB ? 0 : code == KEY_REC_CD ? 1 : 2; Balloon *bl = &balloon[b];
+        if (!pressed) return 1;
+        if (func_held || sq_cue_held) {
+            if (bl->state != B_FLOATING) { say("BALLOON", "IS EMPTY"); return 1; }
+            if (func_held) sq_slice_balloon(b);
+            else { int slot = aos_balloon_to_slot(b); if (slot < 0) say("NO ROOM", "BANK 6"); else if (!sq_single_sample(slot)) say("AUDIO TRACKS", "ONLY"); }
+            return 1;
+        }
+        if (bl->state == B_FILLING) { bl->state = B_FLOATING; balloon_voice = b; AOS_BALLOON(b, 2); src_balloons = 1; say("BALLOON", b == 0 ? "1 UP" : b == 1 ? "2 UP" : "3 UP"); }
+        else { bl->state = B_FILLING; bl->size = 0; bl->y = WATER_Y - 12; AOS_BALLOON(b, 1); say("CATCHING", b == 0 ? "A B" : b == 1 ? "C D" : "THE MIX"); }
+        return 1;
+    }
     if (code == KEY_CUE) { sq_cue_held = (uint8_t)pressed; return 1; }
     /* the scene keys here: mute scenes. Hold one and a trig calls that scene's mutes; with FUNC it keeps the mutes as they are now */
     if (sq_scn_held && pressed && code == KEY_NO) {                 /* the scene forgets the track knobs it holds */
@@ -462,7 +559,7 @@ static int seq_key(int code, int pressed)
             return 1;
         }
         if (sq_pat_held) {
-            if (pressed && k < SQ_PATTERNS) { h->pattern = (uint8_t)k; h->chain_n = 0; if (sq_chain_n < 8) sq_chain[sq_chain_n++] = (uint8_t)k; static char n[2]; n[0] = (char)('A' + k); n[1] = 0; say("PATTERN", n); }
+            if (pressed && k < SQ_PATTERNS) { h->pattern = (uint8_t)k; h->chain_n = 0; if (sq_chain_n < 16) sq_chain[sq_chain_n++] = (uint8_t)k; static char n[2]; n[0] = (char)('A' + k); n[1] = 0; say("PATTERN", n); }
             return 1;
         }
         if (sq_view == SV_MIXER) {
@@ -523,6 +620,7 @@ static int seq_key(int code, int pressed)
         return 1;
     case KEY_SRC: case KEY_AMP: case KEY_LFO: case KEY_FX1: case KEY_FX2: case KEY_PAGE: case KEY_ARR: {
         if (code == KEY_FX2 && func_held && !sq_held) { if (sq_bank) return 1; sq_page = SQP_RVB; sq_view = SV_GRID; func_latch = 0; say("RVB BUS", SQH->rv_on ? "ON" : "OFF"); return 1; }   /* the reverb bus's page */
+        if (code == KEY_PAGE && func_held && !sq_held) { if (sq_bank) return 1; sq_view = SV_SONG; sq_song_cur = (uint8_t)(SQH->song_row < SQH->song_n ? SQH->song_row : 0); func_latch = 0; say("SONG", SQH->song_on ? "ON" : "OFF"); return 1; }   /* (16 Nov 2026) the song: FUNC + PAGE */
         if (code == KEY_LFO && func_held && !sq_held) { if (sq_bank) return 1; sq_page = SQP_MIDI; sq_view = SV_GRID; func_latch = 0; say("TRACK MIDI", 0); return 1; }   /* an audio track's own MIDI page (15 Nov 2026: FUNC + LFO) */
         if (sq_bank && (code == KEY_AMP || code == KEY_LFO || code == KEY_FX1 || code == KEY_FX2)) { say("MIDI TRACKS", "SRC GEN PTN"); return 1; }
         int pg = code == KEY_SRC ? SQP_SRC : code == KEY_AMP ? SQP_AMP : code == KEY_LFO ? SQP_MOD : code == KEY_FX1 ? SQP_FLT : code == KEY_FX2 ? SQP_FX : code == KEY_ARR ? SQP_GEN : SQP_PTN;
@@ -531,9 +629,11 @@ static int seq_key(int code, int pressed)
         else { sq_page = (uint8_t)pg; sq_view = SV_GRID; func_latch = 0; say(sq_page_name[pg], 0); }
         return 1; }
     case KEY_BANK:
-        if (func_held) {                                           /* the main output into sample 6.1, one pattern long from its next start */
-            if (aos_resampling()) { aos_resample(80, 0); say("RESAMPLE", "OFF"); }
-            else { aos_resample(80, h->mlen[sq_pat()] ? h->mlen[sq_pat()] : 16); say("RESAMPLE 6.1", "AT THE BAR"); }
+        if (func_held) {                                           /* what RSRC names, one pattern long from its next start, into the next slot of bank 5; the track then plays it */
+            if (aos_resampling()) { aos_resample(0); sq_rs_slot = -1; say("RESAMPLE", "OFF"); }
+            else if (sq_bank) say("AUDIO TRACKS", "ONLY");
+            else { int m = *sq_mlen_p(sq_pat()); int slot = aos_resample(m >= 1 && m <= SQ_STEPS ? m : 16);
+                   if (slot < 0) say("NO ROOM", "BANK 6"); else { sq_rs_slot = (int16_t)slot; sq_rs_track = (uint8_t)sq_sel(); static char n[12] = "RESAMPLE "; sq_text(TP_SMPL, slot, n + 9); say(n, "AT THE BAR"); } }
             return 1;
         }
         sq_view = sq_view == SV_MIXER ? SV_GRID : SV_MIXER; say(sq_view == SV_MIXER ? "MIXER" : "GRID", 0); return 1;
@@ -569,10 +669,20 @@ static int seq_enc(int e, int delta)
 {
     if (!seq_on || preset_mode || br_mode) return 0;
     if (sq_view == SV_MASTER) return e == 6;                       /* the master page's own knobs; LEVEL does nothing there */
+    if (sq_view == SV_SONG) {                                       /* (16 Nov 2026) the row in hand: pattern, times, mute scene; knob 4 the song on or off */
+        SqHead *h = SQH; static char n[8];
+        if (e == 3) { h->song_on = (uint8_t)(delta > 0); say("SONG", h->song_on ? "ON" : "OFF"); return 1; }
+        if (!h->song_n || e > 3) return 1;
+        uint8_t *r = h->song[sq_song_cur];
+        if (e == 0) { int p = clamp(SONG_PAT(r[0]) + (delta > 0 ? 1 : -1), 0, SQ_PATTERNS - 1); r[0] = (uint8_t)((r[0] & ~7) | p); n[0] = (char)('A' + p); n[1] = 0; say("PATTERN", n); }
+        else if (e == 1) { int v = clamp(r[1] + delta, 1, 64); r[1] = (uint8_t)v; num(n, v); say("TIMES", n); }
+        else if (e == 2) { int sc = clamp(SONG_SCN(r[0]) + (delta > 0 ? 1 : -1), 0, 16); r[0] = (uint8_t)((r[0] & 7) | sc << 3); if (sc) num(n, sc); say("MUTE SCENE", sc ? n : "NONE"); }
+        return 1;
+    }
     if (scene_held && e >= 0 && e < 6 && !sq_bank) {                /* a track knob into the scene that end holds */
         int pg = sq_shown_page(), i = e + (layer() && pg != SQP_STEP ? 6 : 0), t = sq_sel();
-        if (pg >= SQP_N || sq_par[pg][i].tp < 0 || sq_par[pg][i].tp >= TP_ALL) return 1;
-        const SqP *p = &sq_par[pg][i]; int sc = scene_held == 1 ? scene_a : scene_b;
+        if (pg >= SQP_N || sq_param(pg, i)->tp < 0 || sq_param(pg, i)->tp >= TP_ALL) return 1;
+        const SqP *p = sq_param(pg, i); int sc = scene_held == 1 ? scene_a : scene_b;
         volatile int8_t *v = sqsc(sc, t, p->tp);
         int cur = *v >= 0 ? *v : *sq_tp(t, p->tp), nv = clamp(cur + (p->hi - p->lo <= 16 ? (delta > 0 ? 1 : -1) : delta), p->lo, p->hi);
         *v = (int8_t)nv;
@@ -600,6 +710,24 @@ static int seq_enc(int e, int delta)
 
 /* ---- the screen ---- */
 static void sq_box(int x0, int y0, int x1, int y1) { for (int x = x0; x <= x1; x++) span(x, y0, y1, 1); }
+/* (16 Nov 2026) the song: five rows around the one in hand -- its number, pattern, how many times, the mute scene */
+static void sq_song_draw(void)
+{
+    const SqHead *h = SQH; char n[12]; int playing = aos_seq_playing();
+    text(1, 12, h->song_on ? "SONG ON" : "SONG OFF", 1); text(52, 12, "YES ADD  FUNC+YES DEL", 1);
+    int first = sq_song_cur > 2 ? sq_song_cur - 2 : 0;
+    for (int k = 0; k < 5 && first + k < h->song_n; k++) {
+        int r = first + k, y = 20 + k * 7; const uint8_t *row = h->song[r];
+        num(n, r + 1); text(6, y, n, 1);
+        n[0] = (char)('A' + SONG_PAT(row[0])); n[1] = 0; text(24, y, n, 1);
+        text(34, y, "X", 1); num(n, row[1]); text(41, y, n, 1);
+        if (SONG_SCN(row[0])) { text(60, y, "MUTES", 1); num(n, SONG_SCN(row[0])); text(94, y, n, 1); }
+        if (r == sq_song_cur) sq_box(1, y, 3, y + 4);
+        if (playing && h->song_on && r == h->song_row) { px(120, y + 1); px(121, y + 2); px(122, y + 3); px(121, y + 4); px(120, y + 5); }
+    }
+    if (!h->song_n) text(6, 27, "EMPTY: YES ADDS A ROW", 1);
+    text(1, 57, "PTN   TIMES  MUTES  ON/OFF", 1);
+}
 static void seq_draw(void)
 {
     const SqHead *h = SQH;
@@ -609,7 +737,7 @@ static void seq_draw(void)
     /* the top line: track, pattern (and the one coming), page of steps, tempo, the eight meters */
     n[0] = sq_bank ? 'M' : 'T'; n[1] = (char)('1' + t); n[2] = 0; text(1, 1, n, 1);
     n[0] = (char)('A' + (playing ? aos_seq_pat() : pat)); n[1] = 0; if (aos_seq_pat() != pat && playing) { n[1] = '>'; n[2] = (char)('A' + pat); n[3] = 0; } text(12, 1, n, 1);
-    if (h->chain_n) text(26, 1, "CH", 1);
+    if (h->song_on && h->song_n) text(26, 1, "SG", 1); else if (h->chain_n) text(26, 1, "CH", 1);
     { int pages = (sq_len(t) + 15) / 16; n[0] = (char)('1' + sq_spage); n[1] = '/'; n[2] = (char)('0' + pages); n[3] = 0; text(37, 1, n, 1); }
     num(n, aos_seq_ext() ? (aos_seq_bpm10() + 5) / 10 : master_bpm()); text(52, 1, n, 1);
     if (aos_seq_ext()) { px(50, 1); px(50, 3); px(50, 5); }           /* a clock from outside has the tempo */
@@ -621,7 +749,8 @@ static void seq_draw(void)
         if (muted) px(x + 1, 3); else { px(x, 7); px(x + 1, 7); px(x + 2, 7); if (lv) sq_box(x, 7 - lv, x + 2, 7); }
         if (k == t) { px(x, 0); px(x + 1, 0); px(x + 2, 0); }
     }
-    if (sq_view == SV_MIXER) {
+    if (sq_view == SV_SONG) sq_song_draw();
+    else if (sq_view == SV_MIXER) {
         /* eight strips: the meter, the volume's mark, M or S (the MIDI tracks: their channel and velocity) */
         for (int k = 0; k < 8; k++) {
             int x = 2 + k * 16, lv = sq_bank ? (aos_mt_active(k) ? 30 : 0) : aos_seq_peak(k) * 30 / 16, vol = (sq_bank ? MTH->trk[k][MP_VEL] : h->trk[k][TP_VOL]) * 30 / 127;
@@ -685,7 +814,13 @@ static void seq_draw(void)
     text(1, 40, sq_page_name[pg], 1);
     if (sq_held) { int st = sq_first_held(); text(22, 40, "STEP", 1); num(n, st + 1); text(40, 40, n, 1);
         const SqStep *s = sq_step_get(pat, t, st); int x = 52;
-        for (int k = 0; k < SQ_LOCKS; k++) if (s->lp[k] && s->lp[k] <= TP_ALL) { for (int a = 0; a < SQP_FX; a++) for (int b = 0; b < 12; b++) if (sq_param(a, b)->tp == s->lp[k] - 1) { text(x, 40, sq_param(a, b)->lab, 1); x += text_w(sq_param(a, b)->lab) + 4; a = SQP_FX; break; } } }
+        for (int k = 0; k < SQ_LOCKS; k++) {
+            if (s->lp[k] && s->lp[k] <= TP_ALL) { for (int a = 0; a < SQP_FX; a++) for (int b = 0; b < 12; b++) if (sq_param(a, b)->tp == s->lp[k] - 1) { text(x, 40, sq_param(a, b)->lab, 1); x += text_w(sq_param(a, b)->lab) + 4; a = SQP_FX; break; } }
+            else if (s->lp[k] > TP_FXK && s->lp[k] <= TP_FXK + 12 && !sq_bank) {   /* a lock on the effect's knob */
+                int row = h->fx_row[t], q = s->lp[k] - 1 - TP_FXK; const char *lab = row > 0 && row <= FX_COUNT ? (q < 6 ? fx_info[row - 1].knob[q] : fx_info[row - 1].knob2[q - 6]) : "FX";
+                if (lab && lab[0]) { text(x, 40, lab, 1); x += text_w(lab) + 4; }
+            }
+        } }
     else if (sq_bank) {                                            /* a MIDI track: its channel and note */
         text(22, 40, "CH", 1); if (MTH->trk[t][MP_CH]) num(n, MTH->trk[t][MP_CH]); else { n[0] = 'O'; n[1] = 'F'; n[2] = 'F'; n[3] = 0; } text(34, 40, n, 1);
         mt_text(MP_NOTE, clamp(MTH->trk[t][MP_NOTE] + (MTH->trk[t][MP_OCT] - 3) * 12, 0, 127), n); text(50, 40, n, 1);
@@ -704,7 +839,7 @@ static void seq_draw(void)
         n[5] = 0;
         text(1 + i * 21, 50, l4, 1); text(1 + i * 21, 57, n, 1);
         /* a value that is the step's own: underlined */
-        if (sq_held && sq_lockable(pg)) { const SqStep *s = sq_step_get(pat, t, sq_first_held()); if (sq_lock_of(s, sq_param(pg, i + lay)->tp) >= 0) for (int x = 1 + i * 21; x < 1 + i * 21 + 15; x++) px(x, 63); }
+        if (sq_held && sq_lockable(pg)) { const SqStep *s = sq_step_get(pat, t, sq_first_held()); int tp = pg == SQP_FX ? TP_FXK + i + lay : sq_param(pg, i + lay)->tp; if (sq_lock_of(s, tp) >= 0) for (int x = 1 + i * 21; x < 1 + i * 21 + 15; x++) px(x, 63); }
     }
     if (ticks < toast_until) {
         int x = (W - text_w(toast)) / 2;

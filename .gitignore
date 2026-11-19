@@ -12,3 +12,6 @@ __pycache__/
 *.wav
 *.dSYM/
 cloudfin/aeria12.c
+aeria-os/sim/aeria_sim
+aeria-os/sim/.build/
+aeria-os/sim/card.img

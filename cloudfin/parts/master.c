@@ -76,7 +76,8 @@ static int master_key(int code)
 {
     if (code >= KEY_TRIG0 && code < KEY_TRIG0 + 16) { Param *p = &P(PG_MASTER, 0); p->value = p->user = (int16_t)(code - KEY_TRIG0 + 1); char n[8]; num(n, p->value); int k = 0; while (n[k]) k++; n[k++] = '/'; n[k++] = '1'; n[k++] = '6'; n[k] = 0; say("DELAY TIME", n); return 1; }
     /* (YES froze it once: too easy to do by accident -- the crossfader at B is the only freeze now) */
-    if (code == KEY_NO) { master_tap(); return 1; }
+    /* (19 Nov 2026) NO is "back" here as everywhere else (it tapped the tempo: every attempt to leave the page moved the
+     * BPM -- found in the simulator). The TEMPO key taps. */
     return 0;
 }
 static void master_say(int i, int v, char *n)

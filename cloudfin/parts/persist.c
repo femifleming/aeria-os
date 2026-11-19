@@ -192,9 +192,11 @@ static int state_restored;
 static void scenes_load(void);
 static Snap snap_factory;   /* the sound as the OS is built (taken before the saved state goes on): INIT (13 Nov 2026) */
 static uint8_t factory_ok;
+static void proj_migrate(void);
 void aeria_state_restore(void)
 {
     snap_take(&snap_factory); factory_ok = 1;
+    proj_migrate();
     snap_bring_over();
     scenes_load();
     if (snap_valid(snap_slot(0))) { snap_fetch(0, &state_loaded); snap_apply(&state_loaded); state_sum = state_loaded.sum; state_had = 1; }
@@ -264,15 +266,29 @@ static int preset_mode, preset_cur = -1;
  * first, a second press at once the other --, 14 the digits (press again: the next), 15 space - _, 16 rubs out.
  * Any knob turns the letter under the cursor through them all; LEFT and RIGHT move the cursor; YES saves, NO gives up.
  * A new letter starts where the last one ended as soon as another trig is pressed or a moment has passed. */
+/* (15/16 Nov 2026, layout 3) eight projects of 0x18000 bytes from the bottom of battery RAM: the sound (+0x40), what is
+ * loaded (+0x800), the MIDI tracks' head (+0xB00), the scenes (+0x1010), the sequence's head (+0x1C00), its eight
+ * patterns (+0x2000, 48 KB), the MIDI tracks' eight patterns (+0xE000, 32 KB) and the track scenes (+0x16000, all 64
+ * knobs of 8 tracks in 16 scenes). The sixteen 32 KB projects of before (at 0x10040000) are brought over once, the
+ * first eight of them; a layout-2 set (0x17C00 a project, the mark 'PRJ2') is spread to this stride once. */
 #ifndef PROJ_BASE
-#define PROJ_BASE 0x10040000u
+#define PROJ_BASE 0x10000000u
 #endif
-#define PROJ_STRIDE 0x8000u
-#ifndef PROJ_MIDI_BASE
-#define PROJ_MIDI_BASE 0x10000000u   /* (15 Nov 2026) each project's MIDI tracks' steps: 16 KB a project, in the battery RAM below the projects */
+#define PROJ_STRIDE 0x18000u
+#define PROJ_STRIDE2 0x17C00u        /* layout 2's */
+#define PJ_ASTEPS 0x2000u
+#define PJ_MHEAD 0xB00u
+#define PJ_MSTEPS 0xE000u
+#define PJ_SQSC 0x16000u
+#define SQSC_KEEP TP_ALL             /* track parameters a project keeps a scene value for: all of them (16 Nov 2026) */
+#ifndef PROJ_MARK
+#define PROJ_MARK 0x100DFFF0u        /* 'PRJ3' once the layout is this one ('PRJ2': layout 2, to be spread) */
 #endif
+#define PROJ_OLD_BASE 0x10040000u
+#define PROJ_OLD_STRIDE 0x8000u
+#define PROJ_OLD_MIDI 0x10000000u
 #define PROJ_MAGIC 0x4145504Au   /* 'AEPJ' */
-#define N_PROJ 16
+#define N_PROJ 8
 #define LOADED_AT 0x100FBA00u    /* aeria-os sampler.c: which samples are loaded */
 #define LOADED_SIZE 0x300u
 void aos_samples_reload(void);
@@ -294,17 +310,18 @@ static void proj_save(int i, const char *name)
     b[0x1000] = scene_a; b[0x1001] = scene_b;
     for (int sc = 0; sc < N_SCENES; sc++) for (int q = 0; q < SCENE_IDS; q++) b[0x1010 + sc * SCENE_IDS + q] = (uint8_t)scene_val[sc][q];
 #ifdef SEQ_UI
-    { const volatile uint8_t *q = (const volatile uint8_t *)SEQ_BASE;       /* the sequences: the head, then every step */
+    { const volatile uint8_t *q = (const volatile uint8_t *)SEQ_BASE;       /* the sequences: the head, then every step of the eight patterns */
       for (unsigned k = 0; k < SEQ_HEAD_SIZE; k++) b[0x1C00 + k] = q[k];
-      for (unsigned k = 0; k < SEQ_STEPS_SIZE; k++) { b[0x2000 + k] = q[SEQ_HEAD_SIZE + k]; if (!(k & 255)) aos_breathe(); } }
+      for (unsigned k = 0; k < SEQ_STEPS_SIZE; k++) { b[PJ_ASTEPS + k] = q[SEQ_HEAD_SIZE + k]; if (!(k & 255)) aos_breathe(); } }
     b[7] = 1;
-    { const volatile uint8_t *q = (const volatile uint8_t *)MT_BASE;       /* the MIDI tracks (15 Nov 2026): their head here, their steps below the projects */
-      volatile uint8_t *ms = (volatile uint8_t *)(PROJ_MIDI_BASE + (unsigned)i * MT_STEPS_SIZE);
-      for (unsigned k = 0; k < MT_HEAD_SIZE; k++) b[0xB00 + k] = q[k];
-      for (unsigned k = 0; k < MT_STEPS_SIZE; k++) { ms[k] = q[MT_HEAD_SIZE + k]; if (!(k & 255)) aos_breathe(); } }
+    { const volatile uint8_t *q = (const volatile uint8_t *)MT_BASE;       /* the MIDI tracks: their head and their steps */
+      for (unsigned k = 0; k < MT_HEAD_SIZE; k++) b[PJ_MHEAD + k] = q[k];
+      for (unsigned k = 0; k < MT_STEPS_SIZE; k++) { b[PJ_MSTEPS + k] = q[MT_HEAD_SIZE + k]; if (!(k & 255)) aos_breathe(); } }
     b[0x21] = 1;
+    for (int sc = 0; sc < N_SCENES; sc++) for (int t = 0; t < SQ_TRACKS; t++) { for (int tp = 0; tp < SQSC_KEEP; tp++) b[PJ_SQSC + (sc * SQ_TRACKS + t) * SQSC_KEEP + tp] = (uint8_t)*sqsc(sc, t, tp); aos_breathe(); }   /* the track scenes (15 Nov 2026) */
+    b[0x22] = 1;
 #endif
-    b[4] = 1; b[5] = (uint8_t)(SCENE_IDS >> 8); b[6] = (uint8_t)SCENE_IDS; b[1] = 'E'; b[2] = 'P'; b[3] = 'J'; b[0] = 'A';
+    b[4] = 2; b[5] = (uint8_t)(SCENE_IDS >> 8); b[6] = (uint8_t)SCENE_IDS; b[1] = 'E'; b[2] = 'P'; b[3] = 'J'; b[0] = 'A';
     proj_cur = i;
 }
 static void proj_load(int i)
@@ -327,18 +344,61 @@ static void proj_load(int i)
         volatile uint8_t *q = (volatile uint8_t *)SEQ_BASE;
         aos_seq_play(0);
         for (unsigned k = 0; k < SEQ_HEAD_SIZE; k++) q[k] = b[0x1C00 + k];
-        for (unsigned k = 0; k < SEQ_STEPS_SIZE; k++) { q[SEQ_HEAD_SIZE + k] = b[0x2000 + k]; if (!(k & 255)) aos_breathe(); }
+        for (unsigned k = 0; k < SEQ_STEPS_SIZE; k++) { q[SEQ_HEAD_SIZE + k] = b[PJ_ASTEPS + k]; if (!(k & 255)) aos_breathe(); }
         { int want = SQH->mode == 1;                                  /* (15 Nov 2026) the same face: set up again without leaving it (no gap in the stream) */
           if (want == (seq_on != 0)) { if (want) aos_seq_refresh(); } else { seq_on = (uint8_t)want; aos_seq_mode(want); } }
     }
-    if (b[0x21] == 1 && b[0xB00] == 'A' && b[0xB01] == 'E' && b[0xB02] == 'M' && b[0xB03] == 'T') {   /* the MIDI tracks (15 Nov 2026) */
+    if (b[0x21] == 1 && b[PJ_MHEAD] == 'A' && b[PJ_MHEAD + 1] == 'E' && b[PJ_MHEAD + 2] == 'M' && b[PJ_MHEAD + 3] == 'T') {   /* the MIDI tracks */
         volatile uint8_t *q = (volatile uint8_t *)MT_BASE;
-        const volatile uint8_t *ms = (const volatile uint8_t *)(PROJ_MIDI_BASE + (unsigned)i * MT_STEPS_SIZE);
-        for (unsigned k = 0; k < MT_HEAD_SIZE; k++) q[k] = b[0xB00 + k];
-        for (unsigned k = 0; k < MT_STEPS_SIZE; k++) { q[MT_HEAD_SIZE + k] = ms[k]; if (!(k & 255)) aos_breathe(); }
+        for (unsigned k = 0; k < MT_HEAD_SIZE; k++) q[k] = b[PJ_MHEAD + k];
+        for (unsigned k = 0; k < MT_STEPS_SIZE; k++) { q[MT_HEAD_SIZE + k] = b[PJ_MSTEPS + k]; if (!(k & 255)) aos_breathe(); }
     } else aos_mt_defaults();                                        /* a project from before them: fresh MIDI tracks */
+    if (b[0x22] == 1) { for (int sc = 0; sc < N_SCENES; sc++) for (int t = 0; t < SQ_TRACKS; t++) { for (int tp = 0; tp < TP_ALL; tp++) *sqsc(sc, t, tp) = tp < SQSC_KEEP ? (int8_t)b[PJ_SQSC + (sc * SQ_TRACKS + t) * SQSC_KEEP + tp] : -1; aos_breathe(); } }   /* the track scenes */
 #endif
     proj_cur = i;
+}
+/* the old layout (sixteen projects of 32 KB at 0x10040000, their MIDI steps below): the first eight are brought over
+ * once, through a scratch in the sample memory (the samples load after this) */
+static void proj_migrate(void)
+{
+#if defined(__m68k__)
+    volatile uint32_t *mark = (volatile uint32_t *)PROJ_MARK;
+    if (*mark == 0x50524A33u) return;                                /* 'PRJ3' */
+    if (*mark == 0x50524A32u) {                                      /* 'PRJ2': the same projects, 0x400 further apart -- the last first, each copied from its end */
+        for (int i = N_PROJ - 1; i >= 1; i--) {
+            volatile uint8_t *o = (volatile uint8_t *)(PROJ_BASE + PROJ_STRIDE2 * (unsigned)i), *b = proj_at(i);
+            for (unsigned k = PROJ_STRIDE2; k-- > 0;) { b[k] = o[k]; if (!(k & 255)) aos_breathe(); }
+        }
+        for (int i = 0; i < N_PROJ; i++) { volatile uint8_t *b = proj_at(i); for (unsigned k = PROJ_STRIDE2; k < PROJ_STRIDE; k++) b[k] = 0xFF; if (b[0] == 'A' && b[1] == 'E' && b[2] == 'P' && b[3] == 'J') b[0x22] = 0; }   /* the track scenes kept were 56 of 64: dropped, they come back on the next save */
+        *mark = 0x50524A33u;
+        return;
+    }
+    uint8_t *scratch = (uint8_t *)0x44800000u;
+    int any = 0;
+    for (int i = 0; i < N_PROJ; i++) {
+        const volatile uint8_t *o = (const volatile uint8_t *)(PROJ_OLD_BASE + PROJ_OLD_STRIDE * (unsigned)i), *om = (const volatile uint8_t *)(PROJ_OLD_MIDI + 0x4000u * (unsigned)i);
+        uint8_t *d = scratch + 0xC000u * (unsigned)i;
+        int ok = o[0] == 'A' && o[1] == 'E' && o[2] == 'P' && o[3] == 'J' && o[4] == 1;
+        d[0] = (uint8_t)(ok ? 1 : 0);
+        if (!ok) continue;
+        any = 1;
+        for (unsigned k = 1; k < PROJ_OLD_STRIDE; k++) { d[k] = o[k]; if (!(k & 255)) aos_breathe(); }
+        for (unsigned k = 0; k < 0x4000u; k++) { d[PROJ_OLD_STRIDE + k] = om[k]; if (!(k & 255)) aos_breathe(); }
+    }
+    for (int i = 0; i < N_PROJ; i++) {
+        volatile uint8_t *b = proj_at(i); const uint8_t *d = scratch + 0xC000u * (unsigned)i;
+        if (!d[0]) { b[0] = 0; continue; }
+        for (unsigned k = 1; k < PROJ_OLD_STRIDE; k++) { b[k] = d[k]; if (!(k & 255)) aos_breathe(); }
+        for (unsigned k = PROJ_OLD_STRIDE; k < PJ_MSTEPS; k++) b[k] = 0;                                  /* patterns E..H: empty */
+        for (unsigned k = 0; k < 0x4000u; k++) { b[PJ_MSTEPS + k] = d[PROJ_OLD_STRIDE + k]; if (!(k & 255)) aos_breathe(); }
+        for (unsigned k = PJ_MSTEPS + 0x4000u; k < PJ_SQSC; k++) b[k] = 0;
+        for (unsigned k = PJ_SQSC; k < PROJ_STRIDE; k++) b[k] = 0xFF;                                     /* no track scenes kept */
+        b[0x22] = 0;
+        b[4] = 2; b[0] = 'A';
+    }
+    *mark = 0x50524A33u;
+    if (any) say("PROJECTS", "BROUGHT OVER");
+#endif
 }
 /* ---- INIT and RESET ALL (13 Nov 2026): a blank start that is always there ---------------------------------------
  * FUNC + PROJ (on any page of the sky or the sequencer) asks; then YES = INIT: the sound as the OS is built -- every knob at its default, the
@@ -381,7 +441,7 @@ static void proj_from_presets(void)
         for (int k = 0; k < 13; k++) b[8 + k] = (uint8_t)nm[k];
         const uint8_t *sp = (const uint8_t *)&t; for (unsigned k = 0; k < sizeof(Snap); k++) b[0x40 + k] = sp[k];
         const volatile uint8_t *ld = (const volatile uint8_t *)LOADED_AT; for (unsigned k = 0; k < LOADED_SIZE; k++) b[0x800 + k] = ld[k];
-        b[5] = 0; b[6] = 0; b[4] = 1; b[1] = 'E'; b[2] = 'P'; b[3] = 'J'; b[0] = 'A';
+        b[5] = 0; b[6] = 0; b[4] = 2; b[1] = 'E'; b[2] = 'P'; b[3] = 'J'; b[0] = 'A';
     }
 }
 /* ---- typing a name ---- */
@@ -478,7 +538,7 @@ static void preset_draw(void)
     text(8, 9, "PROJECTS", 1);
     text(W - 8 - text_w("FUNC+PROJ INIT"), 9, "FUNC+PROJ INIT", 1);
     for (int i = 0; i < N_PROJ; i++) {
-        int bx = 10 + (i % 8) * 14, by = 17 + (i / 8) * 12;
+        int bx = 10 + (i % 8) * 14, by = 20;
         for (int x = bx; x < bx + 12; x++) { px(x, by); px(x, by + 9); }
         for (int y = by; y <= by + 9; y++) { px(bx, y); px(bx + 11, y); }
         if (proj_saved(i)) for (int x = bx + 2; x < bx + 10; x++) for (int y = by + 2; y < by + 8; y++) if (i == proj_cur || ((x + y) & 1)) px(x, y);
@@ -491,6 +551,6 @@ static void preset_draw(void)
 static void preset_leds(void)
 {
     if (naming) { for (int k = 0; k < 16; k++) led_want[k] = k == name_last ? 2 : 1; return; }
-    for (int k = 0; k < 16; k++) led_want[k] = k == proj_sel ? 2 : proj_saved(k) ? 1 : 0;
+    for (int k = 0; k < 16; k++) led_want[k] = k == proj_sel ? 2 : k < N_PROJ && proj_saved(k) ? 1 : 0;
 }
 #endif

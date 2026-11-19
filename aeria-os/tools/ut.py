@@ -61,5 +61,7 @@ def inputs_off():
     o=(par(6,6),par(6,7)); par(6,6,0); par(6,7,0); return o
 def inputs_back(o): par(6,6,o[0][0]); par(6,7,o[1][0])
 B=0x100C0000
-def seq_backup(): return aos.rd(d,B,0x400+0x6000)
-def seq_restore(k): aos.wr(d,B,k)
+MT=0x100CC400   # (15 Nov 2026, eight patterns: the MIDI tracks moved here)
+def seq_backup(): return aos.rd(d,B,0x400+0xC000)+aos.rd(d,MT,0x400+0x8000)
+def mt_backup(): return aos.rd(d,MT,0x400+0x8000)
+def seq_restore(k): aos.wr(d,B,k[:0x400+0xC000]); aos.wr(d,MT,k[0x400+0xC000:]) if len(k)>0x400+0xC000 else None

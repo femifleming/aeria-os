@@ -72,7 +72,14 @@ static struct {
     uint8_t prog_sent[SQ_TRACKS];
     uint32_t ext_at, ext_per; uint32_t ext_n;   /* a clock from outside: when its last tick came, the ticks' spacing (smoothed, timer ticks), how many since the start */
     uint8_t ui_route[SQ_TRACKS];
+    int16_t fxlk[SQ_TRACKS][12];         /* (15 Nov 2026) a step's locks on the track's effect knobs, held until its next note (-1 none) */
+    uint8_t vel_last[SQ_TRACKS];         /* the last hit's velocity (VLP: a soft hit closes the low-pass) */
+    uint32_t thru_g[SQ_TRACKS][2];       /* THRU: the gains the engine applies to inputs A B and C D for this track (Q23) */
+    int32_t hum_off[SQ_ALL];             /* HUMT: the next step's drawn offset (24.8 frames), drawn once as the step comes up, so early and late both happen */
+    int32_t fenv[SQ_TRACKS];             /* (16 Nov 2026) the filter envelope, Q12, 4096 at a note, falling as FDEC says */
+    uint8_t song_rep;                    /* how many times the song's row has played */
 } sq;
+static int fxk_of(int s, int k) { return (s >= 0 && s < SQ_TRACKS && k >= 0 && k < 12 && sq.fxlk[s][k] >= 0) ? sq.fxlk[s][k] : SQH->fx_knob[s & 7][k & 15]; }
 int aos_midi_out(unsigned st, unsigned a, unsigned b);
 static void route_write(int s, int on, const uint32_t g[4]);
 static void ph_write(int s, unsigned mono, const uint32_t g[2], int lone);
@@ -101,8 +108,8 @@ void aos_seq_defaults(void)
     SqHead *h = SQH;
     volatile uint8_t *b = (volatile uint8_t *)SEQ_BASE;
     for (uint32_t i = 0; i < SEQ_HEAD_SIZE + SEQ_STEPS_SIZE; i++) b[i] = 0;
-    h->ver = 2; h->swing = 50; h->duck_rel = 40;
-    for (int p = 0; p < SQ_PATTERNS; p++) { h->mlen[p] = 16; for (int t = 0; t < SQ_TRACKS; t++) h->len[p][t] = 16; }
+    h->ver = 3; h->swing = 50; h->duck_rel = 40;
+    for (int p = 0; p < SQ_PATTERNS; p++) { *sq_mlen_p(p) = 16; for (int t = 0; t < SQ_TRACKS; t++) *sq_len_p(p, t) = 16; }
     for (int t = 0; t < SQ_TRACKS; t++) {
         uint8_t *p = h->trk[t];
         p[TP_SMPL] = (uint8_t)(96 + t); p[TP_PTCH] = 64; p[TP_DEC] = 127; p[TP_VOL] = 100; p[TP_LP] = 127; p[TP_PAN] = 64;
@@ -117,17 +124,46 @@ static int seq_valid(void)
     SqHead *h = SQH;
     if (!(h->magic[0] == 'A' && h->magic[1] == 'E' && h->magic[2] == 'S' && h->magic[3] == 'Q')) return 0;
     if (h->ver == 1) { for (int t = 0; t < SQ_TRACKS; t++) seq_trk2_defaults(t); h->ver = 2; }   /* a sequence of before the second block */
-    return h->ver == 2;
+    if (h->ver == 2) {                                                        /* (15 Nov 2026) before patterns E..H and the third block: they start empty */
+        { const volatile uint8_t *om = (const volatile uint8_t *)0x100C8000u;   /* the MIDI tracks of before sat where patterns E..H go: moved first */
+          if (om[0] == 'A' && om[1] == 'E' && om[2] == 'M' && om[3] == 'T') {
+              volatile uint8_t *nm = (volatile uint8_t *)MT_BASE;
+              for (uint32_t i = 0; i < MT_HEAD_SIZE + 0x4000u; i++) nm[i] = om[i];
+              for (uint32_t i = MT_HEAD_SIZE + 0x4000u; i < MT_HEAD_SIZE + MT_STEPS_SIZE; i++) nm[i] = 0;
+          } }
+        for (int p = 4; p < SQ_PATTERNS; p++) { *sq_mlen_p(p) = 16; for (int t = 0; t < SQ_TRACKS; t++) { *sq_len_p(p, t) = 16; for (int n = 0; n < SQ_STEPS; n++) { uint8_t *s = (uint8_t *)SQ_STEP(p, t, n); for (int k = 0; k < 12; k++) s[k] = 0; } } }
+        for (int k = 0; k < 8; k++) h->chain2[k] = 0;
+        h->rs_src = 0;
+        for (int t = 0; t < SQ_TRACKS; t++) for (int k = 0; k < 16; k++) h->trk3[t][k] = 0;
+        h->song_n = 0; h->song_on = 0; h->song_row = 0; for (int k = 0; k < SQ_SONG_MAX; k++) { h->song[k][0] = 0; h->song[k][1] = 1; }
+        h->ver = 3;
+    }
+    return h->ver == 3;
 }
+static int mlen_of(int p) { int v = *sq_mlen_p(p); return v >= 1 && v <= SQ_STEPS ? v : 16; }
+/* a song row begins: its mute scene, when it names one that holds */
+static void song_row_begin(int row)
+{
+    SqHead *h = SQH; int scn = SONG_SCN(h->song[row & 31][0]);
+    if (scn >= 1 && scn <= 16 && ((h->mscn_ok[(scn - 1) >> 3] >> ((scn - 1) & 7)) & 1)) h->mutes = h->mscn[scn - 1];
+}
+int aos_song_row(void) { return SQH->song_row; }
+static int chain_of(int k) { return *sq_chain_p(k) & 7; }
 /* ---- the MIDI tracks (15 Nov 2026) ---- */
-static int mt_valid(void) { const MtHead *m = MTH; return m->magic[0] == 'A' && m->magic[1] == 'E' && m->magic[2] == 'M' && m->magic[3] == 'T' && m->ver == 1; }
+static int mt_valid(void)
+{
+    MtHead *m = MTH;
+    if (!(m->magic[0] == 'A' && m->magic[1] == 'E' && m->magic[2] == 'M' && m->magic[3] == 'T')) return 0;
+    if (m->ver == 1) { for (int p = 4; p < SQ_PATTERNS; p++) for (int t = 0; t < SQ_TRACKS; t++) *mt_len_p(p, t) = 16; m->ver = 2; }   /* before patterns E..H */
+    return m->ver == 2;
+}
 void aos_mt_defaults(void)
 {
     MtHead *m = MTH;
     volatile uint8_t *b = (volatile uint8_t *)MT_BASE;
     for (uint32_t i = 0; i < MT_HEAD_SIZE + MT_STEPS_SIZE; i++) b[i] = 0;
-    m->ver = 1;
-    for (int p = 0; p < SQ_PATTERNS; p++) for (int t = 0; t < SQ_TRACKS; t++) m->len[p][t] = 16;
+    m->ver = 2;
+    for (int p = 0; p < SQ_PATTERNS; p++) for (int t = 0; t < SQ_TRACKS; t++) *mt_len_p(p, t) = 16;
     for (int t = 0; t < SQ_TRACKS; t++) {
         uint8_t *p = m->trk[t];
         p[MP_CH] = (uint8_t)(t + 1); p[MP_NOTE] = 60; p[MP_VEL] = 100; p[MP_GATE] = 4; p[MP_OCT] = 3;
@@ -138,7 +174,17 @@ void aos_mt_defaults(void)
 }
 /* the clock side sees sixteen tracks: 0..7 the audio tracks, 8..15 the MIDI tracks */
 static const uint8_t *trk2_of(int t) { return t < SQ_TRACKS ? SQH->trk2[t] : MTH->trk2[t - SQ_TRACKS]; }
-static int len_of(int pat, int t) { int l = t < SQ_TRACKS ? SQH->len[pat][t] : MTH->len[pat][t - SQ_TRACKS]; return l >= 1 && l <= SQ_STEPS ? l : 16; }
+static int len_of(int pat, int t) { int l = t < SQ_TRACKS ? *sq_len_p(pat, t) : *mt_len_p(pat, t - SQ_TRACKS); return l >= 1 && l <= SQ_STEPS ? l : 16; }
+static int hum_t(int t) { return t < SQ_TRACKS ? SQH->trk3[t][TP_HUMT - TP_2END] : MTH->trk[t - SQ_TRACKS][MP_HUMT]; }
+static int hum_v(int t) { return t < SQ_TRACKS ? SQH->trk3[t][TP_HUMV - TP_2END] : MTH->trk[t - SQ_TRACKS][MP_HUMV]; }
+static int hum_vel(int t, int vel)    /* HUMV: a hit may come up to half as soft */
+{
+    int hv = hum_v(t);
+    if (!hv) return vel;
+    uint32_t span = (uint32_t)(hv * vel) / 254u + 1u;
+    int v = vel - (int)(rnd_u() % span);
+    return v < 1 ? 1 : v;
+}
 static int free_of(int t) { return t < SQ_TRACKS ? SQH->trk[t][TP_FREE] : MTH->trk[t - SQ_TRACKS][MP_FREE]; }
 static int nei_of(int t) { return t < SQ_TRACKS ? (t + 7) & 7 : SQ_TRACKS + ((t - SQ_TRACKS + 7) & 7); }   /* the track above, in its own bank */
 static uint8_t mt_cc_sent[SQ_TRACKS][2], mt_prog_sent[SQ_TRACKS];
@@ -153,6 +199,17 @@ static inline int32_t sq_sin(uint32_t ph)   /* a sine from a parabola, rounded: 
     y += ((((y * ay) >> 15) - y) * 7373) >> 15;
     return y > 32767 ? 32767 : y < -32767 ? -32767 : y;
 }
+/* a wave for the SUB machine, -32767..32767: 0 the sine, 1 a triangle, 2 a saw, 3 a square (plain, their edges soften under the track's low-pass) */
+static inline int32_t sq_wave(uint32_t ph, int wave)
+{
+    int32_t x = (int32_t)ph >> 16;                                             /* -32768..32767 */
+    switch (wave) {
+    case 1: { int32_t ax = x < 0 ? -x : x; return 32767 - 2 * ax; }
+    case 2: return x > -32768 ? x : -32767;
+    case 3: return x < 0 ? -24000 : 24000;
+    default: return sq_sin(ph);
+    }
+}
 #define SQ_ENV() do { \
         if (v->env_inc) { env += v->env_inc; if (env >= 1 << 24) { env = 1 << 24; v->env_inc = 0; } e12 = env >> 12; e = (((e12 * e12) >> 12) * g) >> 12; } \
         else if (v->env_dec) { env -= v->env_dec; if (env <= 0) { v->on = 0; break; } e12 = env >> 12; e = (((e12 * e12) >> 12) * g) >> 12; } } while (0)
@@ -166,15 +223,17 @@ __attribute__((optimize("O2"))) static void tv_render(TV *v, int32_t *out)
     int32_t e = (((e12 * e12) >> 12) * g) >> 12;                              /* the envelope squared: a curve, not a line */
     int i = 0;
     if (v->delay) { uint32_t k = v->delay < 32 ? v->delay : 32; v->delay -= k; i = (int)k; }
-    if (v->mach == SQM_SUB) {                                                  /* SUB: a sine */
-        uint32_t ph = v->ph;
+    if (v->mach == SQM_SUB) {                                                  /* SUB: a sine, triangle, saw or square (WAVE), with a detuned second oscillator (DTUN, SUB2) */
+        uint32_t ph = v->ph, ph2 = v->mph, st2 = v->noise; const int wave = (int)v->ratio & 3, mix2 = (int)v->fmi;
         for (; i < 32; i++) {
             if (v->env_inc) { env += v->env_inc; if (env >= 1 << 24) { env = 1 << 24; v->env_inc = 0; } e12 = env >> 12; e = (((e12 * e12) >> 12) * g) >> 12; }
             else if (v->env_dec) { env -= v->env_dec; if (env <= 0) { v->on = 0; break; } e12 = env >> 12; e = (((e12 * e12) >> 12) * g) >> 12; }
-            out[i] += ((sq_sin(ph) << 4) * e) >> 8;
-            ph += step;
+            int32_t y = sq_wave(ph, wave);
+            if (mix2) { y = ((y * (160 - mix2 / 2)) >> 7) + ((sq_wave(ph2, wave) * mix2) >> 7); if (y > 32767) y = 32767; else if (y < -32767) y = -32767; }
+            out[i] += ((y << 4) * e) >> 8;
+            ph += step; ph2 += st2;
         }
-        v->ph = ph; v->env = env;
+        v->ph = ph; v->mph = ph2; v->env = env;
         return;
     }
     if (v->mach == SQM_FM) {
@@ -226,6 +285,13 @@ __attribute__((optimize("O2"))) static void tv_render(TV *v, int32_t *out)
         ks[t].w = w; ks[t].last = last; v->env = env;
         return;
     }
+    if (v->mach == SQM_THRU) {                                                 /* THRU: the envelope alone (the engine opens the inputs by it) */
+        for (; i < 32; i++) {
+            if (v->env_inc) { env += v->env_inc; if (env >= 1 << 24) { env = 1 << 24; v->env_inc = 0; } }
+            else if (v->env_dec) { env -= v->env_dec; if (env <= 0) { v->on = 0; break; } }
+        }
+        v->env = env; return;
+    }
     if (v->mach != SQM_SMPL) { v->on = 0; return; }
     const int32_t *q = v->q; const int32_t st = v->st; const uint32_t n = v->n;
     uint32_t pos = v->pos, frac = v->frac;
@@ -249,12 +315,17 @@ static void sq_trigger(int t, const uint8_t *p, int vel, int rev, uint32_t delay
     TV *v = &tv[t][0];
     TV nv;
     int mod = sq.modv[t], dest = p[TP_LFOD];
-    int semi = clamp_i((int)p[TP_PTCH] - 64 + (dest == 5 ? mod * 24 / 127 : 0), -36, 36);
+    int semi = clamp_i((int)p[TP_PTCH] - 64 + (dest == 5 ? mod * 24 / 127 : 0) + ((vel - 100) * (int)p[TP_VPT]) / 508, -36, 36);   /* VPT: a softer hit is lower (15 Nov 2026) */
+    sq.vel_last[t] = (uint8_t)(vel < 1 ? 1 : vel > 127 ? 127 : vel);
     nv.mach = p[TP_MACH] < SQM_N ? p[TP_MACH] : 0; nv.ph = 0; nv.q = 0; nv.st = 2; nv.n = 0; nv.mph = 0; nv.hold = 0;
     nv.noise = rnd_u() | 1u; nv.ratio = 65536; nv.fmi = 0; nv.fmk = 65535 << 4; nv.fmk_rate = 0;
-    if (nv.mach == SQM_MIDI) { /* no sound of its own */ }
+    if (nv.mach == SQM_MIDI || nv.mach == SQM_THRU) { /* no sound of its own here: MIDI sends, THRU opens the inputs in the engine */ }
     else if (nv.mach != SQM_SMPL) {
         nv.step = mul16(5356567u, pitch_step(semi));                          /* 55 Hz at the middle, as a phase step */
+        if (nv.mach == SQM_SUB) {                                              /* WAVE; a second oscillator DTUN (up to two semitones up) at level SUB2 (16 Nov 2026) */
+            nv.ratio = p[TP_WAVE] & 3; nv.fmi = (uint32_t)p[TP_SUB2];
+            nv.noise = p[TP_DTUN] ? mul16(nv.step, cents_step((int)p[TP_DTUN] * 2)) : nv.step;
+        }
         if (nv.mach == SQM_PLUK) {
             /* the string: INDX how bright the pluck (its noise through a one-pole), IDEC how long it rings */
             uint32_t per = div_u(0xFFFFFFFFu, (nv.step >> 8) + 1u);              /* samples << 8 */
@@ -280,12 +351,17 @@ static void sq_trigger(int t, const uint8_t *p, int vel, int rev, uint32_t delay
         const Smp *s = &st_smp[p[TP_SMPL] & 127];
         if (s->status || s->frames < 4) return;
         int strt = clamp_i(p[TP_STRT] + (dest == 6 ? mod / 2 : 0), 0, 127);
-        uint32_t n = s->frames, start = (uint32_t)strt * (n >> 7) + (uint32_t)sq.slip[t] * (n >> 10);
+        uint32_t n = s->frames, base = 0;
+        { int slcs = p[TP_SLCS]; if (slcs > 1) {                               /* SLCS equal slices: SLIC picks one (16 Nov 2026) */
+              uint32_t k = (uint32_t)(p[TP_SLIC] ? p[TP_SLIC] - 1 : 0) % (uint32_t)slcs, sl = div_u(n, (uint32_t)slcs);
+              if (sl >= 4) { base = k * sl; n = sl; } } }
+        uint32_t start = (uint32_t)strt * (n >> 7) + (uint32_t)sq.slip[t] * (n >> 10);
         start %= n;
         if (n - start < 2) start = 0;
         nv.n = n - start;
-        if (rev) { nv.q = s->d + 2 * (n - 1 - start); nv.st = -2; nv.n = n - start; if (!start) { nv.q = s->d + 2 * (n - 1); nv.n = n; } }
-        else nv.q = s->d + 2 * start;
+        if (p[TP_LEN]) { uint32_t want = (uint32_t)p[TP_LEN] * (n >> 7); if (want < 4) want = 4; if (want < nv.n) nv.n = want; }   /* LEN: that much of it */
+        if (rev) { nv.q = s->d + 2 * (base + start + nv.n - 1); nv.st = -2; }
+        else nv.q = s->d + 2 * (base + start);
         nv.step = mul16(s->step, pitch_step(semi));
     }
     nv.pos = 0; nv.frac = 0;
@@ -298,6 +374,7 @@ static void sq_trigger(int t, const uint8_t *p, int vel, int rev, uint32_t delay
     nv.delay = delay; nv.on = nv.mach != SQM_MIDI;
     if (v->on && v->mach != SQM_PLUK) { tv[t][1] = *v; tv[t][1].env_inc = 0; tv[t][1].env_dec = (1 << 24) / 96; tv[t][1].delay = 0; }
     *v = nv;
+    sq.fenv[t] = 4096;                                                         /* the filter envelope starts over */
     if (SQH->duck_src == (uint8_t)t) sq.duck = 4096;
     if (p[TP_MCH]) {
         /* MIDI: the track's note (and its chord: up to four notes), each with its own end -- a long GATE lets them overlap */
@@ -341,9 +418,12 @@ static void sq_params(int t, const SqStep *s, uint8_t *p)
     const SqHead *h = SQH;
     for (int k = 0; k < SQ_TP; k++) p[k] = h->trk[t][k];
     for (int k = 0; k < 16; k++) p[SQ_TP + k] = h->trk2[t][k];
+    for (int k = 0; k < 16; k++) p[TP_2END + k] = h->trk3[t][k];               /* the third block too (16 Nov 2026: WAVE, SLCS .. were read from nothing) */
     sq.lk[t][0] = sq.lk[t][1] = 0;
-    if (s) for (int k = 0; k < SQ_LOCKS; k++) if (s->lp[k] && s->lp[k] <= TP_ALL) {
-        int id = s->lp[k] - 1; p[id] = s->lv[k]; sq.lk[t][id >> 5] |= 1u << (id & 31);
+    for (int k = 0; k < 12; k++) sq.fxlk[t][k] = -1;                            /* an effect knob's lock holds until the next note */
+    if (s) for (int k = 0; k < SQ_LOCKS; k++) {
+        if (s->lp[k] && s->lp[k] <= TP_ALL) { int id = s->lp[k] - 1; p[id] = s->lv[k]; sq.lk[t][id >> 5] |= 1u << (id & 31); }
+        else if (s->lp[k] > TP_FXK && s->lp[k] <= TP_FXK + 12) sq.fxlk[t][s->lp[k] - 1 - TP_FXK] = s->lv[k];
     }
     for (int k = 0; k < TP_ALL; k++) sq.lkp[t][k] = p[k];
     for (int k = 0; k < TP_ALL; k++) if (aos_mod_tp[t][k]) { int v = p[k] + aos_mod_tp[t][k]; p[k] = (uint8_t)(v < 0 ? 0 : v > 127 ? 127 : v); }   /* MOD on top */
@@ -364,7 +444,7 @@ static uint8_t ca_rule_was[SQ_TRACKS], ca_seed_was[SQ_TRACKS];
 static int ca_get(int t, int n) { n &= 63; return (int)(ca_row[t][n >> 5] >> (n & 31)) & 1; }
 static void ca_seed(int t)
 {
-    int sd = SQH->trk2[t][TP_CSD - SQ_TP], len = SQH->len[sq.pat][t]; if (len < 1 || len > 64) len = 16;
+    int sd = SQH->trk2[t][TP_CSD - SQ_TP], len = *sq_len_p(sq.pat, t); if (len < 1 || len > 64) len = 16;
     ca_row[t][0] = ca_row[t][1] = 0;
     if (!sd) { int m = len / 2; ca_row[t][m >> 5] |= 1u << (m & 31); }
     else for (int k = 0; k < 7; k++) if ((sd >> k) & 1) { int m = (len / 2 - 3 + k + len) % len; ca_row[t][m >> 5] |= 1u << (m & 31); }
@@ -372,7 +452,7 @@ static void ca_seed(int t)
 }
 static void ca_next(int t)
 {
-    int rule = 2 * SQH->trk2[t][TP_CAR - SQ_TP], len = SQH->len[sq.pat][t]; if (len < 1 || len > 64) len = 16;
+    int rule = 2 * SQH->trk2[t][TP_CAR - SQ_TP], len = *sq_len_p(sq.pat, t); if (len < 1 || len > 64) len = 16;
     uint32_t nr[2] = {0, 0};
     for (int n = 0; n < len; n++) {
         int v = ca_get(t, (n + len - 1) % len) << 2 | ca_get(t, n) << 1 | ca_get(t, (n + 1) % len);
@@ -401,8 +481,11 @@ static void sq_fire(int t, int n, uint32_t delay)
         if (m == 0) { if (c) s.flags |= SF_ON; else s.flags &= (uint8_t)~SF_ON; }
         else if (m == 1) { if (!c) s.flags &= (uint8_t)~SF_ON; }
         else if (m == 2) { if (c) s.flags ^= SF_ON; }
-        else { static const int8_t deg[6] = {0, 3, 5, 7, 10, 12}; int len = SQH->len[sq.pat][t], k = 0; if (len < 1 || len > 64) len = 16; for (int i = -2; i <= 2; i++) k += ca_get(t, (n + i + len) % len); ca_up = deg[k]; }
+        else { static const int8_t deg[6] = {0, 3, 5, 7, 10, 12}; int len = *sq_len_p(sq.pat, t), k = 0; if (len < 1 || len > 64) len = 16; for (int i = -2; i <= 2; i++) k += ca_get(t, (n + i + len) % len); ca_up = deg[k]; }
     }
+    { int euc = SQH->trk3[t][TP_EUC - TP_2END];                               /* EUC hits spread evenly (Bjorklund) over the track's length: they are the steps (16 Nov 2026) */
+      if (euc) { int len = *sq_len_p(sq.pat, t); if (len < 1 || len > 64) len = 16; if (euc > len) euc = len;
+                 int hit = ((n + 1) * euc) / len - (n * euc) / len; if (hit) s.flags |= SF_ON; else s.flags &= (uint8_t)~SF_ON; } }
     if (!(s.flags & SF_ON)) return;
     if (sq.skip[t] == (uint8_t)(n + 1)) { sq.skip[t] = 0; return; }           /* a pad just played and wrote this step */
     { int pr = (s.prob ? s.prob : 100) * (SQH->trk2[t][TP_DENS - SQ_TP] + 1) / 128;   /* DENS thins the whole track */
@@ -414,7 +497,11 @@ static void sq_fire(int t, int n, uint32_t delay)
     sq_params(t, &s, p);
     if (ca_up) p[TP_PTCH] = (uint8_t)clamp_i(p[TP_PTCH] + ca_up, 0, 127);
     sq.rndv[t] = (int8_t)((int)(rnd_u() % 255u) - 127);
-    int vel = s.vel ? s.vel : 100, rev = (s.flags & SF_REV) || p[TP_REV];
+    int vel = hum_vel(t, s.vel ? s.vel : 100), rev = (s.flags & SF_REV) || p[TP_REV];
+    /* (19 Nov 2026) the track's level from this note's own parameters, now: the tick that sets it (seq_tick) comes up
+     * to 16 ms later, after this block has already been made, so a step's VOL lock was heard on the NEXT note
+     * (found in the simulator: locked step at full level, the step after it quiet) */
+    { int vol = p[TP_VOL]; if (SQH->trk[t][TP_LFOD] == 3) vol += sq.modv[t] / 2; vol = clamp_i(vol, 0, 127); sq.tgain[t] = (vol * vol * 65) >> 8; }
     sq_trigger(t, p, vel, rev, delay);
     if (s.ratch > 1) {
         /* a ratchet: r hits in the step's time. Its curve bends them: each gap the one before times a ratio, so they
@@ -478,7 +565,7 @@ static void mt_fire(int t, int n, uint32_t delay)
     if (!ok || sq_muted(t)) return;
     uint8_t p[TP_ALL];
     mt_params(m, &s, p);
-    int vel = s.vel ? s.vel : 100;
+    int vel = hum_vel(t, s.vel ? s.vel : p[MP_VEL] ? p[MP_VEL] : 100);   /* (19 Nov 2026) a step without its own velocity takes the track's VEL (it took 100) */
     mt_trigger(m, p, vel, delay);
     if (s.ratch > 1) {                                                         /* a ratchet, as the audio tracks' */
         int r = s.ratch > 64 ? 64 : s.ratch, cv = SQ_CURVE(s.flags);
@@ -553,35 +640,53 @@ static int32_t sq_step_dur(int t, int c, int len, int32_t sl)
     uint32_t avg = div_u(sum, (uint32_t)len) >> 4;                            /* the mean, Q8 */
     return (int32_t)(div_u(mul16((uint32_t)sl, at), avg ? avg : 1u) << 8);
 }
-/* ---- resampling: the main output, as it is heard, into a sample slot (a bank of its own: 6.1, about 11 s) ---- */
-static struct { uint8_t state; int16_t slot; uint32_t skip, left; Smp *s; } rs;   /* state 1 armed, 2 recording */
-void aos_resample(int slot, int steps)
+/* the sequencer's voices playing a bank fall silent (the bank is being emptied) */
+static void seq_bank_stop(int b)
 {
-    if (slot < 0 || slot >= 128 || !seq_mode || !sq.step_len) return;
-    if (rs.state) { rs.state = 0; aos_tap_want(8, 0); return; }                 /* again: give it up */
-    rs.slot = (int16_t)slot; rs.left = (sq.step_len >> 8) * (uint32_t)(steps < 1 ? 16 : steps);
-    if (rs.left > SZ_BANK / 8 - 64) rs.left = SZ_BANK / 8 - 64;
+    const uint8_t *lo = bank_base(b), *hi = lo + bank_size(b);
+    for (int t = 0; t < SQ_TRACKS; t++) for (int k = 0; k < 2; k++) { const uint8_t *q = (const uint8_t *)tv[t][k].q; if (tv[t][k].on && tv[t][k].mach == SQM_SMPL && q >= lo && q < hi) tv[t][k].on = 0; }
+}
+/* ---- resampling (15 Nov 2026: into bank 5, from the main out or the inputs): the next free slot of bank 5 takes what RSRC
+ * names, from the pattern's next start, for `steps` steps. The slot is given back so the track can be put on it. ---- */
+static struct { uint8_t state, src, done; int16_t slot; uint32_t skip, left; Smp *s; } rs;   /* state 1 armed, 2 recording; done: the take waits to be finished */
+static void take_normalise(int32_t *q, uint32_t frames);
+static void resample_finish(void)
+{
+    if (!rs.done) return;
+    rs.done = 0; Smp *s = rs.s; if (!s) return;
+    take_normalise(s->d, s->frames);
+    s->status = 0; bank_used[5] += s->frames * 8u;
+}
+int aos_resample(int steps)
+{
+    if (!seq_mode || !sq.step_len) return -1;
+    if (rs.state) { rs.state = 0; aos_tap_want(8, 0); if (rs.s) { rs.s->status = 1; rs.s->frames = 0; } return -2; }   /* again: give it up */
+    uint32_t want = (sq.step_len >> 8) * (uint32_t)(steps < 1 ? 16 : steps);
+    int slot = bank5_take(want + 64u);
+    if (slot < 0) return -1;
+    rs.slot = (int16_t)slot; rs.src = SQH->rs_src > 2 ? 0 : SQH->rs_src; rs.left = want;
+    if (rs.left > (bank_size(5) - bank_used[5]) / 8u - 64u) rs.left = (bank_size(5) - bank_used[5]) / 8u - 64u;
     rs.state = 1;
     if (!sq.playing) aos_seq_play(1);
+    return slot;
 }
-int aos_resampling(void) { return rs.state; }
+int aos_resampling(void) { return rs.state ? rs.state : rs.done ? 2 : 0; }   /* 2 as well while the take waits to be finished */
 static void resample_begin(void)
 {
     Smp *s = &st_smp[rs.slot];
-    voices_stop(s);
-    for (int t = 0; t < SQ_TRACKS; t++) for (int k = 0; k < 2; k++) if (tv[t][k].on && tv[t][k].mach == SQM_SMPL && tv[t][k].q >= s->d && s->frames && tv[t][k].q < s->d + 2 * s->frames) tv[t][k].on = 0;
-    s->d = (int32_t *)(POOL_STARS + SZ_BANK * (uint32_t)(rs.slot / 16)); s->frames = 0; s->step = 0x10000; s->status = 2;
-    bank_used[rs.slot / 16] = SZ_BANK;                                           /* the bank is this one recording now */
+    voices_stop(s); seq_bank_stop(5);
+    s->d = (int32_t *)(bank_base(5) + bank_used[5]); s->frames = 0; s->step = 0x10000; s->status = 2;
     rs.s = s; rs.skip = seq_ahead_now + 110;                                     /* what is on its way to the converter and back is not the bar yet */
     rs.state = 2; aos_tap_want(8, 1);
 }
-static void resample_frame(int32_t l, int32_t r)
+static void resample_frame6(const int32_t *f)
 {
     if (rs.state != 2) return;
     if (rs.skip) { rs.skip--; return; }
     Smp *s = rs.s;
+    int32_t l = rs.src == 1 ? f[0] : rs.src == 2 ? f[2] : f[4], r = rs.src == 1 ? f[1] : rs.src == 2 ? f[3] : f[5];
     s->d[2 * s->frames] = l; s->d[2 * s->frames + 1] = r; s->frames++;
-    if (!--rs.left) { s->status = 0; rs.state = 0; aos_tap_want(8, 0); }
+    if (!--rs.left) { rs.state = 0; aos_tap_want(8, 0); rs.done = 1; }     /* finished in the tick (normalising takes a moment) */
 }
 static void fz_in(int ch, int32_t v);
 /* one block of 32 samples: the clock, then every track's voices, its drive, level and sends */
@@ -593,11 +698,15 @@ __attribute__((optimize("O2"))) static void seq_block(void)
     if (sq.playing && sq.step_len) {
         int32_t sl = (int32_t)sq.step_len;
         while (sq.g_next < B) {
-            if (++sq.g_pos >= (h->mlen[sq.pat] ? h->mlen[sq.pat] : 16)) {
+            if (++sq.g_pos >= mlen_of(sq.pat)) {
                 sq.g_pos = 0;
                 if (rs.state == 1) resample_begin();
-                int want = h->pattern & 3;
-                if (h->chain_n) { sq.chain_at = (uint8_t)((sq.chain_at + 1) % (h->chain_n > 8 ? 8 : h->chain_n)); want = h->chain[sq.chain_at] & 3; SQH->pattern = (uint8_t)want; }
+                int want = h->pattern & 7;
+                if (h->song_on && h->song_n) {                                 /* the song: this row again, or the next (16 Nov 2026) */
+                    int row = h->song_row < h->song_n ? h->song_row : 0, times = h->song[row][1] ? h->song[row][1] : 1;
+                    if (++sq.song_rep >= times) { sq.song_rep = 0; row = (row + 1) % h->song_n; SQH->song_row = (uint8_t)row; song_row_begin(row); }
+                    want = SONG_PAT(h->song[row][0]); SQH->pattern = (uint8_t)want;
+                } else if (h->chain_n) { sq.chain_at = (uint8_t)((sq.chain_at + 1) % (h->chain_n > 16 ? 16 : h->chain_n)); want = chain_of(sq.chain_at); SQH->pattern = (uint8_t)want; }
                 if (want != sq.pat) {
                     sq.pat = (uint8_t)want;
                     if (h->pcch) mq_put(0, 0xC0u | (unsigned)((h->pcch - 1) & 15), (unsigned)want, 0);
@@ -626,6 +735,7 @@ __attribute__((optimize("O2"))) static void seq_block(void)
                 int32_t off = 0;
                 if ((c & 1) && sw > 50) off = (ts / 50) * (sw - 50);
                 if (s_on) off += (ts / 48) * s_micro;
+                if (s_on) off += sq.hum_off[t];                                /* HUMT: this step's drawn offset (up to a fifth of a step either way) */
                 int32_t at = sq.t_next[t] + off;
                 if (at >= B) break;
                 if (at < 0) at = 0;
@@ -633,6 +743,7 @@ __attribute__((optimize("O2"))) static void seq_block(void)
                 if (sq.dur[t] <= 0) sq.dur[t] = ts;
                 if (audio) sq_fire(t, n, (uint32_t)at >> 8); else mt_fire(t, n, (uint32_t)at >> 8);
                 sq.t_next[t] += sq.dur[t];
+                { int hv = hum_t(t); sq.hum_off[t] = 0; if (hv) { int hj = hv * 8 / 127 + 1; sq.hum_off[t] = (ts / 48) * ((int32_t)(rnd_u() % (uint32_t)(2 * hj + 1)) - hj); } }   /* the next step's jitter, drawn once (15 Nov 2026) */
                 if (++c >= len) {
                     c = 0; sq.loops[t]++;
                     if (audio) { ca_tick_loop(t); sq.slip[t] = (uint16_t)(sq.slip[t] + h->trk[t][TP_SLIP]); if (!h->trk[t][TP_SLIP]) sq.slip[t] = 0; }
@@ -694,6 +805,7 @@ __attribute__((optimize("O2"))) static void seq_block(void)
         if (send) any_send = 1;
         if (pk > sq.peak[t]) sq.peak[t] = pk;
     }
+    aos_hear_block(trk_buf[SQH->sel & 7]);                                     /* the card's preview, through the track in hand (15 Nov 2026) */
     if (fz.on) for (int i = 0; i < 32; i++) { int32_t x = any_send ? dly[i] : 0; if (x > 0x7FFFFF) x = 0x7FFFFF; else if (x < -0x7FFFFF) x = -0x7FFFFF; fz_in(0, x); fz_in(1, x); }
 }
 
@@ -715,6 +827,7 @@ static void seq_filter(int t, int hp, int lp)
 static const uint16_t sq_pan_tab[17] = {0, 3212, 6393, 9512, 12540, 15447, 18205, 20788, 23170, 25330, 27246, 28899, 30274, 31357, 32138, 32610, 32768};   /* sin, a quarter turn */
 static void seq_tick(void)
 {
+    resample_finish();
     if (!seq_mode) return;
     if (!seq_valid()) aos_seq_defaults();
     if (!mt_valid()) aos_mt_defaults();
@@ -735,6 +848,15 @@ static void seq_tick(void)
         sq.modv[t] = (int8_t)clamp_i(mod, -127, 127);
         int hp = sq_p(t, TP_HP), lp = sq_p(t, TP_LP), vol = sq_p(t, TP_VOL), pan = sq_p(t, TP_PAN), dl = sq_p(t, TP_DLY);
         if (p[TP_LFOD] == 1) lp += mod / 2; else if (p[TP_LFOD] == 2) hp += mod / 2; else if (p[TP_LFOD] == 3) vol += mod / 2; else if (p[TP_LFOD] == 4) pan += mod / 2;
+        { int vlp = sq_p(t, TP_VLP); if (vlp) lp -= (127 - (sq.vel_last[t] ? sq.vel_last[t] : 100)) * vlp / 127; }   /* VLP: a soft hit closes the low-pass */
+        { int fe = sq_p(t, TP_FENV) ? sq_p(t, TP_FENV) - 64 : 0;                  /* FENV / FDEC: the envelope opens (above 64) or closes the low-pass, then falls (16 Nov 2026; 0 as 64: none) */
+          if (fe && sq.fenv[t] > 0) lp += (fe * 2 * sq.fenv[t]) >> 12;
+          if (sq.fenv[t] > 0) { int fd = sq_p(t, TP_FDEC); int32_t rate = fd >= 127 ? 0 : (int32_t)div_u(4096u, 2u + (uint32_t)(fd * fd) / 20u); if (fd < 127 && rate < 8) rate = 8; sq.fenv[t] -= ((sq.fenv[t] * rate) >> 12) + (rate ? 1 : 0); if (sq.fenv[t] < 0) sq.fenv[t] = 0; } }
+        { uint32_t g = 0;                                                        /* THRU: the inputs through this track, as its envelope and level say (half: a pair is summed to mono) */
+          if (tv[t][0].on && tv[t][0].mach == SQM_THRU) { int32_t e = tv[t][0].env >> 12, lv = sq.tgain[t]; int32_t q = ((((e * e) >> 12) * (lv > 0 ? lv : 0)) >> 12); g = (uint32_t)(q < 0 ? 0 : q > 4095 ? 4095 : q) << 10; }
+          int tin = sq_p(t, TP_TIN); uint32_t gab = tin == 1 ? 0 : g, gcd = tin == 0 ? 0 : g;     /* TIN: IN AB, IN CD, BOTH */
+          if (gab != sq.thru_g[t][0]) { sq.thru_g[t][0] = gab; dsp_write(0x8900u + 32u * (uint32_t)t + 0xCu, gab, 0); }
+          if (gcd != sq.thru_g[t][1]) { sq.thru_g[t][1] = gcd; dsp_write(0x8900u + 32u * (uint32_t)t + 0xDu, gcd, 0); } }
         seq_filter(t, clamp_i(hp, 0, 127), clamp_i(lp, 0, 127));
         vol = clamp_i(vol, 0, 127); pan = clamp_i(pan, 0, 127);
         sq.tgain[t] = sq_muted(t) ? 0 : (vol * vol * 65) >> 8;                 /* a square law: 100 is about -4 dB, 127 full */
@@ -791,7 +913,9 @@ void aos_seq_mode(int on)
         tv[t][0].on = tv[t][1].on = 0;
         dsp_write(0x280u + 8u * (uint32_t)t + 7u, 0x220u + 9u * (uint32_t)t, 0);   /* every track has its routing block, slot or none */
         if (on) { dsp_write(0x8900u + 32u * (uint32_t)t + 0xAu, 0, 0); dsp_write(0x8900u + 32u * (uint32_t)t + 0xBu, 0, 0); }
-        else { static const uint32_t g0[4] = {0, 0, 0, 0}; route_write(t, 0, g0); }
+        dsp_write(0x8900u + 32u * (uint32_t)t + 0xCu, 0, 0); dsp_write(0x8900u + 32u * (uint32_t)t + 0xDu, 0, 0); sq.thru_g[t][0] = sq.thru_g[t][1] = 0;
+        for (int k = 0; k < 12; k++) sq.fxlk[t][k] = -1;
+        if (!on) { static const uint32_t g0[4] = {0, 0, 0, 0}; route_write(t, 0, g0); }
     }
     mnotes_off();
     if (!on) { sq.playing = 0; rb_off(); }
@@ -812,6 +936,8 @@ void aos_seq_refresh(void)
         sq.lk[t][0] = sq.lk[t][1] = 0;
         tv[t][0].on = tv[t][1].on = 0;
         dsp_write(0x8900u + 32u * (uint32_t)t + 0xAu, 0, 0); dsp_write(0x8900u + 32u * (uint32_t)t + 0xBu, 0, 0);
+        dsp_write(0x8900u + 32u * (uint32_t)t + 0xCu, 0, 0); dsp_write(0x8900u + 32u * (uint32_t)t + 0xDu, 0, 0); sq.thru_g[t][0] = sq.thru_g[t][1] = 0;
+        for (int k = 0; k < 12; k++) sq.fxlk[t][k] = -1;
         mt_cc_sent[t][0] = mt_cc_sent[t][1] = 0xFF; mt_prog_sent[t] = 0;
     }
     mnotes_off();
@@ -826,8 +952,9 @@ void aos_seq_play(int on)
     }
     if (on) {
         if (!seq_valid()) aos_seq_defaults();
-        if (SQH->chain_n) SQH->pattern = SQH->chain[0] & 3;
-        sq.pat = SQH->pattern & 3;
+        if (SQH->song_on && SQH->song_n) { int row = SQH->song_row < SQH->song_n ? SQH->song_row : 0; SQH->song_row = (uint8_t)row; sq.song_rep = 0; song_row_begin(row); SQH->pattern = (uint8_t)SONG_PAT(SQH->song[row][0]); }
+        else if (SQH->chain_n) SQH->pattern = (uint8_t)chain_of(0);
+        sq.pat = SQH->pattern & 7;
         if (!mt_valid()) aos_mt_defaults();
         for (int t = 0; t < SQ_ALL; t++) {
             int len = len_of(sq.pat, t);
@@ -876,7 +1003,7 @@ static void seq_hit(int t, int vel, int rec, int note)      /* note: -1 a pad, e
     mq_base = now() + seq_ahead * 2993u;                                        /* a pad: heard, and sent, a cushion from now */
     if (!sq_muted(t)) sq_trigger(t, p, vel < 1 ? 100 : vel, p[TP_REV], 0);
     if (rec && sq.playing && sq.step_len) {
-        int len = SQH->len[sq.pat][t]; if (len < 1 || len > SQ_STEPS) len = 16;
+        int len = *sq_len_p(sq.pat, t); if (len < 1 || len > SQ_STEPS) len = 16;
         /* what was heard when the pad was hit left here a moment ago (the stream's way to the converter): the hit
          * belongs that much earlier */
         int32_t sl = sq_track_step(t), tn = sq.t_next[t] + (int32_t)(((uint32_t)(uint16_t)(stream_written - stream_taken) + 96u) << 8);

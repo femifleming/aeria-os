@@ -1,8 +1,7 @@
 """walk every sequencer key path on the unit (both banks), watching that the OS stays alive. sweep_seq.py"""
 import sys; sys.path.insert(0,'/Users/you/octa/aeria-os/tools'); from ut import *
 import numpy as np
-MT=0x100C8000
-keep=seq_backup(); keepmt=aos.rd(d,MT,0x4400); old=inputs_off(); dry0=dry()
+keep=seq_backup(); keepmt=aos.rd(d,MT,0x8400); old=inputs_off(); dry0=dry()
 try:
     seqmode(1); alive('enter')
     aos.wr(d,B+64,bytes([96,64,0,0,127,100,0,127,64]+[0]*10+[0]+[0,36,0,0,0,0,0,0,0,0,0,0]))

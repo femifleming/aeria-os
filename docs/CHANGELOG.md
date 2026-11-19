@@ -12,6 +12,16 @@ The full request-by-request log is in [LOG.md](LOG.md).
 
 ## Release builds
 
+### AERIA OS Nov 19 2026 17:50:56 (v0.9.5-beta)
+
+- Tested on the unit: no (every check passed in the new simulator, which runs this exact image and both DSP programs: 10 suites; the owner tests it on the unit next)
+- A repair release, no new features. Headphones: the DSP now waits for its clock to settle before it lines its outputs up with the converter (at a cold start the outputs could land on the wrong sockets: the main mix on the main jacks, silence on the headphones); the MKII's headphone left and right the right way round. Level lamps above REC1/REC2 reach full brightness near clipping. NO always backs out (on MASTER it no longer taps the tempo: TEMPO taps); closing OUT or the grain cloud returns to what was on screen; the STARS and BALLOON pictures go with their page. Sequencer: a step's VOL lock is heard on that step; MIDI tracks use the track's VEL; MIDI notes leave within a millisecond or two of their sound. The card browser and kits are A to Z (folders first). No DIST in the default chain. New: aeria-os/sim, a simulator of the unit with automated tests; docs/AERIA_PROJECT_SPECIFICATION.md. Manual and quick guide updated.
+
+### AERIA OS Nov 16 2026 02:45:01
+
+- Tested on the unit: yes (flashed 16 Nov)
+- 8 patterns, a 16-step chain and SONG mode; humanise (HUMT, HUMV), velocity to the filter and pitch (VLP, VPT), effect-knob locks; the THRU machine; a transient slicer, resampling and balloons or single WAVs onto tracks (bank 6, normalised); an 8 MB kit bank; SUB waves and detune, a filter envelope, sample slices and LEN; fast preview (heard in the sequencer face); 8 projects that keep the MIDI tracks and scenes; battery-RAM migration.
+
 ### AERIA OS Nov 15 2026 23:49:58
 
 - Tested on the unit: yes (key sweeps of both faces, MIDI tracks over the DIN loopback, project round trip; flashed 15 Nov)

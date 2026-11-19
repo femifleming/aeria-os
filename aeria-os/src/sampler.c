@@ -30,6 +30,48 @@
 typedef struct { int32_t *d; uint32_t frames, step; uint8_t status; } Smp;   /* step: playback step at PTCH 64 (16.16) */
 static Smp st_smp[N_STATIC], flex_smp, intro_smp, bal_smp[3];
 static uint32_t bank_used[8];
+/* (15 Nov 2026) bank 5 (resamples, slices and single samples: 6 MB) and bank 6 (the kit: 8 MB) live in the old intro
+ * pool, after the freeze delay's lines; the other banks keep their 4 MB in the stars' pool */
+static uint8_t *bank_base(int b) { return (uint8_t *)(b == 6 ? 0x44200000u : b == 5 ? 0x44A00000u : POOL_STARS + SZ_BANK * (uint32_t)(b & 7)); }
+static uint32_t bank_size(int b) { return b == 6 ? 0x00800000u : b == 5 ? 0x00600000u : SZ_BANK; }
+static void seq_bank_stop(int b);   /* seq.c: the sequencer's voices playing that bank fall silent */
+static void stream_pump(void);
+static uint32_t div_u(uint32_t n, uint32_t d);
+void aos_breathe(void);              /* seq.c: the engine's reports read and the stream pumped (a pump alone starves it: 15 Nov 2026) */
+/* bank 5 starts over: its sixteen slots empty, its room back (a slice job, or a bank that is full) */
+static void bank5_reset(void)
+{
+    for (int s = 80; s < 96; s++) { st_smp[s].status = 1; st_smp[s].frames = 0; }
+    seq_bank_stop(5); bank_used[5] = 0;
+}
+int aos_bank5_free(void) { for (int s = 80; s < 96; s++) if (st_smp[s].status || !st_smp[s].frames) return s; return -1; }
+/* the next slot of bank 5 with room for `frames` frames; the bank is emptied and begun again when it is full */
+static int bank5_take(uint32_t frames)
+{
+    int s = aos_bank5_free();
+    if (s < 0 || bank_size(5) - bank_used[5] < frames * 8u + 64u) { bank5_reset(); s = 80; }
+    if (bank_size(5) < frames * 8u + 64u) return -1;
+    return s;
+}
+int aos_bank5_take(int frames) { return bank5_take((uint32_t)(frames < 0 ? 0 : frames)); }
+/* a take brought up to -3 dBFS at its peak (the outputs carry the mix well below full scale: a resample would come
+ * back much softer than it was heard, and each generation softer again); never more than 40 dB, so a silent take stays silent */
+static void take_normalise(int32_t *q, uint32_t frames)
+{
+    int32_t peak = 0;
+    for (uint32_t i = 0; i < 2 * frames; i++) { int32_t x = q[i] < 0 ? -q[i] : q[i]; if (x > peak) peak = x; if ((i & 4095u) == 0) aos_breathe(); }
+    if (peak < 60) return;
+    uint32_t g = div_u(5931641u << 4, (uint32_t)peak >> 4);                  /* Q8: 0.707 full scale over the peak (32-bit maths: no 64-bit helpers in this build) */
+    if (g > 100u << 8) g = 100u << 8;
+    if (g <= 256u + 3u) return;
+    for (uint32_t i = 0; i < 2 * frames; i++) {
+        int32_t x = q[i], neg = x < 0; uint32_t ax = (uint32_t)(neg ? -x : x);   /* |x| < 2^23, g < 2^15: the product fits 32 bits after the >> 8 of a 16-bit split */
+        uint32_t hi = (ax >> 8) * g, lo = ((ax & 255u) * g) >> 8, y = hi + lo;
+        if (y > 0x7FFFFFu) y = 0x7FFFFFu;
+        q[i] = neg ? -(int32_t)y : (int32_t)y;
+        if ((i & 4095u) == 0) aos_breathe();
+    }
+}
 
 static uint32_t rnd_state = 0x2545F491u;
 static uint32_t rnd_u(void) { rnd_state ^= rnd_state << 13; rnd_state ^= rnd_state >> 17; rnd_state ^= rnd_state << 5; return rnd_state; }
@@ -49,7 +91,7 @@ static void wav_widen(const uint8_t *src, int32_t *o, uint32_t frames, uint32_t 
 {
     for (uint32_t i = 0; i < frames; i++) {
         int32_t v[2];
-        if ((i & 1023u) == 0) stream_pump();   /* (15 Nov 2026) a long file: the stream keeps going meanwhile (a project's loop coming back ran it dry) */
+        if ((i & 1023u) == 0) aos_breathe();   /* (15 Nov 2026) a long file: the stream keeps going meanwhile, the engine's reports read (a pump alone starves it) */
         for (uint32_t c = 0; c < ch; c++) {
             const uint8_t *p = src + i * fsz + c * bps;
             int32_t x;
@@ -79,6 +121,8 @@ static uint8_t hear_chunk[16384];
 static int hear_more(void)
 {
     if (!hear_job.s) return 0;
+    int bursts = hear_job.done < 44100u ? 3 : 1;                           /* (15 Nov 2026) the first second comes in three chunks a tick: the preview started on 0.1 s */
+    for (int b = 0; b < bursts && hear_job.s; b++) {
     uint32_t n = div_u(sizeof hear_chunk, hear_job.fsz);
     if (n > hear_job.total - hear_job.done) n = hear_job.total - hear_job.done;
     uint32_t raw = n * hear_job.fsz;
@@ -88,6 +132,7 @@ static int hear_more(void)
     } else hear_job.total = hear_job.done;                 /* a read went wrong: keep what is in */
     if (hear_job.done >= hear_job.total) hear_job.s = 0;
     hear_dbg[2]++;
+    }
     return 1;
 }
 static uint32_t wav_first;   /* frames to load at once (0: all); the rest by hear_more */
@@ -304,7 +349,8 @@ static uint32_t rec_mask, rec_seen_mask, rec_headers;   /* what the ColdFire ask
 static int rec_ch;
 static uint8_t bal_filling[3];
 static void usb_tap(int ch, int32_t v);
-static void resample_frame(int32_t l, int32_t r);
+static void resample_frame6(const int32_t *f);
+static void resample_frame(int32_t l, int32_t r) { int32_t f[6] = {0, 0, 0, 0, l, r}; resample_frame6(f); }   /* (the stems' path: the main pair only) */
 static int8_t rec_order[12], rec_n;
 static int seq_mode;     /* the sequencer (seq.c): its eight tracks are the stream */
 static void fz_in(int ch, int32_t v);
@@ -439,6 +485,68 @@ static void balloon_grain(int b, uint32_t delay)
     v->delay = delay;
     v->on = 1;
 }
+/* (15 Nov 2026) a floating balloon's recording copied whole into the next slot of bank 5: the slot, or -1 */
+int aos_balloon_to_slot(int b)
+{
+    if (b < 0 || b > 2) return -1;
+    const Smp *src = &bal_smp[b];
+    if (src->status || src->frames < 64) return -1;
+    int slot = bank5_take(src->frames);
+    if (slot < 0) return -1;
+    Smp *s = &st_smp[slot];
+    voices_stop(s); seq_bank_stop(5);
+    s->d = (int32_t *)(bank_base(5) + bank_used[5]); s->frames = 0; s->step = 0x10000; s->status = 2;
+    for (uint32_t i = 0; i < src->frames; i++) { s->d[2 * i] = src->d[2 * i]; s->d[2 * i + 1] = src->d[2 * i + 1]; if ((i & 2047u) == 0) aos_breathe(); }
+    take_normalise(s->d, src->frames);
+    s->frames = src->frames; s->status = 0; bank_used[5] += src->frames * 8u;
+    return slot;
+}
+/* (15 Nov 2026) found sound: balloon b cut at its transients into bank 5, slots 5.1, 5.2 .. in order. A transient is a
+ * 256-frame block much louder than the blocks before it, at least 46 ms after the last; the first block always begins
+ * a slice; at most sixteen slices (the strongest are kept). Returns how many, 0 when there is nothing to cut. */
+int aos_slice(int b, uint8_t *starts)
+{
+    (void)starts;
+    if (b < 0 || b > 2) return 0;
+    Smp *src = &bal_smp[b];
+    if (src->status || src->frames < 4096) return 0;
+    uint32_t nb = src->frames / 256u; if (nb > 2600) nb = 2600;
+    take_normalise(src->d, src->frames);                                      /* the balloon itself: its slices come out at level */
+    static uint16_t lv[2600];
+    uint32_t top = 1;
+    for (uint32_t i = 0; i < nb; i++) {
+        uint32_t sum = 0; const int32_t *q = src->d + 512u * i;
+        for (int k = 0; k < 512; k++) { int32_t x = q[k]; sum += (uint32_t)(x < 0 ? -x : x) >> 8; }
+        lv[i] = (uint16_t)(sum >> 9); if (lv[i] > top) top = lv[i];
+        if ((i & 63u) == 0) aos_breathe();
+    }
+    uint32_t on[64], str[64]; int n = 0;
+    /* an onset: a block twice the slow background (a 32-block average, about 190 ms) plus a floor; then nothing counts
+     * until the level has fallen to a quarter of that hit's peak (16 Nov 2026: the quick average of before followed a
+     * kick's own rise and never saw it) */
+    uint32_t bg = lv[0], floor_ = top / 32u + 1u, last = 0, peak = 0; int armed = 1;
+    on[n] = 0; str[n] = top; n++;
+    for (uint32_t i = 1; i < nb && n < 64; i++) {
+        if (armed && lv[i] > 2u * bg + floor_ && i - last >= 8u) { on[n] = i; str[n] = lv[i] - bg; n++; last = i; peak = lv[i]; armed = 0; }
+        else if (!armed) { if (lv[i] > peak) peak = lv[i]; if (lv[i] < peak / 4u) armed = 1; }
+        bg += ((int32_t)lv[i] - (int32_t)bg) / 32;
+    }
+    while (n > 16) {                                                           /* too many: the weakest goes, again and again */
+        int w = 1; for (int k = 2; k < n; k++) if (str[k] < str[w]) w = k;
+        for (int k = w; k < n - 1; k++) { on[k] = on[k + 1]; str[k] = str[k + 1]; }
+        n--;
+    }
+    bank5_reset();
+    for (int k = 0; k < n; k++) {
+        uint32_t a = on[k] * 256u, e = k + 1 < n ? on[k + 1] * 256u : src->frames, len = e - a;
+        if (bank_size(5) - bank_used[5] < len * 8u + 64u) { n = k; break; }
+        Smp *s = &st_smp[80 + k];
+        s->d = (int32_t *)(bank_base(5) + bank_used[5]); s->frames = 0; s->step = 0x10000; s->status = 2;
+        for (uint32_t i = 0; i < len; i++) { s->d[2 * i] = src->d[2 * (a + i)]; s->d[2 * i + 1] = src->d[2 * (a + i) + 1]; if ((i & 2047u) == 0) aos_breathe(); }
+        s->frames = len; s->status = 0; bank_used[5] += len * 8u;
+    }
+    return n;
+}
 #define TICK_FRAMES 723   /* a UI tick: 1/61 s */
 static void balloons_sing(void)
 {
@@ -561,7 +669,8 @@ static void stream_meter(uint32_t w)
 }
 static uint32_t sp_dbg[6];   /* bring-up: calls, words, give-ups at a busy port, ticks inside, ticks waiting for the port, longest wait */
 static void stream_pump_in(void);
-static void stream_pump(void) { uint32_t t0 = now(); sp_dbg[0]++; stream_pump_in(); sp_dbg[3] += now() - t0; }
+static uint8_t pumping;   /* (15 Nov 2026) never twice at once: a long copy that breathes from inside the stream's own work (a take normalised in the tick, a WAV widened for the preview) must not pump again */
+static void stream_pump(void) { if (pumping) return; pumping = 1; uint32_t t0 = now(); sp_dbg[0]++; stream_pump_in(); sp_dbg[3] += now() - t0; pumping = 0; }
 static void stream_pump_in(void)
 {
     if (!stream_on) return;
@@ -681,7 +790,10 @@ void aos_shuffle(int16_t *idx, int n, uint32_t seed)
 void aos_note_deal(int bank, const char *folder, uint32_t seed)
 {
     if (bank < 0 || bank > 7) return;
-    loaded_init(); LOADED->bank[bank].seed = seed; vcopy(LOADED->bank[bank].path, folder[0] ? folder : "/", 76);
+    /* a leading '*' marks a deal made from the names in order (19 Nov 2026); a path without it was dealt from the card's
+     * own order and comes back that way, so a project saved before keeps its samples where they were */
+    char p[76]; p[0] = '*'; strcpy_n(p + 1, folder[0] ? folder : "/", 75);
+    loaded_init(); LOADED->bank[bank].seed = seed; vcopy(LOADED->bank[bank].path, p, 76);
 }
 
 /* ---- the loop's shape, for the LOOP page's picture: 128 columns, each the loudest of up to 512 frames spread across
@@ -722,15 +834,15 @@ int aos_slot_load(int kind, int slot, const char *path)
         if (ok && strlen(path) < 124) { loaded_init(); vcopy(LOADED->loop, path, 124); }
         return ok;
     }
-    if (slot == 128) { uint32_t t0 = now(); voices_stop(&st_smp[128]); hear_job.s = 0; wav_first = 22050; int ok = wav_load(path, &st_smp[128], (uint8_t *)POOL_HEAR, SZ_HEAR); wav_first = 0; hear_dbg[0] = now() - t0; hear_dbg[1] = hear_job.total; return ok; }
+    if (slot == 128) { uint32_t t0 = now(); voices_stop(&st_smp[128]); hear_job.s = 0; wav_first = 4410; int ok = wav_load(path, &st_smp[128], (uint8_t *)POOL_HEAR, SZ_HEAR); wav_first = 0; hear_dbg[0] = now() - t0; hear_dbg[1] = hear_job.total; return ok; }   /* (15 Nov 2026: 0.1 s first, it plays at once; hear_more brings the rest) */
     if (slot < 0 || slot >= 128) return 0;
     int b = slot / 16;
     if (slot % 16 == 0) bank_used[b] = 0;      /* a deal starts at the bank's first slot: the bank is new */
     voices_stop(&st_smp[slot]);
-    uint32_t room = SZ_BANK - bank_used[b];
+    uint32_t room = bank_size(b) - bank_used[b];
     if (room < 4096) { st_smp[slot].status = 3; return 0; }
     uint32_t left = 15 - (uint32_t)(slot % 16), share = room > left * 0x10000u ? room - left * 0x10000u : 4096;   /* all but 64 KB for each slot still to come */
-    int ok = wav_load(path, &st_smp[slot], (uint8_t *)(POOL_STARS + SZ_BANK * (uint32_t)b + bank_used[b]), share & ~7u);
+    int ok = wav_load(path, &st_smp[slot], bank_base(b) + bank_used[b], share & ~7u);
     if (ok) bank_used[b] += st_smp[slot].frames * 8;
     return ok;
 }
@@ -740,6 +852,25 @@ int aos_slot_status(int kind, int slot)
     return !s ? 3 : s->d ? s->status : 1;
 }
 void aos_hear(int on) { voices_stop(&st_smp[128]); if (on) voice_one_shot(&st_smp[128], BUS_HEAR, 64, 0, 127); }
+/* (15 Nov 2026) the sequencer's face: the sky's voices are not in its stream, so the card's preview is rendered here --
+ * 32 frames summed to mono into the track in hand's buffer (seq.c, after the track's level). While the card is still
+ * bringing the file, a preview that has caught up waits rather than ends. */
+void aos_hear_block(int32_t *o)
+{
+    for (int k = 0; k < N_VOICES; k++) {
+        Voice *v = &voice[k];
+        if (!v->on || v->bus != BUS_HEAR) continue;
+        const int32_t *d = v->s->d; const uint32_t n = v->s->frames;
+        const uint32_t si = v->step >> 16, sf = v->step & 0xFFFF;
+        uint32_t pos = v->pos, frac = v->frac;
+        for (int i = 0; i < 32; i++) {
+            if (pos >= n) { if (hear_job.s != v->s) v->on = 0; break; }
+            o[i] += (d[2 * pos] >> 1) + (d[2 * pos + 1] >> 1);
+            frac += sf; pos += si + (frac >> 16); frac &= 0xFFFF;
+        }
+        v->pos = pos; v->frac = frac;
+    }
+}
 /* PONG (pong.c): a ball hits a wall -- the sample in static slot `slot` at pitch ptch (64 = as recorded), its decay,
  * and the module's level (0..127) on its own bus, so the balls sound with STARS off too */
 void aos_pong(int slot, int ptch, int dec, int level)
@@ -750,18 +881,44 @@ void aos_pong(int slot, int ptch, int dec, int level)
 }
 int aos_slot_ready(int slot) { return slot >= 0 && slot < 128 && !st_smp[slot].status && st_smp[slot].frames; }
 void aos_star(int slot, int ptch, int atk, int dec) { if (slot >= 0 && slot < 128) voice_one_shot(&st_smp[slot], BUS_STAR, ptch, atk, dec); }
+/* (19 Nov 2026) names in order, as the original Octatrack lists them: folders first, then files, each A to Z (case not
+ * minded). The card's own order is the order files happened to be copied in -- a kit's tracks got their samples in
+ * whatever order Finder wrote them (found in the simulator: 1KICK..8T660 copied as SNARE KICK T330 HAT ...). */
+static int name_cmp(const char *x, const char *y)
+{
+    for (;; x++, y++) {
+        int cx = *x >= 'a' && *x <= 'z' ? *x - 32 : *x, cy = *y >= 'a' && *y <= 'z' ? *y - 32 : *y;
+        if (cx != cy || !cx) return cx - cy;
+    }
+}
+static void names_sort(char (*nm)[64], const uint8_t *isdir, int16_t *ord, int n)
+{
+    for (int i = 1; i < n; i++) {                       /* insertion sort of the indexes: a few hundred names at most */
+        int16_t v = ord[i]; int j = i - 1;
+        while (j >= 0) {
+            int d = isdir ? (int)isdir[v] - (int)isdir[ord[j]] : 0;
+            if (d < 0 || (d == 0 && name_cmp(nm[ord[j]], nm[v]) <= 0)) break;
+            ord[j + 1] = ord[j]; j--;
+        }
+        ord[j + 1] = v;
+    }
+}
+#define LIST_MAX 256
+static char list_nm[LIST_MAX][64]; static uint8_t list_dir[LIST_MAX]; static int16_t list_ord[LIST_MAX];
 int aos_list(const char *path, void (*each)(const char *name, int dir))
 {
     uint32_t cl, sz; uint8_t a; char nm[256];
     if (!card_ok || !fat_find(path, &cl, &sz, &a) || !(a & 0x10)) return -1;
     dir_open(cl);
     int n = 0;
-    while (dir_next(nm, sizeof nm, &a, &cl, &sz)) {
+    while (n < LIST_MAX && dir_next(nm, sizeof nm, &a, &cl, &sz)) {
         if (nm[0] == '.' || (a & 0x02)) continue;     /* dot entries, hidden (macOS ._ files) */
         const char *use = nm;
         if (strlen(nm) > 63) use = dir_short;          /* too long to keep: the 8.3 name opens it */
-        each(use, (a & 0x10) != 0); n++;
+        strcpy_n(list_nm[n], use, 64); list_dir[n] = (a & 0x10) != 0; list_ord[n] = (int16_t)n; n++;
     }
+    names_sort(list_nm, list_dir, list_ord, n);
+    for (int i = 0; i < n; i++) each(list_nm[list_ord[i]], list_dir[list_ord[i]]);
     return n;
 }
 
@@ -777,6 +934,8 @@ static int restore_names(int bank)
     static char path[80]; char nm[256]; uint8_t a; uint32_t c, sz;
     static char all[192][64]; int16_t idx[192]; int n = 0;
     vread(path, LOADED->bank[bank].path, 76);
+    int sorted = path[0] == '*';
+    if (sorted) { int i = 0; do path[i] = path[i + 1]; while (path[i++]); }
     if (!path[0] || !fat_find(path, &c, &sz, &a) || !(a & 0x10)) return 0;
     dir_open(c);
     while (n < 192 && dir_next(nm, sizeof nm, &a, &c, &sz)) {
@@ -786,6 +945,7 @@ static int restore_names(int bank)
         strcpy_n(all[n], k < 64 ? nm : dir_short, 64); idx[n] = (int16_t)n; n++;
     }
     if (!n) return 0;
+    if (sorted) names_sort(all, 0, idx, n);
     aos_shuffle(idx, n, LOADED->bank[bank].seed);
     for (int k = 0; k < 16; k++) {
         int pl = (int)strlen(path);
